@@ -7,6 +7,7 @@ defmodule Tinkex.Types.ImageChunk do
   CRITICAL: Field names are `data` and `format`, NOT `image_data` and `image_format`.
   """
 
+  @enforce_keys [:data, :format, :height, :width, :tokens]
   defstruct [:data, :format, :height, :width, :tokens, type: "image"]
 
   @type format :: :png | :jpeg

@@ -5,6 +5,7 @@ defmodule Tinkex.Types.CreateSessionResponse do
   Mirrors Python tinker.types.CreateSessionResponse.
   """
 
+  @enforce_keys [:session_id]
   defstruct [:session_id, :info_message, :warning_message, :error_message]
 
   @type t :: %__MODULE__{

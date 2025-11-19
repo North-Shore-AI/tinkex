@@ -7,6 +7,7 @@ defmodule Tinkex.Types.ImageAssetPointerChunk do
   CRITICAL: Field name is `location`, NOT `asset_id`.
   """
 
+  @enforce_keys [:location, :format, :height, :width, :tokens]
   defstruct [:location, :format, :height, :width, :tokens, type: "image_asset_pointer"]
 
   @type format :: :png | :jpeg

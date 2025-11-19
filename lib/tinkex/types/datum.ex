@@ -7,8 +7,9 @@ defmodule Tinkex.Types.Datum do
 
   alias Tinkex.Types.{ModelInput, TensorData}
 
+  @enforce_keys [:model_input]
   @derive {Jason.Encoder, only: [:model_input, :loss_fn_inputs]}
-  defstruct [:model_input, :loss_fn_inputs]
+  defstruct [:model_input, loss_fn_inputs: %{}]
 
   @type t :: %__MODULE__{
           model_input: ModelInput.t(),

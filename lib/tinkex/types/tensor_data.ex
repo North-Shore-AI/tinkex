@@ -29,11 +29,12 @@ defmodule Tinkex.Types.TensorData do
   @spec from_nx(Nx.Tensor.t()) :: t()
   def from_nx(%Nx.Tensor{} = tensor) do
     {casted_tensor, dtype} = normalize_tensor(tensor)
+    shape_tuple = Nx.shape(casted_tensor)
 
     %__MODULE__{
       data: Nx.to_flat_list(casted_tensor),
       dtype: dtype,
-      shape: Tuple.to_list(Nx.shape(casted_tensor))
+      shape: maybe_list_shape(shape_tuple)
     }
   end
 
@@ -75,6 +76,9 @@ defmodule Tinkex.Types.TensorData do
         raise ArgumentError, "Unsupported tensor dtype: #{inspect(other)}"
     end
   end
+
+  defp maybe_list_shape({}), do: nil
+  defp maybe_list_shape(shape_tuple), do: Tuple.to_list(shape_tuple)
 end
 
 defimpl Jason.Encoder, for: Tinkex.Types.TensorData do

@@ -8,7 +8,7 @@ defmodule Tinkex.Types.ModelInput do
   alias Tinkex.Types.EncodedTextChunk
 
   @derive {Jason.Encoder, only: [:chunks]}
-  defstruct [:chunks]
+  defstruct chunks: []
 
   @type chunk :: EncodedTextChunk.t() | Tinkex.Types.ImageChunk.t() | Tinkex.Types.ImageAssetPointerChunk.t()
   @type t :: %__MODULE__{

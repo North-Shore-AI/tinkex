@@ -7,6 +7,7 @@ defmodule Tinkex.Types.ForwardBackwardInput do
 
   alias Tinkex.Types.{Datum, LossFnType}
 
+  @enforce_keys [:data, :loss_fn]
   defstruct [:data, :loss_fn, :loss_fn_config]
 
   @type t :: %__MODULE__{

@@ -7,6 +7,7 @@ defmodule Tinkex.Types.ForwardBackwardRequest do
 
   alias Tinkex.Types.ForwardBackwardInput
 
+  @enforce_keys [:forward_backward_input, :model_id]
   @derive {Jason.Encoder, only: [:forward_backward_input, :model_id, :seq_id]}
   defstruct [:forward_backward_input, :model_id, :seq_id]
 

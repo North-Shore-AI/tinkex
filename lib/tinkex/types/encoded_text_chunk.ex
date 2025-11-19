@@ -5,6 +5,7 @@ defmodule Tinkex.Types.EncodedTextChunk do
   Mirrors Python tinker.types.EncodedTextChunk.
   """
 
+  @enforce_keys [:tokens]
   @derive {Jason.Encoder, only: [:tokens, :type]}
   defstruct [:tokens, type: "encoded_text"]
 

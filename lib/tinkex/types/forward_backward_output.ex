@@ -7,7 +7,8 @@ defmodule Tinkex.Types.ForwardBackwardOutput do
   NOTE: There is NO `loss` field. Loss is accessed via `metrics["loss"]`.
   """
 
-  defstruct [:loss_fn_output_type, :loss_fn_outputs, :metrics]
+  @enforce_keys [:loss_fn_output_type]
+  defstruct [:loss_fn_output_type, loss_fn_outputs: [], metrics: %{}]
 
   @type t :: %__MODULE__{
           loss_fn_output_type: String.t(),
