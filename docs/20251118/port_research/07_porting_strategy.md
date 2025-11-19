@@ -41,10 +41,10 @@
 **Key Corrections (Round 7 - Concrete Bugs Fixed):**
 - **Type field names**: Fixed ImageChunk (`data` not `image_data`), ImageAssetPointerChunk (`location` not `asset_id`)
 - **Optional semantics**: Fixed SampleRequest.prompt_logprobs to `Optional[bool] = None` (NOT `bool = False`)
-- **RateLimiter scope**: Changed to `for_key({base_url, api_key})` - same key against staging/prod must not share limits
+- **RateLimiter scope**: Documented per-ServiceClient/holder scope (matches Python’s `_sample_backoff_until`); global coordination deferred
 - **HTTP date parsing**: Removed incorrect implementation - only numeric Retry-After delays supported in v1.0
 - **Multi-tenancy pools**: Documented single base_url limitation with Finch pool architecture
-- **Retry responsibility**: Clarified SamplingClient (backoff only, no retry) vs HTTP layer (retries with exponential backoff)
+- **SamplingClient retries**: Restored automatic retries/backoff (via `execute_with_retries`) to match Python behavior
 - **GenServer.reply safety**: Added ArgumentError rescue when caller dies before reply
 - **Type verification checklist**: Added comprehensive pre-implementation verification steps
 
@@ -1202,20 +1202,20 @@ Before shipping v1.0, you MUST verify the following against actual API behavior:
 
 **Action:** If API rejects `null` for specific fields, use per-field omission (NOT global nil-stripping).
 
-### 3. Rate Limit Scope (Per API Key vs Global)
+### 3. Rate Limit Scope (Per ServiceClient vs Shared)
 
-**Why:** RateLimiter architecture depends on whether limits are per-key or global.
+**Why:** Python’s `_sample_backoff_until` lives on each `ServiceClient` holder, so two independent ServiceClients (even with the same API key) should back off independently. We must confirm the API does not rely on SDK-wide coordination before finalizing the holder-local design.
 
 **Verification:**
-1. Create two SamplingClients with different API keys
-2. Trigger 429 on one client
-3. Check if the other client is also rate-limited
+1. Create two ServiceClients (can use same API key) so that each owns its own InternalClientHolder
+2. Trigger 429 on only one client by spamming sampling requests
+3. Confirm the other client continues sending immediately (no shared pause)
 
 **Expected:**
-- If limits are per-key: second client unaffected → RateLimiter.for_api_key is correct
-- If global: both clients affected → need global limiter
+- Per-ServiceClient: second client unaffected → holder-local RateLimiter is correct
+- Global: both clients paused → document as intentional divergence before changing architecture
 
-**Action:** Current plan assumes per-key (most common). Adjust if global.
+**Action:** Plan assumes per-ServiceClient scope (matches source code). Only revisit if real API behavior contradicts the code analysis.
 
 ### 4. x-should-retry Header Presence
 
@@ -1289,7 +1289,7 @@ Before writing code, verify your assumptions:
 **API Behavior (Round 6):**
 - [ ] API key format (logged from successful auth)
 - [ ] RequestErrorCategory casing (logged from error response)
-- [ ] Rate limit scope (tested with multiple keys - confirmed per {base_url, api_key})
+- [ ] Rate limit scope (confirmed per-ServiceClient holder; verify two ServiceClients with same key stay independent)
 - [ ] x-should-retry header presence (logged from 5xx responses)
 - [ ] Image upload method (JSON vs multipart)
 - [ ] Chat template requirements (tested with instruct model)
@@ -1298,9 +1298,9 @@ Before writing code, verify your assumptions:
 
 **Architectural (Round 7):**
 - [ ] Multi-tenancy base_url limitation documented (single base_url per app instance)
-- [ ] RateLimiter keyed by {base_url, api_key} (NOT just api_key)
+- [ ] RateLimiter keyed per ServiceClient holder (NOT globally shared across API keys/base URLs)
 - [ ] GenServer.reply handles ArgumentError when caller dies
-- [ ] 429 retry responsibility split: SamplingClient (backoff only), HTTP layer (retries)
+- [ ] SamplingClient uses execute_with_retries + RateLimiter (matches Python)
 
 **Concurrency & Safety (Round 8):**
 - [ ] SamplingClient injects config from ETS into API opts (prevents Keyword.fetch! crash)
@@ -1331,7 +1331,7 @@ Before writing code, verify your assumptions:
 3. **Week 2**
    - Implement TrainingClient with verified timeout behavior
    - Build SamplingRegistry and SamplingClient
-   - Wire RateLimiter with confirmed scope (per-key or global)
+   - Wire RateLimiter with confirmed per-ServiceClient scope (matches Python holder behavior)
 
 4. **Week 3-4**
    - Wire forward_backward, optim_step operations

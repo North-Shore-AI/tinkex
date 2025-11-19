@@ -632,10 +632,12 @@ defmodule Tinkex.MetricsReduction do
     end
   end
 
-  # Slack reduction (special reduction for slack metrics)
-  # For v1.0, treat as weighted mean. Can be refined if needed.
+  # Slack reduction (matches Python: max - mean)
+  # Python's `_slack` computes np.max(xs) - np.average(xs, weights=weights)
   defp reduce_slack(values, weights, total_weight) do
-    reduce_mean(values, weights, total_weight)
+    max_val = Enum.max(values)
+    mean_val = reduce_mean(values, weights, total_weight)
+    max_val - mean_val
   end
 
   # Unique reduction (identity-ish behavior for unique values)

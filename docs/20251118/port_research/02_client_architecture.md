@@ -33,9 +33,9 @@
 - **Config threading**: Updated all API examples to pass config through opts, not Application.get_env
 
 **Key Corrections (Round 7 - Concrete Bugs):**
-- **RateLimiter scope**: Changed from `for_api_key(api_key)` to `for_key({base_url, api_key})` - same key against staging/prod must not share limits
+- **RateLimiter scope**: Clarified that backoff state is per `ServiceClient`/`InternalClientHolder`, matching Python’s `_sample_backoff_until`
 - **GenServer.reply safety**: Added ArgumentError rescue when caller dies before reply
-- **429 responsibility split**: SamplingClient has RateLimiter for backoff, but does NOT retry. HTTP layer (TrainingClient/futures) handles retries.
+- **SamplingClient retries**: Use the same retry loop + shared backoff (`execute_with_retries`) as Python instead of surfacing raw 429s
 - **Multi-tenancy pools**: Added CRITICAL limitation - Finch pools defined at app start with single base_url. Multi-base_url requires dynamic pool management (see note below).
 
 **Key Corrections (Round 8 - Integration Bugs):**
@@ -722,53 +722,36 @@ async def _sample_async_impl(self, ...):
 
 #### Step 1: RateLimiter Module (Shared Backoff State) ⚠️ CORRECTED (Round 7)
 
-**CRITICAL:** Rate limits are enforced **per {base_url, api_key}** combination. All clients using the same API key against the same server must share backoff state.
-
-**Why {base_url, api_key} not just api_key:**
-- Same API key might be used against staging AND production
-- Those are independent rate limit buckets
-- Matches Python SDK's per-ClientHolder behavior
+**CRITICAL:** Rate limits are enforced **per `ServiceClient` / InternalClientHolder**. In Python a new `ServiceClient()` instantiates a holder with its own `_sample_backoff_until`. We must mirror that semantics so two independent clients (even with the same API key) do NOT coordinate unless they share the holder.
 
 ```elixir
 defmodule Tinkex.RateLimiter do
   @moduledoc """
   Shared backoff state for rate limiting.
 
-  CRITICAL: Rate limits are per {base_url, api_key}, so ALL clients
-  with the same combination share ONE RateLimiter instance.
-
-  When ONE request gets 429, ALL requests to that {base_url, api_key}
-  back off. Uses ETS + atomics for lock-free coordination.
+  CRITICAL: Rate limits are per ServiceClient holder. Each ServiceClient
+  (and derived Sampling/Training clients) receives a unique limiter.
+  Sharing across holders would diverge from Python behavior.
   """
 
   @doc """
-  Get or create rate limiter for a {base_url, api_key} combination.
-
-  ⚠️ IMPORTANT: Keys by both base_url AND api_key to handle:
-  - Same API key against staging vs production (independent limits)
-  - Different API keys against same server (independent limits)
+  Get or create the rate limiter for a specific holder process/ref.
 
   ⚠️ CRITICAL (Round 8): Uses insert_new to prevent race condition
   """
-  def for_key({base_url, api_key}) do
-    # Normalize base_url to avoid "http://foo" vs "http://foo/" duplicates
-    normalized_url = Tinkex.PoolKey.normalize_base_url(base_url)
-    key = {:limiter, {normalized_url, api_key}}
+  def for_holder(holder_ref) do
+    key = {:limiter, holder_ref}
 
     # ⚠️ UPDATED (Round 8): Use insert_new to prevent split-brain limiters
-    # Race scenario without insert_new:
-    #   Process A: lookup → [], create atomic A, insert
-    #   Process B: lookup → [], create atomic B, insert (overwrites A)
-    #   Result: Process A holds detached atomic A, all others use B → split brain!
     limiter = :atomics.new(1, signed: true)
 
     case :ets.insert_new(:tinkex_rate_limiters, {key, limiter}) do
       true ->
-        # We won the race: our limiter is the canonical one
+        # We won the race: this ServiceClient owns this limiter
         limiter
 
       false ->
-        # Another process inserted first; use the existing one
+        # Another process inserted first (same holder), reuse it
         [{^key, existing}] = :ets.lookup(:tinkex_rate_limiters, key)
         existing
     end
@@ -882,10 +865,9 @@ defmodule Tinkex.SamplingClient do
     # Create lock-free request ID counter (per-client)
     request_id_counter = :atomics.new(1, signed: false)
 
-    # ⚠️ CRITICAL (Round 7): Get SHARED rate limiter for {base_url, api_key}
-    # All clients with same combination must share backoff state!
+    # ⚠️ CRITICAL (Round 7): Attach holder-local limiter (per ServiceClient)
     config = opts[:config]
-    rate_limiter = Tinkex.RateLimiter.for_key({config.base_url, config.api_key})
+    rate_limiter = Tinkex.RateLimiter.for_holder(self())
 
     # Write THIS client's config to global ETS table
     # Table created in Tinkex.Application.start/2
@@ -895,7 +877,7 @@ defmodule Tinkex.SamplingClient do
         sampling_session_id: session_id,
         http_pool: opts[:http_pool] || Tinkex.HTTP.Pool,
         request_id_counter: request_id_counter,
-        rate_limiter: rate_limiter,  # Shared by API key, not per-client!
+        rate_limiter: rate_limiter,  # Holder-local (matches Python semantics)
         config: config  # Store Tinkex.Config for API calls
       }
     })
@@ -919,7 +901,7 @@ end
 **Why This Works:**
 1. **Zero GenServer calls** during sampling (ETS reads are lock-free)
 2. **True 400 concurrent requests** - no serialization bottleneck
-3. **Shared backoff state** - when one request hits 429, all requests back off
+3. **Shared backoff state per ServiceClient** - when one request hits 429, the other requests issued by that holder back off together (exactly like Python’s `_sample_backoff_until`)
 4. **Lock-free counters** - atomics for request IDs and backoff timestamps
 5. **Minimal latency** - ETS read is ~100ns, GenServer.call is ~5-10μs
 
@@ -928,63 +910,46 @@ end
 - **ETS approach**: 400 requests × 100ns = 40μs total overhead
 - **Speedup**: 50x faster at high concurrency
 
-### 429 Retry Responsibility ⚠️ CLARIFIED (Round 7)
+### SamplingClient Retries ⚠️ MIRROR PYTHON
 
-**CRITICAL:** The 429 handling is split between two layers:
+**CRITICAL:** The Python SDK wraps `_sample_async_impl` in `holder.execute_with_retries`, so sampling requests automatically retry 429/500/408 responses while coordinating shared backoff. The Elixir plan now mirrors that behavior:
 
 **SamplingClient (this module):**
-- ✅ Has RateLimiter for coordinated backoff
-- ✅ Sets backoff when 429 received (`retry_after_ms` from server)
-- ✅ Waits before sending if in backoff period
-- ❌ Does **NOT** retry the request itself
-- Returns `{:error, %Tinkex.Error{status: 429}}` to caller
+- ✅ Waits on holder-local `RateLimiter` before dispatching
+- ✅ Calls `Tinkex.API.with_retries/3` (or equivalent) with `max_retries` from config
+- ✅ On 429, sets backoff via `RateLimiter` **and retries** until attempts exhausted
+- ✅ On retryable 5xx/408, uses exponential backoff before reissuing the request
 
 **HTTP Layer (04_http_layer.md):**
-- TrainingClient/futures: HTTP-level retries with exponential backoff
-- Retries 429s according to retry policy
-- Uses x-should-retry header
+- Still handles retries for other clients (TrainingClient, Futures, etc.)
+- Provides shared helpers (retry policies, telemetry, headers)
 
-**Why This Split?**
 ```elixir
-# SamplingClient just handles backoff coordination:
-def sample(client, prompt, ...) do
+def sample(client, prompt, opts) do
   Task.async(fn ->
-    Tinkex.RateLimiter.wait_for_backoff(config.rate_limiter)  # ← Wait if backing off
+    config = get_config(client)
+    limiter = config.rate_limiter
 
-    case Tinkex.API.Sampling.asample(request, pool, opts) do
-      {:error, %{status: 429, retry_after_ms: ms}} = error ->
-        Tinkex.RateLimiter.set_backoff(config.rate_limiter, ms)  # ← Set backoff
-        {:error, error}  # ← Return error, don't retry!
+    Tinkex.API.with_retries(max_attempts: config.max_retries, label: :sampling, fn attempt ->
+      Tinkex.RateLimiter.wait_for_backoff(limiter)
 
-      result ->
-        result
-    end
+      case Tinkex.API.Sampling.asample(request, config.http_pool, opts) do
+        {:error, %{status: 429, retry_after_ms: ms}} ->
+          Tinkex.RateLimiter.set_backoff(limiter, ms || default_backoff(attempt))
+          {:retry, :rate_limited}
+
+        {:error, %{status: status}} = error when status in 500..599 or status == 408 ->
+          {:retry, {:server_error, error}}
+
+        other ->
+          {:ok, other}
+      end
+    end)
   end)
 end
 ```
 
-**User's Responsibility:**
-```elixir
-# User must retry if they want retry behavior:
-case Task.await(Tinkex.SamplingClient.sample(...)) do
-  {:error, %{status: 429}} ->
-    # Wait and retry manually
-    Process.sleep(1000)
-    retry_sample()
-
-  {:ok, response} ->
-    response
-end
-
-# OR use a retry library like Retry:
-use Retry
-
-retry with: exponential_backoff() |> randomize |> expiry(10_000) do
-  Task.await(Tinkex.SamplingClient.sample(...))
-end
-```
-
-This matches Python SDK behavior where SamplingClient also doesn't auto-retry - the retry logic is in the HTTP client layer, not SamplingClient itself.
+This keeps the user experience aligned with Python: sampling requests automatically retry (subject to policy) and callers only see an error after the configured attempts have been exhausted.
 
 ## 4. InternalClientHolder
 
@@ -1094,11 +1059,11 @@ end
 **Current Implementation:**
 - Finch pools are defined **once at application start** with a **single base_url**
 - All clients must share the same base_url (typically production API)
-- Different API keys against the same base_url work fine (pools are shared, RateLimiters are separate)
+- Different API keys against the same base_url work fine (pools are shared, and each ServiceClient/holder has its own RateLimiter)
 
 **What Works:**
 ```elixir
-# ✅ SUPPORTED: Different API keys, same base_url
+# ✅ SUPPORTED: Different API keys, same base_url (separate ServiceClients → separate limiters)
 config_a = Tinkex.Config.new(api_key: "key_a", base_url: "https://api.prod.com")
 config_b = Tinkex.Config.new(api_key: "key_b", base_url: "https://api.prod.com")
 
@@ -1109,7 +1074,7 @@ config_b = Tinkex.Config.new(api_key: "key_b", base_url: "https://api.prod.com")
 
 **What Doesn't Work (without code changes):**
 ```elixir
-# ❌ NOT SUPPORTED: Different base_urls (staging + production)
+# ❌ NOT SUPPORTED: Different base_urls (staging + production) within the same Finch pool
 config_staging = Tinkex.Config.new(api_key: "key", base_url: "https://api.staging.com")
 config_prod = Tinkex.Config.new(api_key: "key", base_url: "https://api.prod.com")
 
@@ -1226,17 +1191,16 @@ def init(opts) do
   # Create lock-free request ID counter (per-client)
   request_id_counter = :atomics.new(1, signed: false)
 
-  # ⚠️ CRITICAL (Round 7): Get SHARED rate limiter for {base_url, api_key}
-  # All clients with same combination must share backoff state!
+  # ⚠️ CRITICAL (Round 7): Attach holder-local limiter (per ServiceClient)
   client_config = opts[:config]
-  rate_limiter = Tinkex.RateLimiter.for_key({client_config.base_url, client_config.api_key})
+  rate_limiter = Tinkex.RateLimiter.for_holder(self())
 
   # Prepare config
   config = %{
     sampling_session_id: session_id,
     http_pool: opts[:http_pool] || Tinkex.HTTP.Pool,
     request_id_counter: request_id_counter,
-    rate_limiter: rate_limiter,  # Shared by {base_url, api_key}, not per-client!
+    rate_limiter: rate_limiter,  # Matches Python: one limiter per ServiceClient holder
     config: client_config  # Store Tinkex.Config for API calls
   }
 

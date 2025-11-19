@@ -540,11 +540,9 @@ defmodule Tinkex.API do
   #   * Honors x-should-retry header from server
   #   * Used by: TrainingClient.forward_backward, Future.poll, etc.
   #
-  # - SamplingClient: Does NOT use this retry logic!
-  #   * Has RateLimiter for coordinated backoff across clients
-  #   * Returns {:error, %{status: 429}} immediately (no retry)
-  #   * User must implement retry if desired
-  #   * Sets max_retries: 0 to bypass this function
+  # - SamplingClient: Uses holder-local RateLimiter + execute_with_retries (mirrors Python)
+  #   * Waits on RateLimiter, retries retryable errors internally
+  #   * Still uses shared HTTP helper concepts (retry delay calc) but runs inside SamplingClient module
 
   defp with_retries(fun, max_retries, attempt \\ 0) do
     case fun.() do
