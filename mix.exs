@@ -22,16 +22,16 @@ defmodule Tinkex.MixProject do
   defp deps do
     [
       # HTTP/2 client
-      {:finch, "~> 0.16"},
+      {:finch, "~> 0.18"},
 
       # JSON encoding/decoding
       {:jason, "~> 1.4"},
 
       # Numerical computing (tensor operations)
-      {:nx, "~> 0.6"},
+      {:nx, "~> 0.7"},
 
       # Tokenization (HuggingFace models)
-      {:tokenizers, "~> 0.4"},
+      {:tokenizers, "~> 0.5"},
 
       # Telemetry
       {:telemetry, "~> 1.2"},

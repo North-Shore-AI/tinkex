@@ -5,13 +5,13 @@ defmodule Tinkex.Types.ForwardBackwardInput do
   Mirrors Python tinker.types.ForwardBackwardInput.
   """
 
-  alias Tinkex.Types.Datum
+  alias Tinkex.Types.{Datum, LossFnType}
 
   defstruct [:data, :loss_fn, :loss_fn_config]
 
   @type t :: %__MODULE__{
           data: [Datum.t()],
-          loss_fn: String.t(),
+          loss_fn: LossFnType.t() | String.t(),
           loss_fn_config: map() | nil
         }
 end

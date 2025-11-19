@@ -17,7 +17,7 @@ defmodule Tinkex.Types.OptimStepResponse do
   @spec from_json(map()) :: t()
   def from_json(json) do
     %__MODULE__{
-      success: json["success"] || true
+      success: Map.get(json, "success", true)
     }
   end
 end

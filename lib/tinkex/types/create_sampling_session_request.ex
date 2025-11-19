@@ -1,4 +1,4 @@
-defmodule Tinkex.Types.CreateSamplingSessioNRequest do
+defmodule Tinkex.Types.CreateSamplingSessionRequest do
   @moduledoc """
   Request to create a new sampling session.
 

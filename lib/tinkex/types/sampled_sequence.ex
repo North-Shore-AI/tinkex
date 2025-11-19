@@ -12,7 +12,7 @@ defmodule Tinkex.Types.SampledSequence do
   @type t :: %__MODULE__{
           tokens: [integer()],
           logprobs: [float()] | nil,
-          stop_reason: StopReason.t()
+          stop_reason: StopReason.t() | nil
         }
 
   @doc """
