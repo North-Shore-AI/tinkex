@@ -1,0 +1,45 @@
+defmodule Tinkex.Types.ModelInputTest do
+  use ExUnit.Case, async: true
+
+  alias Tinkex.Types.{ModelInput, EncodedTextChunk}
+
+  describe "from_ints/1" do
+    test "creates ModelInput from token list" do
+      tokens = [1, 2, 3, 4, 5]
+      model_input = ModelInput.from_ints(tokens)
+
+      assert %ModelInput{chunks: [%EncodedTextChunk{tokens: ^tokens}]} = model_input
+    end
+  end
+
+  describe "to_ints/1" do
+    test "extracts tokens from ModelInput" do
+      tokens = [1, 2, 3]
+      model_input = ModelInput.from_ints(tokens)
+
+      assert ModelInput.to_ints(model_input) == tokens
+    end
+  end
+
+  describe "length/1" do
+    test "returns total token count" do
+      model_input = ModelInput.from_ints([1, 2, 3])
+      assert ModelInput.length(model_input) == 3
+    end
+  end
+
+  describe "JSON encoding" do
+    test "encodes correctly" do
+      model_input = ModelInput.from_ints([1, 2, 3])
+      json = Jason.encode!(model_input)
+      decoded = Jason.decode!(json)
+
+      assert is_list(decoded["chunks"])
+      assert length(decoded["chunks"]) == 1
+
+      [chunk] = decoded["chunks"]
+      assert chunk["tokens"] == [1, 2, 3]
+      assert chunk["type"] == "encoded_text"
+    end
+  end
+end

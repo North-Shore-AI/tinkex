@@ -21,8 +21,28 @@ defmodule Tinkex.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
-      # {:dep_from_hexpm, "~> 0.3.0"},
-      # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
+      # HTTP/2 client
+      {:finch, "~> 0.16"},
+
+      # JSON encoding/decoding
+      {:jason, "~> 1.4"},
+
+      # Numerical computing (tensor operations)
+      {:nx, "~> 0.6"},
+
+      # Tokenization (HuggingFace models)
+      {:tokenizers, "~> 0.4"},
+
+      # Telemetry
+      {:telemetry, "~> 1.2"},
+
+      # Development
+      {:dialyxir, "~> 1.4", only: :dev, runtime: false},
+      {:ex_doc, "~> 0.30", only: :dev, runtime: false},
+
+      # Testing
+      {:mox, "~> 1.0", only: :test},
+      {:bypass, "~> 2.1", only: :test}
     ]
   end
 end
