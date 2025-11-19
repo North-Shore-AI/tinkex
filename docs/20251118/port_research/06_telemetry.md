@@ -480,7 +480,8 @@ defmodule Tinkex.Telemetry.Reporter do
     state = %{
       session_id: opts[:session_id],
       events: [],
-      http_pool: opts[:http_pool]
+      http_pool: opts[:http_pool],
+      session_index: 0  # Track event session index (matches Python _session_index)
     }
 
     {:ok, state}
@@ -498,13 +499,16 @@ defmodule Tinkex.Telemetry.Reporter do
   end
 
   def handle_cast({:log_event, event}, state) do
-    events = [event | state.events]
+    # Assign incrementing session index to each event (matches Python _next_session_index)
+    indexed_event = Map.put(event, :event_session_index, state.session_index)
+    events = [indexed_event | state.events]
+    new_session_index = state.session_index + 1
 
     if length(events) >= @flush_threshold do
       send(self(), :flush)
-      {:noreply, %{state | events: events}}
+      {:noreply, %{state | events: events, session_index: new_session_index}}
     else
-      {:noreply, %{state | events: events}}
+      {:noreply, %{state | events: events, session_index: new_session_index}}
     end
   end
 

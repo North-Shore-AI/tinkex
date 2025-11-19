@@ -26,7 +26,7 @@
 - No changes required - document already aligned with Round 5 recommendations
 
 **Key Corrections (Round 9 - Final Implementation Gaps):**
-- **Metric reduction**: Implemented `Tinkex.MetricsReduction` module with suffix-based reduction strategies (`:mean`, `:sum`, `:min`, `:max`, `:slack`, `:unique`) matching Python's `chunked_fwdbwd_helpers._metrics_reduction` - prevents corruption of summed/extrema metrics
+- **Metric reduction**: Implemented `Tinkex.MetricsReduction` module with suffix-based reduction strategies (`:mean`, `:sum`, `:min`, `:max`, `:slack`, `:unique`) matching Python's `REDUCE_MAP` - prevents corruption of summed/extrema metrics
 - **Queue state backpressure**: Added `TryAgainResponse` and `QueueState` handling in `Future.poll/2` for graceful degradation (`:paused_rate_limit`, `:paused_capacity`) before hard 429s
 - **QueueStateObserver behaviour**: Added optional observer pattern for TrainingClient/SamplingClient to react to queue-level signals
 - **Telemetry integration**: Queue state changes emit `:tinkex.queue.state_change` events
@@ -602,9 +602,6 @@ defmodule Tinkex.MetricsReduction do
               Map.put(acc2, "#{key}_#{idx}", value)
             end)
 
-          "hash_unordered" ->
-            Map.put(acc, key, reduce_hash_unordered(values))
-
           _ ->
             reducer = reduction_fun(suffix)
             Map.put(acc, key, reducer.(values, weights, total_weight))
@@ -621,7 +618,6 @@ defmodule Tinkex.MetricsReduction do
   defp reduction_fun("max"), do: &reduce_max/3
   defp reduction_fun("mean"), do: &reduce_mean/3
   defp reduction_fun("slack"), do: &reduce_slack/3
-  defp reduction_fun("hash_unordered"), do: &reduce_hash_unordered_dispatch/3
 
   # Default: weighted mean (matches Python's fallback behavior)
   defp reduction_fun(_), do: &reduce_mean/3
@@ -663,17 +659,6 @@ defmodule Tinkex.MetricsReduction do
     max_val = Enum.max(values)
     mean_val = reduce_mean(values, weights, total_weight)
     max_val - mean_val
-  end
-
-  defp reduce_hash_unordered(values) do
-    values
-    |> Enum.sort()
-    |> :erlang.phash2()
-  end
-
-  # Helper so reduction_fun/1 can reuse reduce_hash_unordered/1 signature
-  defp reduce_hash_unordered_dispatch(values, _weights, _total_weight) do
-    reduce_hash_unordered(values)
   end
 end
 

@@ -140,17 +140,18 @@ Elixir is an excellent fit for this SDK port because:
 - **NIF safety**: Added verification checklist for tokenizers NIF resource sharing
 
 **⚠️ UPDATED (Round 9 - Final Implementation Gaps Fixed):** Addressed critical behavioral parity issues from Python source code analysis:
-- **Metric reduction**: Implemented suffix-based reduction (`:mean`, `:sum`, `:min`, `:max`, `:slack`, `:unique`, `:hash_unordered`) matching Python's `chunked_fwdbwd_helpers._metrics_reduction` - prevents data corruption
+- **Metric reduction**: Implemented 6 suffix-based reduction strategies (`:mean`, `:sum`, `:min`, `:max`, `:slack`, `:unique`) matching Python's `REDUCE_MAP` - prevents data corruption
 - **Queue state backpressure**: Added `TryAgainResponse` and `QueueState` handling for graceful degradation before hard 429 rate limits
 - **TrainingClient responsiveness**: Documented blocking trade-off during synchronous send phase (acceptable for v1.0, optional work queue pattern for v2.0)
 - **Llama-3 tokenizer**: Verified exact mapping to `"baseten/Meta-Llama-3-tokenizer"` matches Python SDK
 
-**⚠️ UPDATED (Round 10 - SDK v0.4.1 Type Corrections):** Fixed type mismatches against actual Tinker Python SDK v0.4.1:
-- **StopReason enum**: Corrected to `"max_tokens" | "stop_sequence" | "eos"` (was incorrectly `"length" | "stop"`)
-- **RequestErrorCategory wire format**: Corrected to lowercase `"unknown" | "server" | "user"` (Python's _types.py patches StrEnum to lowercase auto() values)
-- **ForwardBackwardOutput**: Removed `loss_fn_output_type` field (does not exist in v0.4.1 SDK)
-- **LossFnType enum**: Added missing `"kl_divergence"` value (4 total: cross_entropy, importance_sampling, ppo, kl_divergence)
-- **MetricsReduction**: Verified `hash_unordered` implementation exists (already present in Round 9)
+**⚠️ UPDATED (Round 10 - SDK v0.4.1 Type Corrections):** Verified type alignment with actual Tinker Python SDK v0.4.1:
+- **StopReason enum**: ✅ Correct - `"max_tokens" | "stop_sequence" | "eos"` (docs already aligned)
+- **RequestErrorCategory wire format**: ✅ Correct - lowercase `"unknown" | "server" | "user"` (Python's _types.py patches StrEnum to lowercase auto() values)
+- **ForwardBackwardOutput**: Includes `loss_fn_output_type` field (type discriminator for loss_fn_outputs)
+- **LossFnType enum**: 3 values only: `"cross_entropy"`, `"importance_sampling"`, `"ppo"` (kl_divergence not in v0.4.1 REDUCE_MAP)
+- **MetricsReduction**: Implements 6 reduction strategies matching Python's REDUCE_MAP: `sum`, `min`, `max`, `mean`, `slack`, `unique` (hash_unordered not in v0.4.1)
+- **Telemetry session indexing**: Reporter maintains incrementing `event_session_index` counter (matches Python's `_session_index`)
 
 This port research is organized into the following documents:
 

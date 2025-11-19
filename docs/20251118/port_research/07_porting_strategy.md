@@ -21,7 +21,7 @@
 
 **Key Corrections (Round 4 - Critique 400+):**
 - **JSON encoding**: Removed global nil-stripping - Python SDK accepts `null` for Optional fields
-- **Error categories**: All references updated from `USER_ERROR/TRANSIENT/FATAL` to `Unknown/Server/User`
+- **Error categories**: All references updated from `USER_ERROR/TRANSIENT/FATAL` to lowercase wire values `unknown/server/user`
 - **429 handling**: Wired retry_after_ms from errors to RateLimiter instead of hard-coded values
 - **Config threading**: Centralized config struct, removed Application.get_env from API layer
 - **PoolKey module**: Single source of truth for URL normalization and pool key generation
@@ -56,7 +56,7 @@
 - **Tokenizer NIF safety verification**: Added Pre-Implementation Checklist item to verify tokenizers NIF resources are safe to store in ETS and share across processes
 
 **Key Corrections (Round 9 - Final Implementation Gaps):**
-- **Metric reduction algorithm**: Implemented `Tinkex.MetricsReduction` with suffix-based strategies (`:mean`, `:sum`, `:min`, `:max`, `:slack`, `:unique`) matching Python's `chunked_fwdbwd_helpers._metrics_reduction` - critical for data integrity (naive averaging corrupts summed/extrema metrics)
+- **Metric reduction algorithm**: Implemented `Tinkex.MetricsReduction` with 6 suffix-based strategies (`:mean`, `:sum`, `:min`, `:max`, `:slack`, `:unique`) matching Python's `REDUCE_MAP` - critical for data integrity (naive averaging corrupts summed/extrema metrics)
 - **Queue state backpressure**: Added `TryAgainResponse` and `QueueState` types with handling in `Future.poll/2` for graceful degradation before hard 429 rate limits (`:paused_rate_limit`, `:paused_capacity`)
 - **TrainingClient responsiveness**: Documented blocking trade-off during synchronous send phase - accepted for v1.0 with optional work queue pattern for v2.0 if responsiveness becomes requirement
 - **Llama-3 tokenizer verification**: Confirmed exact mapping to `"baseten/Meta-Llama-3-tokenizer"` for gating workaround matches Python SDK
@@ -1181,7 +1181,7 @@ Before shipping v1.0, you MUST verify the following against actual API behavior:
 
 ### 1. RequestErrorCategory Wire Format
 
-**Why:** The plan assumes `StrEnum.auto()` capitalizes, but standard library StrEnum uses `name.lower()`.
+**Status:** ✅ Already correct - the plan uses lowercase ("unknown", "server", "user") matching Python's _types.py StrEnum patching.
 
 **Verification:**
 1. Trigger a RequestFailedError from the API (e.g., invalid model_id)
@@ -1189,7 +1189,7 @@ Before shipping v1.0, you MUST verify the following against actual API behavior:
 3. Inspect `response["category"]` value
 4. Verify if it's `"user"`, `"User"`, or something else
 
-**Action:** Update `Tinkex.Types.RequestErrorCategory.parse/1` to match actual format (defensive parser handles both).
+**Action:** The parser already uses lowercase ("unknown", "server", "user") matching the Python SDK's _types.py StrEnum patching.
 
 ### 2. JSON null Handling for Optional Fields
 
@@ -1317,7 +1317,7 @@ curl -i "$TINKER_BASE_URL/rate_limited_endpoint" \
   -H "X-Tinker-Api-Key: $TINKER_API_KEY" | grep -i retry-after
 ```
 
-Record the observed casing (should be "User"/"Server"/"Unknown") and note whether the service ever emits HTTP-date Retry-After headers.
+Record the observed casing (should be lowercase: "user"/"server"/"unknown") and note whether the service ever emits HTTP-date Retry-After headers.
 
 ---
 

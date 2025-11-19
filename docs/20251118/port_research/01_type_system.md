@@ -5,7 +5,7 @@
 **Key Corrections (Round 1 - Critiques 100-102):**
 - `AdamParams`: Fixed defaults (beta2: 0.95, eps: 1e-12, learning_rate has default)
 - `TensorDtype`: Only 2 types supported (int64, float32)
-- `StopReason`: Corrected values ("length", "stop")
+- `StopReason`: Corrected values ("max_tokens", "stop_sequence", "eos")
 - Validation: Using pure functions instead of Ecto for lighter dependencies
 
 **Key Corrections (Round 2 - Critiques 200-202):**
@@ -204,10 +204,10 @@ Response types represent data received from the API:
 ```python
 # ACTUAL Python SDK v0.4.1 (verified from source):
 class ForwardBackwardOutput(BaseModel):
+    loss_fn_output_type: str  # Type discriminator for loss_fn_outputs
     loss_fn_outputs: List[LossFnOutput]  # Per-example outputs (typed)
     metrics: Dict[str, float]  # Aggregated metrics
     # NOTE: No 'loss' field! Loss is in metrics["loss"]
-    # NOTE: No 'loss_fn_output_type' field in v0.4.1!
 ```
 
 **SampleResponse**
@@ -373,8 +373,8 @@ class TensorData(BaseModel):
 **LossFnType** ⚠️ CORRECTED (v0.4.1)
 ```python
 # ACTUAL Python SDK v0.4.1 (verified from source):
-LossFnType: TypeAlias = Literal["cross_entropy", "importance_sampling", "ppo", "kl_divergence"]
-# All 4 values supported by SDK and backend
+LossFnType: TypeAlias = Literal["cross_entropy", "importance_sampling", "ppo"]
+# Only 3 values supported by SDK and backend
 ```
 
 **StopReason** ⚠️ CORRECTED (v0.4.1)
