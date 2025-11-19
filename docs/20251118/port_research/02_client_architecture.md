@@ -422,6 +422,21 @@ defmodule Tinkex.TrainingClient do
     {:ok, state}
   end
 
+  # ═══════════════════════════════════════════════════════════════════════
+  # ⚠️ CRITICAL SAFETY REQUIREMENT - GenServer.reply MUST ALWAYS BE CALLED
+  # ═══════════════════════════════════════════════════════════════════════
+  #
+  # This handle_call spawns a background Task that eventually calls
+  # GenServer.reply(from, result). If that Task crashes without proper
+  # error handling, the caller will hang FOREVER waiting for a reply.
+  #
+  # MANDATORY: Wrap ALL Task bodies in try/rescue and ALWAYS call
+  # GenServer.reply/2, even on error.
+  #
+  # Without this, ANY unhandled exception in the polling logic will
+  # cause production deadlocks that are extremely difficult to debug.
+  # ═══════════════════════════════════════════════════════════════════════
+
   @impl true
   def handle_call({:forward_backward, data, loss_fn, opts}, from, state) do
     # Chunk the data
@@ -601,21 +616,38 @@ async def _sample_async_impl(self, ...):
 
 **CRITICAL FIX (Round 2):** Even "thin GenServer" with `GenServer.call` creates a bottleneck at 400 concurrent requests. The solution is **ETS for lock-free reads** and **atomics for shared backoff state**.
 
-#### Step 1: RateLimiter Module (Shared Backoff State)
+#### Step 1: RateLimiter Module (Shared Backoff State) ⚠️ CRITICAL - Per API Key
+
+**IMPORTANT:** Rate limits are enforced **per API key**, not per client process. All clients using the same API key must share backoff state.
 
 ```elixir
 defmodule Tinkex.RateLimiter do
   @moduledoc """
-  Shared backoff state for sampling requests.
+  Shared backoff state for rate limiting.
 
-  When ONE request gets 429, ALL requests back off immediately.
-  Uses atomics for lock-free coordination.
+  CRITICAL: Rate limits are per API key, so ALL clients with the
+  same API key must share ONE RateLimiter instance.
+
+  When ONE request gets 429, ALL requests using that API key back off.
+  Uses ETS + atomics for lock-free coordination across processes.
   """
 
-  @doc "Create new rate limiter (returns atomics reference)"
-  def new do
-    # Store backoff_until timestamp (monotonic milliseconds)
-    :atomics.new(1, signed: true)
+  @doc """
+  Get or create rate limiter for an API key.
+
+  ⚠️ IMPORTANT: This ensures all clients with the same API key
+  share the same backoff state (required for correct 429 handling).
+  """
+  def for_api_key(api_key) do
+    case :ets.lookup(:tinkex_rate_limiters, {:limiter, api_key}) do
+      [{_, limiter}] ->
+        limiter
+      [] ->
+        # Create new limiter
+        limiter = :atomics.new(1, signed: true)
+        :ets.insert(:tinkex_rate_limiters, {{:limiter, api_key}, limiter})
+        limiter
+    end
   end
 
   @doc "Check if currently in backoff period"
@@ -718,8 +750,10 @@ defmodule Tinkex.SamplingClient do
     # Create lock-free request ID counter (per-client)
     request_id_counter = :atomics.new(1, signed: false)
 
-    # Create shared rate limiter (per-client)
-    rate_limiter = Tinkex.RateLimiter.new()
+    # ⚠️ CRITICAL (Round 6): Get SHARED rate limiter for this API key
+    # All clients with same API key must share backoff state!
+    config = opts[:config]
+    rate_limiter = Tinkex.RateLimiter.for_api_key(config.api_key)
 
     # Write THIS client's config to global ETS table
     # Table created in Tinkex.Application.start/2
@@ -729,8 +763,8 @@ defmodule Tinkex.SamplingClient do
         sampling_session_id: session_id,
         http_pool: opts[:http_pool] || Tinkex.HTTP.Pool,
         request_id_counter: request_id_counter,
-        rate_limiter: rate_limiter,
-        config: opts[:config]  # Store config for API calls
+        rate_limiter: rate_limiter,  # Shared by API key, not per-client!
+        config: config  # Store Tinkex.Config for API calls
       }
     })
 
@@ -817,6 +851,15 @@ defmodule Tinkex.Application do
       :public,
       :named_table,
       read_concurrency: true  # Optimize for concurrent reads
+    ])
+
+    # ⚠️ CRITICAL (Round 6): Rate limiters table for per-API-key backoff
+    :ets.new(:tinkex_rate_limiters, [
+      :set,
+      :public,
+      :named_table,
+      read_concurrency: true,
+      write_concurrency: true  # Multiple clients may create limiters
     ])
 
     :ets.new(:tinkex_tokenizers, [

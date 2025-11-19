@@ -29,6 +29,11 @@
 - **429 retry integrated**: 429 now retries in with_retries/3 using server-provided backoff
 - **Tinkex.Config usage**: Updated all examples to use Config struct, not Application.get_env
 
+**Round 6 Verification:**
+- ✅ x-should-retry header support confirmed (line 518-529) - matches Python SDK `_base_client._should_retry`
+- ✅ Retry-After parsing (retry-after-ms, retry-after seconds, HTTP Date) confirmed (line 551-574)
+- ✅ 429 handling integrated into retry loop with server backoff (line 526-533)
+
 ## Python Implementation
 
 ### HTTP Client: httpx

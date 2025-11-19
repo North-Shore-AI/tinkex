@@ -1040,4 +1040,150 @@ With these changes, the v1.0 scope remains **8 weeks** (minimal creep):
    - Integration tests
    - Documentation
    - Final polish
-4. Iterate with testing and refinement
+
+---
+
+## Critical Verification Steps (Round 6)
+
+Before shipping v1.0, you MUST verify the following against actual API behavior:
+
+### 1. RequestErrorCategory Wire Format
+
+**Why:** The plan assumes `StrEnum.auto()` capitalizes, but standard library StrEnum uses `name.lower()`.
+
+**Verification:**
+1. Trigger a RequestFailedError from the API (e.g., invalid model_id)
+2. Log the raw JSON response body
+3. Inspect `response["category"]` value
+4. Verify if it's `"user"`, `"User"`, or something else
+
+**Action:** Update `Tinkex.Types.RequestErrorCategory.parse/1` to match actual format (defensive parser handles both).
+
+### 2. JSON null Handling for Optional Fields
+
+**Why:** Need to confirm API accepts `{"field": null}` vs requires field omission.
+
+**Verification:**
+1. Send SampleRequest with `{"base_model": null, "sampling_session_id": "xyz"}`
+2. Send same request with `{"sampling_session_id": "xyz"}` (field omitted)
+3. Verify both succeed or document which fields reject null
+
+**Action:** If API rejects `null` for specific fields, use per-field omission (NOT global nil-stripping).
+
+### 3. Rate Limit Scope (Per API Key vs Global)
+
+**Why:** RateLimiter architecture depends on whether limits are per-key or global.
+
+**Verification:**
+1. Create two SamplingClients with different API keys
+2. Trigger 429 on one client
+3. Check if the other client is also rate-limited
+
+**Expected:**
+- If limits are per-key: second client unaffected → RateLimiter.for_api_key is correct
+- If global: both clients affected → need global limiter
+
+**Action:** Current plan assumes per-key (most common). Adjust if global.
+
+### 4. x-should-retry Header Presence
+
+**Why:** Plan implements x-should-retry support, but need to confirm server sends it.
+
+**Verification:**
+1. Make requests that trigger retryable errors (5xx)
+2. Log response headers
+3. Check if `x-should-retry: true/false` header is present
+
+**Action:** If header is never sent, x-should-retry support is harmless but unused. If sent inconsistently, ensure fallback logic works.
+
+### 5. Multipart vs JSON for ImageChunk
+
+**Why:** Plan assumes JSON-based images only; need to confirm no multipart endpoints.
+
+**Verification:**
+1. Review all API endpoints that accept images
+2. Check Content-Type requirements
+3. Verify `ImageChunk` with base64 data works via JSON
+
+**Action:** If multipart required, implement `Tinkex.Multipart` module (currently deferred to v2.0).
+
+### 6. Tokenizer Chat Template Requirements
+
+**Why:** Plan provides raw tokenization only; need to clarify user responsibilities.
+
+**Verification:**
+1. Test with instruction-tuned model (e.g., Llama-3-Instruct)
+2. Try raw text vs manually-formatted chat template
+3. Document which format the API expects
+
+**Action:** Update Tinkex.Tokenizer docs to explicitly state:
+- "You must pre-format chat templates" OR
+- "SDK handles template application"
+
+### 7. GenServer.reply Timeout Behavior
+
+**Why:** Need to verify caller behavior when TrainingClient handle_call blocks long.
+
+**Verification:**
+1. Submit forward_backward with large batch (many chunks)
+2. Measure time from call to reply
+3. Ensure no intermediate timeouts in production
+
+**Action:** If blocking exceeds default GenServer timeout (5s), all examples must use `:infinity` or explicit large timeout.
+
+### 8. ETS Table Creation Race
+
+**Why:** If client starts before Application.start/2 completes, ETS lookup fails.
+
+**Verification:**
+1. In test, start client immediately after Application.start
+2. Verify no `:badarg` from missing ETS tables
+3. Check Application children start order
+
+**Action:** If race occurs, use application callback to block until tables ready.
+
+---
+
+## Pre-Implementation Checklist
+
+Before writing code, verify your assumptions:
+
+- [ ] API key format (logged from successful auth)
+- [ ] RequestErrorCategory casing (logged from error response)
+- [ ] Rate limit scope (tested with multiple keys)
+- [ ] x-should-retry header presence (logged from 5xx responses)
+- [ ] Image upload method (JSON vs multipart)
+- [ ] Chat template requirements (tested with instruct model)
+- [ ] GenServer call timeout needs (measured with large batch)
+- [ ] ETS initialization order (tested in clean environment)
+
+---
+
+## Next Actions for Developer (Post-Verification)
+
+1. **Immediate (Day 1)**
+   - Run verification tests against real API
+   - Update plan based on actual wire format
+   - Implement Tinkex.Config struct
+   - Set up Finch pools with PoolKey module
+
+2. **Week 1**
+   - Implement all type definitions with verified formats
+   - Build HTTP layer with confirmed retry logic
+   - Create error types matching actual categories
+
+3. **Week 2**
+   - Implement TrainingClient with verified timeout behavior
+   - Build SamplingRegistry and SamplingClient
+   - Wire RateLimiter with confirmed scope (per-key or global)
+
+4. **Week 3-4**
+   - Wire forward_backward, optim_step operations
+   - Implement sampling with confirmed rate limiting
+   - Test multi-tenancy scenarios
+
+5. **Week 5-8**
+   - CLI implementation
+   - Integration tests
+   - Documentation
+   - Final polish

@@ -295,18 +295,60 @@ TensorDtype: TypeAlias = Literal["int64", "float32"]
 # float64 and int32 are NOT supported by the backend
 ```
 
-**RequestErrorCategory** ⚠️ CORRECTED (Round 3)
-```python
-# ACTUAL Python SDK (verified from source):
-class RequestErrorCategory(StrEnum):
-    Unknown = auto()  # StrEnum.auto() produces "Unknown" (capitalized!)
-    Server = auto()   # Produces "Server" (capitalized!)
-    User = auto()     # Produces "User" (capitalized!)
+**RequestErrorCategory** ⚠️ REQUIRES RUNTIME VERIFICATION
 
-# Wire format values: "Unknown" | "Server" | "User" (CAPITALIZED)
-# NOT lowercase: "unknown" | "server" | "user"
-# NOT the old values: "user_error", "transient", "fatal"
+```python
+# Python SDK source code:
+class RequestErrorCategory(StrEnum):
+    Unknown = auto()
+    Server = auto()
+    User = auto()
+
+# ⚠️ IMPORTANT: The actual wire format depends on StrEnum implementation!
+# - Standard library StrEnum: auto() → name.lower() → "unknown", "server", "user"
+# - Custom StrEnum or override: Could be "Unknown", "Server", "User" (capitalized)
 ```
+
+**CRITICAL - Implementation Verification Step:**
+
+Before implementing the Elixir parser, you MUST:
+1. Log a real `RequestFailedResponse` from the API
+2. Inspect the actual `category` value returned by the server
+3. Verify whether it's `"user"`, `"User"`, or something else
+
+**Defensive Elixir Parser (handles both cases):**
+
+```python
+defmodule Tinkex.Types.RequestErrorCategory do
+  @moduledoc """
+  Request error category parser.
+
+  ⚠️ VERIFY WIRE FORMAT: The actual casing from server may vary.
+  This parser handles both lowercase and capitalized variants.
+  """
+
+  @type t :: :unknown | :server | :user
+
+  @doc "Parse from JSON string (defensive - handles both cases)"
+  def parse("unknown"), do: :unknown
+  def parse("Unknown"), do: :unknown
+  def parse("server"), do: :server
+  def parse("Server"), do: :server
+  def parse("user"), do: :user
+  def parse("User"), do: :user
+  def parse(_), do: :unknown  # Safe fallback
+
+  @doc "Check if error category is retryable"
+  def retryable?(:server), do: true
+  def retryable?(:unknown), do: true
+  def retryable?(:user), do: false
+end
+```
+
+**Why This Matters:**
+- Python code does `RequestErrorCategory(result_dict.get("category"))` - this will fail if values don't match
+- The actual wire format determines parsing logic
+- Defensive parsing prevents crashes on case mismatches
 
 ## 5. Future Types
 
@@ -536,23 +578,48 @@ end
 - Simple structs can use pattern matching + guards
 - Consider `norm` or `vex` libraries for additional validation
 
-### 4. JSON Encoding Strategy ⚠️ CORRECTED (Round 4)
+### 4. JSON Encoding Strategy ⚠️ CRITICAL - DO NOT GLOBALLY STRIP NILS
 
-**CRITICAL CORRECTION:** The Python SDK request/response models use `Optional[...] = None`, NOT `NotGiven` types. The server accepts `null` for optional fields.
+**THE RULE:** Mirror Python's behavior exactly - `nil` → `"null"` in JSON for request bodies.
 
-**Previous Understanding (INCORRECT):**
-- ❌ "StrictBase rejects `{"param": null}` when field should be omitted"
-- ❌ "Must globally strip nil values to avoid 422 errors"
+**Where NotGiven is Actually Used (client options, NOT request models):**
+```python
+# Python SDK uses NotGiven for REQUEST OPTIONS (internal)
+class FinalRequestOptions:
+    headers: Headers | NotGiven = NOT_GIVEN
+    max_retries: int | NotGiven = NOT_GIVEN
+    timeout: float | NotGiven = NOT_GIVEN
 
-**Actual Behavior (verified from Python SDK code):**
-- Request/response Pydantic models: `Optional[...] = None`
-- `StrictBase` just sets `extra="forbid"` and `frozen=True`
-- Python SDK **already sends `null` in JSON** for Optional fields
-- `NotGiven` sentinel is used in **client options** (headers, timeout), NOT request schemas
+# But REQUEST MODELS use Optional[...] = None (allows null)
+class SampleRequest(BaseModel):
+    sampling_session_id: Optional[str] = None  # → {"sampling_session_id": null} is valid!
+    base_model: Optional[str] = None           # → {"base_model": null} is valid!
+```
 
-**Elixir Strategy:**
+**What Python Actually Sends:**
+- For request bodies (`SampleRequest`, `ForwardBackwardRequest`, etc.): `None` → `null` in JSON
+- For internal options: `NotGiven` fields are omitted when building the request
+- The API server **accepts `null`** for Optional fields in request bodies
 
-**Approach 1: Mirror Python exactly (RECOMMENDED)**
+**❌ WRONG - Global Nil Stripping:**
+```elixir
+# DO NOT DO THIS - breaks semantic difference between "not set" and "explicitly null"
+defmodule Tinkex.JSON do
+  def encode!(struct) do
+    struct
+    |> Map.from_struct()
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)  # ❌ Global stripping
+    |> Jason.encode!()
+  end
+end
+```
+
+**Why Global Stripping is Wrong:**
+1. Python sends `{"field": null}`, Elixir would send `{}` → different semantics
+2. Prevents distinguishing "not set" from "explicitly null" if API ever needs it
+3. Not what the Python SDK actually does for request bodies
+
+**✅ CORRECT - Approach 1: Natural nil → null (RECOMMENDED)**
 
 Let Jason encode `nil` as `null` naturally:
 
