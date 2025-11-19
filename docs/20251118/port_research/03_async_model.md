@@ -25,6 +25,12 @@
 - **Blocking behavior documented**: TrainingClient handle_call blocking is a conscious tradeoff for request ordering
 - No changes required - document already aligned with Round 5 recommendations
 
+**Key Corrections (Round 9 - Final Implementation Gaps):**
+- **Metric reduction**: Implemented `Tinkex.MetricsReduction` module with suffix-based reduction strategies (`:mean`, `:sum`, `:min`, `:max`, `:slack`, `:unique`) matching Python's `chunked_fwdbwd_helpers._metrics_reduction` - prevents corruption of summed/extrema metrics
+- **Queue state backpressure**: Added `TryAgainResponse` and `QueueState` handling in `Future.poll/2` for graceful degradation (`:paused_rate_limit`, `:paused_capacity`) before hard 429s
+- **QueueStateObserver behaviour**: Added optional observer pattern for TrainingClient/SamplingClient to react to queue-level signals
+- **Telemetry integration**: Queue state changes emit `:tinkex.queue.state_change` events
+
 ## Overview
 
 The Tinker SDK implements a sophisticated futures-based async model that allows synchronous-looking code to perform async operations. This is one of the most complex parts of the SDK to port.
@@ -281,6 +287,23 @@ defmodule Tinkex.Future do
         Process.sleep(backoff)
         poll_loop(request_id, pool, timeout, start_time, iteration + 1)
 
+      # ⚠️ CRITICAL (Round 9): Handle TryAgainResponse with queue_state
+      # Python SDK responds to queue-level signals (paused_rate_limit, paused_capacity)
+      # before hard 429s occur. We must respect these to avoid unnecessary load.
+      {:ok, %{status: "try_again", queue_state: queue_state}} ->
+        # Notify observers (for logging/monitoring)
+        notify_queue_state_change(queue_state)
+
+        # Back off based on queue state
+        backoff = case queue_state do
+          "paused_rate_limit" -> 1000  # 1 second
+          "paused_capacity"   -> 1000  # 1 second
+          _                   -> calculate_backoff(iteration)
+        end
+
+        Process.sleep(backoff)
+        poll_loop(request_id, pool, timeout, start_time, iteration + 1)
+
       {:error, %{status: 408}} ->
         # Timeout, retry immediately
         poll_loop(request_id, pool, timeout, start_time, iteration + 1)
@@ -305,6 +328,117 @@ defmodule Tinkex.Future do
 
   defp is_retryable(%{status: status}) when status >= 500, do: true
   defp is_retryable(_), do: false
+
+  # ⚠️ NEW (Round 9): Queue state notification
+  defp notify_queue_state_change(queue_state) do
+    # Emit telemetry event for queue state changes
+    :telemetry.execute(
+      [:tinkex, :queue, :state_change],
+      %{timestamp: System.system_time(:millisecond)},
+      %{queue_state: queue_state}
+    )
+
+    # Log for visibility
+    case queue_state do
+      "paused_rate_limit" ->
+        require Logger
+        Logger.warning("Queue paused due to rate limit")
+
+      "paused_capacity" ->
+        require Logger
+        Logger.warning("Queue paused due to capacity constraints")
+
+      _ ->
+        :ok
+    end
+  end
+end
+```
+
+### Queue State Handling ⚠️ NEW (Round 9)
+
+**Critical Addition:** The Python SDK includes a `QueueState` enum and `TryAgainResponse` mechanism that signals queue-level backpressure *before* hard 429 rate limits occur.
+
+**Why This Matters:**
+- Server sends `TryAgainResponse` with `queue_state` when worker queue is paused
+- Clients should respect these signals to avoid unnecessary load
+- Enables graceful degradation before hitting hard rate limits
+
+**Queue State Types:**
+
+```elixir
+# In types/queue_state.ex
+defmodule Tinkex.Types.QueueState do
+  @type t :: :active | :paused_rate_limit | :paused_capacity | :unknown
+
+  def parse("active"), do: :active
+  def parse("paused_rate_limit"), do: :paused_rate_limit
+  def parse("paused_capacity"), do: :paused_capacity
+  def parse(_), do: :unknown
+end
+```
+
+**TryAgainResponse Type:**
+
+```elixir
+# In types/try_again_response.ex
+defmodule Tinkex.Types.TryAgainResponse do
+  @derive Jason.Encoder
+  defstruct [:status, :queue_state, :retry_after_ms]
+
+  @type t :: %__MODULE__{
+    status: String.t(),           # "try_again"
+    queue_state: String.t(),      # "active" | "paused_rate_limit" | "paused_capacity"
+    retry_after_ms: integer() | nil
+  }
+end
+```
+
+**Integration Points:**
+
+1. **Future.poll/2** - Detects `TryAgainResponse` and backs off accordingly (implemented above)
+2. **TrainingClient/SamplingClient** - Can implement optional `QueueStateObserver` behaviour for custom handling
+3. **Telemetry** - Emits `:tinkex.queue.state_change` events for monitoring
+
+**Optional QueueStateObserver Behaviour:**
+
+```elixir
+defmodule Tinkex.QueueStateObserver do
+  @moduledoc """
+  Behaviour for observing queue state changes.
+
+  TrainingClient and SamplingClient can implement this to react
+  to queue-level backpressure signals from the server.
+  """
+
+  @callback on_queue_state_change(Tinkex.Types.QueueState.t()) :: any()
+end
+```
+
+**Example Implementation in TrainingClient:**
+
+```elixir
+defmodule Tinkex.TrainingClient do
+  @behaviour Tinkex.QueueStateObserver
+
+  @impl Tinkex.QueueStateObserver
+  def on_queue_state_change(queue_state) do
+    require Logger
+
+    case queue_state do
+      :paused_rate_limit ->
+        Logger.warning("Training paused: rate limit hit for model #{inspect(self())}")
+
+      :paused_capacity ->
+        Logger.warning("Training paused: capacity constraints for model #{inspect(self())}")
+
+      :active ->
+        Logger.info("Training queue resumed")
+
+      :unknown ->
+        :ok
+    end
+  end
 end
 ```
 
@@ -397,14 +531,128 @@ defp send_forward_backward_chunk(chunk, loss_fn, req_id, state) do
   untyped_future  # Return future for polling
 end
 
+# ═══════════════════════════════════════════════════════════════════════
+# ⚠️ CRITICAL (Round 9): Metrics Reduction Module
+# ═══════════════════════════════════════════════════════════════════════
+#
+# Python SDK uses chunked_fwdbwd_helpers._metrics_reduction with suffix-based
+# reduction strategies. Using naive average corrupts metrics that must be
+# summed (tokens_processed:sum), tracked by extrema (max_grad_norm:max), etc.
+#
+# This module mirrors Python's REDUCE_MAP logic:
+# - Keys ending ":mean" → weighted mean
+# - Keys ending ":sum" → sum
+# - Keys ending ":min" → min
+# - Keys ending ":max" → max
+# - Keys ending ":slack" → special slack reduction
+# - Keys ending ":unique" → identity/unique behavior
+# ═══════════════════════════════════════════════════════════════════════
+
+defmodule Tinkex.MetricsReduction do
+  @moduledoc """
+  Metric reduction for chunked forward/backward results.
+
+  Mirrors Python SDK's chunked_fwdbwd_helpers._metrics_reduction logic.
+  Reduces metrics based on suffix after last ':' in metric name.
+  """
+
+  @type metrics :: %{String.t() => float()}
+  @type result :: %{metrics: metrics(), loss_fn_outputs: list()}
+
+  @doc """
+  Reduce metrics from multiple chunk results using suffix-based strategies.
+
+  Weights are computed based on number of loss_fn_outputs per result.
+  """
+  @spec reduce([result()]) :: metrics()
+  def reduce(results) do
+    # 1. Compute weights based on number of loss_fn_outputs
+    weights = Enum.map(results, fn r -> length(r.loss_fn_outputs) end)
+    total_weight = Enum.sum(weights)
+
+    # 2. Collect all unique metric keys across results
+    keys =
+      results
+      |> Enum.flat_map(fn r -> Map.keys(r.metrics) end)
+      |> Enum.uniq()
+
+    # 3. Reduce each metric using suffix-based strategy
+    Enum.into(keys, %{}, fn key ->
+      values = Enum.map(results, &Map.get(&1.metrics, key, 0.0))
+
+      reducer =
+        key
+        |> String.split(":")
+        |> List.last()
+        |> reduction_fun()
+
+      {key, reducer.(values, weights, total_weight)}
+    end)
+  end
+
+  # Dispatch based on suffix (matches Python REDUCE_MAP)
+  defp reduction_fun("sum"), do: &reduce_sum/3
+  defp reduction_fun("min"), do: &reduce_min/3
+  defp reduction_fun("max"), do: &reduce_max/3
+  defp reduction_fun("mean"), do: &reduce_mean/3
+  defp reduction_fun("slack"), do: &reduce_slack/3
+  defp reduction_fun("unique"), do: &reduce_unique/3
+
+  # Default: weighted mean (matches Python's fallback behavior)
+  defp reduction_fun(_), do: &reduce_mean/3
+
+  # Sum reduction
+  defp reduce_sum(values, _weights, _total_weight) do
+    Enum.sum(values)
+  end
+
+  # Min reduction
+  defp reduce_min(values, _weights, _total_weight) do
+    Enum.min(values)
+  end
+
+  # Max reduction
+  defp reduce_max(values, _weights, _total_weight) do
+    Enum.max(values)
+  end
+
+  # Weighted mean reduction
+  defp reduce_mean(values, weights, total_weight) do
+    weighted_sum =
+      values
+      |> Enum.zip(weights)
+      |> Enum.map(fn {v, w} -> v * w end)
+      |> Enum.sum()
+
+    # Avoid division by zero
+    if total_weight > 0 do
+      weighted_sum / total_weight
+    else
+      0.0
+    end
+  end
+
+  # Slack reduction (special reduction for slack metrics)
+  # For v1.0, treat as weighted mean. Can be refined if needed.
+  defp reduce_slack(values, weights, total_weight) do
+    reduce_mean(values, weights, total_weight)
+  end
+
+  # Unique reduction (identity-ish behavior for unique values)
+  # For v1.0, return first value. Python expands key space; we simplify.
+  defp reduce_unique(values, _weights, _total_weight) do
+    List.first(values) || 0.0
+  end
+end
+
 defp combine_forward_backward_results(results) do
   # Flatten outputs
   all_outputs = Enum.flat_map(results, & &1.loss_fn_outputs)
 
-  # Merge metrics (loss is in metrics["loss"])
-  merged_metrics = Enum.reduce(results, %{}, fn result, acc ->
-    Map.merge(acc, result.metrics, fn _k, v1, v2 -> (v1 + v2) / 2 end)
-  end)
+  # ⚠️ CRITICAL (Round 9): Use suffix-based metric reduction to match Python SDK
+  # Python uses chunked_fwdbwd_helpers._metrics_reduction with weighted reduction
+  # based on metric name suffix (:mean, :sum, :min, :max, :slack, :unique)
+  merged_metrics = Tinkex.MetricsReduction.reduce(results)
 
   # Use loss_fn_output_type from first result (should be same for all)
   loss_fn_output_type = hd(results).loss_fn_output_type

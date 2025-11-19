@@ -44,6 +44,10 @@
 - **TrainingClient submission errors**: Added `reduce_while` with error handling - prevents GenServer crash on transient HTTP/validation errors
 - **Tokenizer ETS key consistency**: Changed to cache by resolved tokenizer ID (not raw model_name) - prevents duplicate caches for same HF tokenizer
 
+**Key Corrections (Round 9 - Final Implementation Gaps):**
+- **TrainingClient responsiveness**: Documented blocking trade-off during synchronous send phase - acceptable for v1.0, optional work queue pattern for v2.0
+- **Llama-3 tokenizer mapping**: Verified exact string `"baseten/Meta-Llama-3-tokenizer"` for models containing "Llama-3" matches Python SDK
+
 ## Overview
 
 The Tinker SDK uses a hierarchical client architecture with three main client types, each backed by a shared `InternalClientHolder` for connection management.
@@ -552,6 +556,81 @@ end
 - **Only after all sends complete** does GenServer spawn polling task
 - Polling for results happens **concurrently** using `Task.await_many`
 - No explicit turn-taking locks needed (GenServer mailbox + sync sends ensure ordering)
+
+**Responsiveness Trade-off ⚠️ DOCUMENTED (Round 9):**
+
+The current design **blocks the TrainingClient GenServer** during the synchronous send phase. This is **correct and safe** but has a trade-off:
+
+**Implications:**
+- While sending chunks (potentially several seconds for large batches), the GenServer cannot process other messages
+- Operations like `get_info/1`, `save_state/2`, or graceful shutdown must wait until sends complete
+- The BEAM VM remains healthy (other processes unaffected), only this one GenServer is busy
+- This does NOT compromise correctness or cause deadlocks
+
+**Why This Is Acceptable for v1.0:**
+- Training operations are sequential by design (can't start next operation until current completes)
+- Blocking during sends ensures strict request ordering (core requirement)
+- Simple, easy to understand and maintain
+- Matches the Python SDK's behavior (thread blocks during synchronous operations)
+
+**Optional Improvement for v2.0 (not mandatory):**
+
+If GenServer responsiveness becomes a requirement, use `handle_continue/2` with a work queue:
+
+```elixir
+defmodule Tinkex.TrainingClient do
+  defstruct [
+    :model_id,
+    :http_pool,
+    status: :idle,              # Track if worker is busy
+    work_queue: :queue.new(),   # Queue of pending operations
+    request_id_counter: 0
+  ]
+
+  @impl true
+  def handle_call({:forward_backward, data, loss_fn, opts}, from, state) do
+    # Enqueue work instead of executing immediately
+    new_queue = :queue.in({:fwd_bwd, data, loss_fn, opts, from}, state.work_queue)
+
+    case state.status do
+      :idle ->
+        # Start processing immediately
+        {:noreply, %{state | work_queue: new_queue, status: :working},
+         {:continue, :process_queue}}
+
+      :working ->
+        # Worker is busy, just enqueue
+        {:noreply, %{state | work_queue: new_queue}}
+    end
+  end
+
+  @impl true
+  def handle_continue(:process_queue, state) do
+    case :queue.out(state.work_queue) do
+      {{:value, {:fwd_bwd, data, loss_fn, opts, from}}, remaining} ->
+        # Execute the same synchronous send + async polling logic
+        # (with Round 8 error handling)
+        # ...
+
+        # Continue with next work item
+        {:noreply, %{state | work_queue: remaining},
+         {:continue, :process_queue}}
+
+      {:empty, _} ->
+        # No more work, become idle
+        {:noreply, %{state | status: :idle}}
+    end
+  end
+end
+```
+
+**Benefits of work queue approach:**
+- GenServer stays responsive to system messages between operations
+- Can still handle `get_info/1` or monitoring calls while busy
+- Preserves request ordering (queue ensures FIFO)
+- More "OTP-idiomatic"
+
+**For v1.0:** Current blocking approach is **approved and acceptable**. Document the trade-off and proceed.
 
 **Why This Works (avoiding race condition):**
 ```

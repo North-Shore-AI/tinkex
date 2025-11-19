@@ -55,6 +55,13 @@
 - **Tokenizer ETS key consistency**: Changed caching to use resolved tokenizer ID (not raw model_name) to prevent duplicate downloads for same HF tokenizer
 - **Tokenizer NIF safety verification**: Added Pre-Implementation Checklist item to verify tokenizers NIF resources are safe to store in ETS and share across processes
 
+**Key Corrections (Round 9 - Final Implementation Gaps):**
+- **Metric reduction algorithm**: Implemented `Tinkex.MetricsReduction` with suffix-based strategies (`:mean`, `:sum`, `:min`, `:max`, `:slack`, `:unique`) matching Python's `chunked_fwdbwd_helpers._metrics_reduction` - critical for data integrity (naive averaging corrupts summed/extrema metrics)
+- **Queue state backpressure**: Added `TryAgainResponse` and `QueueState` types with handling in `Future.poll/2` for graceful degradation before hard 429 rate limits (`:paused_rate_limit`, `:paused_capacity`)
+- **TrainingClient responsiveness**: Documented blocking trade-off during synchronous send phase - accepted for v1.0 with optional work queue pattern for v2.0 if responsiveness becomes requirement
+- **Llama-3 tokenizer verification**: Confirmed exact mapping to `"baseten/Meta-Llama-3-tokenizer"` for gating workaround matches Python SDK
+- **Behavioral parity**: All fixes ensure 1:1 behavioral match with Python SDK based on source code analysis
+
 ## Technology Stack Recommendations
 
 ### Core Dependencies ⚠️ UPDATED

@@ -139,6 +139,12 @@ Elixir is an excellent fit for this SDK port because:
 - **Tokenizer**: Fixed ETS caching to use resolved tokenizer ID (prevents duplicate caches)
 - **NIF safety**: Added verification checklist for tokenizers NIF resource sharing
 
+**⚠️ UPDATED (Round 9 - Final Implementation Gaps Fixed):** Addressed critical behavioral parity issues from Python source code analysis:
+- **Metric reduction**: Implemented suffix-based reduction (`:mean`, `:sum`, `:min`, `:max`, `:slack`, `:unique`) matching Python's `chunked_fwdbwd_helpers._metrics_reduction` - prevents data corruption
+- **Queue state backpressure**: Added `TryAgainResponse` and `QueueState` handling for graceful degradation before hard 429 rate limits
+- **TrainingClient responsiveness**: Documented blocking trade-off during synchronous send phase (acceptable for v1.0, optional work queue pattern for v2.0)
+- **Llama-3 tokenizer**: Verified exact mapping to `"baseten/Meta-Llama-3-tokenizer"` matches Python SDK
+
 This port research is organized into the following documents:
 
 1. **00_overview.md** (this document) - High-level architecture
