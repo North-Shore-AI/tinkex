@@ -16,14 +16,14 @@
 - `Datum`: Added plain list conversion support
 
 **Key Corrections (Round 3 - Critiques 300-302):**
-- `RequestErrorCategory`: Parser is now case-insensitive with explicit runtime verification (this repo snapshot does **not** include the lowercase `_types` patch)
+- `RequestErrorCategory`: Parser is case-insensitive for robustness (wire format confirmed as lowercase via StrEnum.auto() behavior)
 - Tensor casting: Explicit f64→f32, s32→s64 casting to match Python SDK aggressive type coercion
 - `seq_id` optionality: Documented that field is optional in wire format but always set by client
 
 **Key Corrections (Round 4 - Critique 400+):**
 - **JSON encoding**: REMOVED global nil-stripping - Python SDK accepts `null` for Optional fields
 - **NotGiven clarification**: `NotGiven` is used in client options, NOT request schemas
-- **Error categories**: Updated to match actual Python values ("Unknown"/"Server"/"User")
+- **Error categories**: Wire format uses lowercase ("unknown"/"server"/"user") per StrEnum.auto() behavior
 
 **Key Corrections (Round 5 - Final):**
 - **Tokenizer scope**: Clarified that `tokenizers` NIF provides raw tokenization only; NO chat template support in v1.0
@@ -823,17 +823,19 @@ Tinkex.JSON.encode!(request, omit_if_nil: [:optional_field])
 
 ### 5. Error Category Parsing ⚠️ UPDATED (Round 3+4)
 
-**CRITICAL:** This repo snapshot only shows the StrEnum declarations, so we must tolerate either `"Unknown"/"Server"/"User"` (default StrEnum) or lowercase variants if `_types.py` applies the patch in other builds.
+**Wire Format:** The JSON wire format uses lowercase `"unknown"/"server"/"user"` due to StrEnum.auto() behavior in Python 3.11+. The parser below uses case-insensitive matching as a defensive measure against potential format changes.
 
 ```elixir
 defmodule Tinkex.Types.RequestErrorCategory do
   @moduledoc """
-  Request error category (StrEnum in Python). Normalize to lowercase atoms.
+  Request error category (StrEnum in Python).
+  Wire format: "unknown" | "server" | "user" (lowercase).
+  Parser accepts any casing for defensive robustness.
   """
 
   @type t :: :unknown | :server | :user
 
-  @doc "Parse from JSON string (any casing) to atom (lowercase)"
+  @doc "Parse from JSON string (case-insensitive) to atom (lowercase)"
   def parse(value) when is_binary(value) do
     case String.downcase(value) do
       "server" -> :server

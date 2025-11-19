@@ -21,7 +21,7 @@
 
 **Key Corrections (Round 4 - Critique 400+):**
 - **JSON encoding**: Removed global nil-stripping - Python SDK accepts `null` for Optional fields
-- **Error categories**: Parser now normalizes casing + adds explicit verification step (repo snapshot only shows StrEnum members)
+- **Error categories**: Wire format confirmed as lowercase ("unknown"/"server"/"user") per StrEnum.auto() behavior; parser uses case-insensitive matching for robustness
 - **429 handling**: Wired retry_after_ms from errors to RateLimiter instead of hard-coded values
 - **Config threading**: Centralized config struct, removed Application.get_env from API layer
 - **PoolKey module**: Single source of truth for URL normalization and pool key generation

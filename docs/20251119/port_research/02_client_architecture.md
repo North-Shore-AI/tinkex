@@ -33,7 +33,7 @@
 - **Config threading**: Updated all API examples to pass config through opts, not Application.get_env
 
 **Key Corrections (Round 7 - Concrete Bugs):**
-- **RateLimiter scope**: Clarified that backoff state is shared per `{base_url, api_key}` combination (staging/prod split), matching Python’s holder-level behavior
+- **RateLimiter scope**: Clarified that backoff state is shared per `{base_url, api_key}` combination (staging/prod split), as an Elixir-only enhancement (Python uses per-call retry logic)
 - **GenServer.reply safety**: Added ArgumentError rescue when caller dies before reply
 - **SamplingClient retries**: Use the same retry loop + shared backoff (`execute_with_retries`) as Python instead of surfacing raw 429s
 - **Multi-tenancy pools**: Added CRITICAL limitation - Finch pools defined at app start with single base_url. Multi-base_url requires dynamic pool management (see note below).
