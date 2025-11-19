@@ -1,6 +1,6 @@
 # Type System Analysis
 
-**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202. See `203_claude_sonnet_response_to_critiques.md` for details.
+**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202, 300-302. See `303_claude_sonnet_response_to_critiques.md` for details.
 
 **Key Corrections (Round 1 - Critiques 100-102):**
 - `AdamParams`: Fixed defaults (beta2: 0.95, eps: 1e-12, learning_rate has default)
@@ -14,7 +14,12 @@
 - `SampleRequest`: Corrected required/optional fields (supports multiple modes)
 - `TensorData`: Handle nil shape gracefully
 - `Datum`: Added plain list conversion support
-- `RequestErrorCategory`: Updated to "unknown", "server", "user"
+
+**Key Corrections (Round 3 - Critiques 300-302):**
+- `RequestErrorCategory`: Fixed capitalization - actual values are "Unknown", "Server", "User" (StrEnum.auto() capitalizes)
+- JSON nil encoding: Added `Tinkex.JSON` module with nil-stripping for Pydantic StrictBase compatibility
+- Tensor casting: Explicit f64→f32, s32→s64 casting to match Python SDK aggressive type coercion
+- `seq_id` optionality: Documented that field is optional in wire format but always set by client
 
 ## Python Type Infrastructure
 
@@ -38,12 +43,16 @@ Request types represent data sent to the API:
 
 ### Training Requests
 
-**ForwardBackwardRequest**
+**ForwardBackwardRequest** ⚠️ UPDATED (Round 3)
 ```python
 class ForwardBackwardRequest(BaseModel):
     forward_backward_input: ForwardBackwardInput
     model_id: ModelID
-    seq_id: int  # Sequence ID for request ordering
+    seq_id: Optional[int] = None  # Optional in schema, but client ALWAYS sets it
+
+# NOTE: While seq_id is Optional in the Python wire schema, the client
+# implementation ALWAYS sets it. Server semantics assume monotonic sequence
+# per model. Document this as: "Optional in wire format, always set by client."
 ```
 
 **ForwardBackwardInput**
@@ -65,12 +74,12 @@ class Datum(StrictBase):
     def convert_tensors(cls, data): ...
 ```
 
-**OptimStepRequest**
+**OptimStepRequest** ⚠️ UPDATED (Round 3)
 ```python
 class OptimStepRequest(BaseModel):
     adam_params: AdamParams
     model_id: ModelID
-    seq_id: int
+    seq_id: Optional[int] = None  # Optional in schema, but client ALWAYS sets it
 ```
 
 **AdamParams** ⚠️ CORRECTED
@@ -257,14 +266,16 @@ TensorDtype: TypeAlias = Literal["int64", "float32"]
 # float64 and int32 are NOT supported by the backend
 ```
 
-**RequestErrorCategory** ⚠️ CORRECTED
+**RequestErrorCategory** ⚠️ CORRECTED (Round 3)
 ```python
 # ACTUAL Python SDK (verified from source):
 class RequestErrorCategory(StrEnum):
-    Unknown = auto()  # Unknown error type
-    Server = auto()   # Server-side error (retryable)
-    User = auto()     # User/client error (not retryable)
+    Unknown = auto()  # StrEnum.auto() produces "Unknown" (capitalized!)
+    Server = auto()   # Produces "Server" (capitalized!)
+    User = auto()     # Produces "User" (capitalized!)
 
+# Wire format values: "Unknown" | "Server" | "User" (CAPITALIZED)
+# NOT lowercase: "unknown" | "server" | "user"
 # NOT the old values: "user_error", "transient", "fatal"
 ```
 
@@ -407,24 +418,77 @@ end
 
 ## Key Porting Considerations
 
-### 1. Tensor Conversion ⚠️ UPDATED
-- Python: Direct torch.Tensor → TensorData conversion
-- Elixir: Need Nx (Numerical Elixir) integration
-  - Use `Nx.to_flat_list/1` for serialization
-  - Store dtype and shape metadata
-  - **Handle nil shape**: When shape is None/nil, treat as 1D array
-    ```elixir
-    def to_nx(%TensorData{shape: nil, data: data, dtype: dtype}) do
-      # No reshape - return as 1D
-      Nx.tensor(data, type: tensor_dtype_to_nx(dtype))
+### 1. Tensor Conversion with Aggressive Casting ⚠️ UPDATED (Round 3)
+
+**CRITICAL:** Python SDK aggressively casts dtypes to match backend support:
+- `float64` → `float32` (downcast)
+- `int32` → `int64` (upcast)
+- `uint*` → `int64` (upcast unsigned)
+
+**Problem:** Standard Elixir floats are 64-bit. Without explicit casting, user inputs will be rejected or encoded incorrectly.
+
+**Solution:**
+
+```elixir
+defmodule Tinkex.Types.TensorData do
+  defstruct [:data, :dtype, :shape]
+
+  @type dtype :: :int64 | :float32
+  @type t :: %__MODULE__{
+    data: list(number()),
+    dtype: dtype(),
+    shape: list(non_neg_integer()) | nil
+  }
+
+  @doc "Create TensorData from Nx tensor with aggressive casting (matches Python SDK)"
+  def from_nx(%Nx.Tensor{} = tensor) do
+    # Cast to supported types (matches Python _convert_numpy_dtype_to_tensor)
+    casted_dtype = case tensor.type do
+      {:f, 64} -> {:f, 32}  # Downcast f64 -> f32 (CRITICAL!)
+      {:f, 32} -> {:f, 32}
+      {:s, 32} -> {:s, 64}  # Upcast s32 -> s64
+      {:s, 64} -> {:s, 64}
+      {:u, _} -> {:s, 64}   # Upcast unsigned -> s64
+      other -> raise ArgumentError, "Unsupported dtype: #{inspect(other)}"
     end
 
-    def to_nx(%TensorData{shape: shape, data: data, dtype: dtype}) when is_list(shape) do
-      data
-      |> Nx.tensor(type: tensor_dtype_to_nx(dtype))
-      |> Nx.reshape(List.to_tuple(shape))
+    tensor = if casted_dtype != tensor.type do
+      Nx.as_type(tensor, casted_dtype)
+    else
+      tensor
     end
-    ```
+
+    %__MODULE__{
+      data: Nx.to_flat_list(tensor),
+      dtype: nx_dtype_to_tensor_dtype(casted_dtype),
+      shape: Tuple.to_list(tensor.shape)
+    }
+  end
+
+  @doc "Convert to Nx tensor"
+  def to_nx(%__MODULE__{shape: nil, data: data, dtype: dtype}) do
+    # No reshape - return as 1D
+    Nx.tensor(data, type: tensor_dtype_to_nx(dtype))
+  end
+
+  def to_nx(%__MODULE__{shape: shape, data: data, dtype: dtype}) when is_list(shape) do
+    data
+    |> Nx.tensor(type: tensor_dtype_to_nx(dtype))
+    |> Nx.reshape(List.to_tuple(shape))
+  end
+
+  defp nx_dtype_to_tensor_dtype({:f, 32}), do: :float32
+  defp nx_dtype_to_tensor_dtype({:s, 64}), do: :int64
+
+  defp tensor_dtype_to_nx(:float32), do: {:f, 32}
+  defp tensor_dtype_to_nx(:int64), do: {:s, 64}
+end
+```
+
+**Why This Matters:**
+- Elixir's default float is `f64` - without casting, every float tensor fails
+- Python SDK's `_convert_numpy_dtype_to_tensor` does this automatically
+- Backend only accepts `int64` and `float32`, nothing else
 
 ### 2. Union Types
 - Python: Pydantic handles `Union[A, B]` with discriminated unions
@@ -443,9 +507,64 @@ end
 - Simple structs can use pattern matching + guards
 - Consider `norm` or `vex` libraries for additional validation
 
-### 4. JSON Encoding Strictness ⚠️ NEW
-- Prevent internal fields from leaking to API
-- Use `@derive {Jason.Encoder, only: [...]}` for explicit control
+### 4. JSON Encoding with Nil Stripping ⚠️ UPDATED (Round 3)
+
+**CRITICAL:** Python SDK uses `NotGiven` sentinel to distinguish:
+- Field omitted from JSON: `{}`
+- Field set to `None`: `{"param": null}`
+
+Pydantic's `StrictBase` in strict mode will **reject** `{"param": null}` when the field should be omitted, causing **422 validation errors**.
+
+**Problem:** Elixir structs default fields to `nil`. `Jason.encode!` encodes `nil` as `null`.
+
+**Solution:** Custom encoder that strips `nil` values:
+
+```elixir
+defmodule Tinkex.JSON do
+  @moduledoc """
+  JSON encoding with nil-stripping for Pydantic StrictBase compatibility.
+
+  Python SDK uses NotGiven sentinel to distinguish omitted fields from null.
+  We must strip nil values before encoding to match this behavior.
+  """
+
+  def encode!(struct) when is_struct(struct) do
+    struct
+    |> Map.from_struct()
+    |> strip_nils()
+    |> Jason.encode!()
+  end
+
+  def encode!(map) when is_map(map) do
+    map
+    |> strip_nils()
+    |> Jason.encode!()
+  end
+
+  defp strip_nils(map) when is_map(map) do
+    map
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> Enum.map(fn {k, v} -> {k, strip_nils(v)} end)
+    |> Enum.into(%{})
+  end
+
+  defp strip_nils(list) when is_list(list) do
+    Enum.map(list, &strip_nils/1)
+  end
+
+  defp strip_nils(value), do: value
+end
+```
+
+**Usage:**
+```elixir
+# In Tinkex.API.post/4
+request = Finch.build(:post, url, headers, Tinkex.JSON.encode!(body))
+
+# NOT: Jason.encode!(body) - this will cause 422 errors!
+```
+
+**Field Control:** Still use `@derive {Jason.Encoder, only: [...]}` to prevent internal fields from leaking:
   ```elixir
   defmodule Tinkex.Types.SampleRequest do
     @derive {Jason.Encoder, only: [
@@ -456,10 +575,57 @@ end
     defstruct [...]
   end
   ```
-- Ensures only specified fields are serialized to JSON
-- Matches Pydantic's `StrictBase` behavior (extra='forbid')
 
-### 5. Immutability
+### 5. Error Category Parsing ⚠️ NEW (Round 3)
+
+**CRITICAL:** Python `StrEnum.auto()` capitalizes values. Actual wire format is `"Unknown" | "Server" | "User"`, **NOT** lowercase.
+
+```elixir
+defmodule Tinkex.Types.RequestErrorCategory do
+  @moduledoc """
+  Request error category (matches Python StrEnum with auto()).
+
+  Python: class RequestErrorCategory(StrEnum): Unknown = auto()
+  Result: "Unknown" (capitalized due to StrEnum.auto() behavior)
+  """
+
+  @type t :: :unknown | :server | :user
+
+  @doc "Parse from JSON string (capitalized) to atom (lowercase)"
+  def parse("Unknown"), do: :unknown
+  def parse("Server"), do: :server
+  def parse("User"), do: :user
+  def parse(_), do: :unknown
+
+  @doc "Check if error category is retryable"
+  def retryable?(:server), do: true
+  def retryable?(:unknown), do: true
+  def retryable?(:user), do: false
+end
+```
+
+**Usage in error handling:**
+```elixir
+defmodule Tinkex.Error do
+  defstruct [:status, :message, :category, :data]
+
+  @doc "Check if error is a user error (matches Python is_user_error logic)"
+  def user_error?(%__MODULE__{status: status, category: category}) do
+    cond do
+      # RequestFailedError with category User
+      category == :user -> true
+
+      # 4xx except 408 (timeout) and 429 (rate limit)
+      status in 400..499 and status not in [408, 429] -> true
+
+      # Everything else (5xx, connection errors, etc.)
+      true -> false
+    end
+  end
+end
+```
+
+### 6. Immutability
 - Elixir structs are immutable by default (advantage!)
 - Use `Map.put/3` or struct update syntax for "mutations"
   ```elixir

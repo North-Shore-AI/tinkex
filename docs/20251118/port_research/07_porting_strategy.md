@@ -13,6 +13,12 @@
 - **RateLimiter**: Added atomics-based shared backoff state module
 - **Telemetry pool**: Added dedicated pool to prevent telemetry from starving other operations
 
+**Key Corrections (Round 3 - Critiques 300-302):**
+- **Custom loss deferred**: Explicitly moved custom loss functions to v2.0 (requires EXLA, out of v1 scope)
+- **Timeline adjusted**: v1.0 scope reduced, realistic 8-week estimate with defined scope cuts
+- **ETS table creation**: Global tables in Application.start/2 documented
+- **Error handling**: Task.start bodies wrapped in try/rescue throughout
+
 ## Technology Stack Recommendations
 
 ### Core Dependencies ⚠️ UPDATED

@@ -1,6 +1,6 @@
 # HTTP Layer and Connection Pooling
 
-**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202. See `203_claude_sonnet_response_to_critiques.md` for details.
+**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202, 300-302. See `303_claude_sonnet_response_to_critiques.md` for details.
 
 **Key Corrections (Round 1 - Critiques 100-102):**
 - **Finch pools**: Changed from single pool to multiple separated pools (training, sampling, session, futures)
@@ -10,6 +10,12 @@
 - **Pool key normalization**: Fixed URL normalization bug (port handling)
 - **Telemetry pool**: Added dedicated pool for telemetry requests
 - **Retry-After headers**: Added support for server backoff signals
+
+**Key Corrections (Round 3 - Critiques 300-302):**
+- **429 retry support**: Added 429 to retryable conditions with server-provided backoff
+- **Retry-After HTTP Date**: Added support for HTTP Date format parsing (not just integers)
+- **Pool key module**: Extracted normalization to `Tinkex.PoolKey` module (single source of truth)
+- **Config parameter**: Added config parameter to API functions (remove global Application.get_env)
 
 ## Python Implementation
 

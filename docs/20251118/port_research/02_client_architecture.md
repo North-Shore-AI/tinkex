@@ -1,6 +1,6 @@
 # Client Architecture Analysis
 
-**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202. See `203_claude_sonnet_response_to_critiques.md` for details.
+**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202, 300-302. See `303_claude_sonnet_response_to_critiques.md` for details.
 
 **Key Corrections (Round 1 - Critiques 100-102):**
 - **SamplingClient**: Changed to "thin GenServer" pattern (state only, HTTP in caller's process)
@@ -12,6 +12,13 @@
 - **RateLimiter**: Added shared backoff state using atomics for 429 coordination
 - **TrainingClient**: Fixed race condition (synchronous sends, async polling)
 - **Request sequencing**: All training operations share same seq_id counter
+
+**Key Corrections (Round 3 - Critiques 300-302):**
+- **ETS table ownership**: Fixed CRITICAL bug - global table in Application, per-client entries (named tables are singletons!)
+- **Config threading**: Removed global Application.get_env, pass config through client structs for multi-tenancy
+- **Tokenizer heuristics**: Added get_tokenizer_id with Llama-3 special case and caching
+- **Task error handling**: Added try/rescue wrappers to prevent infinite hangs
+- **Defensive ETS**: Added pattern matching for missing entries
 
 ## Overview
 
@@ -110,16 +117,23 @@ defmodule Tinkex.ServiceClient do
 
   @impl true
   def init(opts) do
-    # Initialize HTTP client pool (Finch)
-    # Create session on server
+    # ⚠️ UPDATED (Round 3): Thread config through state for multi-tenancy
+    config = %{
+      api_key: opts[:api_key] || Application.get_env(:tinkex, :api_key) || System.get_env("TINKER_API_KEY"),
+      base_url: opts[:base_url] || Application.get_env(:tinkex, :base_url),
+      http_pool: opts[:http_pool] || Tinkex.HTTP.Pool,
+      user_metadata: opts[:user_metadata] || %{}
+    }
+
+    # Create session on server (pass config)
     # Start heartbeat process
-    with {:ok, session_id} <- create_session(opts),
-         :ok <- start_heartbeat(session_id) do
+    with {:ok, session_id} <- create_session(config),
+         :ok <- start_heartbeat(session_id, config) do
       state = %{
         session_id: session_id,
         training_client_counter: 0,
         sampling_client_counter: 0,
-        http_pool: Tinkex.HTTP.Pool,
+        config: config,  # Store config for child clients
         opts: opts
       }
       {:ok, state}
@@ -512,8 +526,9 @@ defmodule Tinkex.SamplingClient do
   Returns a Task that resolves to {:ok, response} | {:error, error}.
   """
   def sample(client, prompt, num_samples, sampling_params, opts \\ []) do
-    # Direct ETS read - lock-free, concurrent
-    [{_, config}] = :ets.lookup(:tinkex_sampling_config, {:config, client})
+    # ⚠️ UPDATED (Round 3): Defensive ETS lookup with pattern matching
+    case :ets.lookup(:tinkex_sampling_clients, {:config, client}) do
+      [{_, config}] ->
 
     Task.async(fn ->
       # Wait if currently in backoff period
@@ -532,17 +547,22 @@ defmodule Tinkex.SamplingClient do
         topk_prompt_logprobs: opts[:topk_prompt_logprobs] || 0
       }
 
-      # HTTP call in THIS process
-      case Tinkex.API.Sampling.asample(request, config.http_pool, opts) do
-        {:error, %{status: 429}} = error ->
-          # Got rate limited - set backoff for ALL concurrent requests
-          Tinkex.RateLimiter.set_backoff(config.rate_limiter, 1000)
-          error
+        # HTTP call in THIS process
+        case Tinkex.API.Sampling.asample(request, config.http_pool, opts) do
+          {:error, %{status: 429}} = error ->
+            # Got rate limited - set backoff for ALL concurrent requests
+            Tinkex.RateLimiter.set_backoff(config.rate_limiter, 1000)
+            error
 
-        result ->
-          result
-      end
-    end)
+          result ->
+            result
+        end
+      end)
+
+      [] ->
+        # Client not initialized or already terminated
+        {:error, %Tinkex.Error{message: "SamplingClient not initialized"}}
+    end
   end
 
   ## Server Callbacks
@@ -552,28 +572,30 @@ defmodule Tinkex.SamplingClient do
     # Create sampling session
     {:ok, session_id} = create_sampling_session(opts)
 
-    # Create shared state in ETS (public table)
-    table = :ets.new(:tinkex_sampling_config, [:set, :public, :named_table])
+    # ⚠️ CRITICAL FIX (Round 3): Do NOT create named table here!
+    # Named tables are BEAM-wide singletons - second client will crash.
+    # Table MUST be created in Application.start/2
 
-    # Create lock-free request ID counter
+    # Create lock-free request ID counter (per-client)
     request_id_counter = :atomics.new(1, signed: false)
 
-    # Create shared rate limiter
+    # Create shared rate limiter (per-client)
     rate_limiter = Tinkex.RateLimiter.new()
 
-    # Write config to ETS (one-time)
-    :ets.insert(table, {
+    # Write THIS client's config to global ETS table
+    # Table created in Tinkex.Application.start/2
+    :ets.insert(:tinkex_sampling_clients, {
       {:config, self()},
       %{
         sampling_session_id: session_id,
-        http_pool: opts[:http_pool],
+        http_pool: opts[:http_pool] || Tinkex.HTTP.Pool,
         request_id_counter: request_id_counter,
-        rate_limiter: rate_limiter
+        rate_limiter: rate_limiter,
+        config: opts[:config]  # Store config for API calls
       }
     })
 
     state = %{
-      table: table,
       sampling_session_id: session_id
     }
 
@@ -581,9 +603,9 @@ defmodule Tinkex.SamplingClient do
   end
 
   @impl true
-  def terminate(_reason, state) do
-    # Clean up ETS table
-    :ets.delete(state.table)
+  def terminate(_reason, _state) do
+    # ⚠️ CRITICAL: Delete only THIS client's entry, NOT the table!
+    :ets.delete(:tinkex_sampling_clients, {:config, self()})
     :ok
   end
 end
@@ -649,6 +671,22 @@ defmodule Tinkex.Application do
   use Application
 
   def start(_type, _args) do
+    # ⚠️ CRITICAL (Round 3): Create global ETS tables BEFORE starting children
+    # Named tables are BEAM-wide singletons - must be created once at app start
+    :ets.new(:tinkex_sampling_clients, [
+      :set,
+      :public,
+      :named_table,
+      read_concurrency: true  # Optimize for concurrent reads
+    ])
+
+    :ets.new(:tinkex_tokenizers, [
+      :set,
+      :public,
+      :named_table,
+      read_concurrency: true  # Tokenizer cache
+    ])
+
     children = [
       # HTTP connection pool
       {Finch, name: Tinkex.HTTP.Pool, pools: pool_config()},
@@ -710,6 +748,71 @@ defmodule Tinkex.SessionManager do
   end
 end
 ```
+
+## 5. Tokenizer Module ⚠️ NEW (Round 3)
+
+**CRITICAL:** Python SDK has complex tokenizer selection logic that MUST be ported exactly, including hardcoded Llama-3 hack.
+
+```elixir
+defmodule Tinkex.Tokenizer do
+  @moduledoc """
+  Tokenizer management with HuggingFace model support and caching.
+
+  Ports Python SDK's _get_tokenizer logic including special cases.
+  """
+
+  @doc """
+  Get tokenizer ID for a model (matches Python SDK exactly).
+
+  1. Try to get from server via get_info
+  2. Hardcoded Llama-3 hack (gating workaround)
+  3. Fallback to model_name
+  """
+  def get_tokenizer_id(training_client, model_name) do
+    # Try to get from server
+    case Tinkex.TrainingClient.get_info(training_client) do
+      {:ok, %{model_data: %{tokenizer_id: id}}} when not is_nil(id) ->
+        id
+
+      _ ->
+        # Hardcoded Llama-3 hack (matches Python exactly!)
+        if String.contains?(model_name, "Llama-3") do
+          "baseten/Meta-Llama-3-tokenizer"
+        else
+          model_name  # Fallback
+        end
+    end
+  end
+
+  @doc """
+  Encode text to tokens using cached tokenizer.
+
+  Tokenizers are cached in :tinkex_tokenizers ETS table to avoid
+  re-downloading from HuggingFace Hub on every call.
+  """
+  def encode(text, model_name) do
+    tokenizer = case :ets.lookup(:tinkex_tokenizers, model_name) do
+      [{^model_name, tok}] -> tok
+      [] -> load_and_cache(model_name)
+    end
+
+    {:ok, encoding} = Tokenizers.Tokenizer.encode(tokenizer, text)
+    Tokenizers.Encoding.get_ids(encoding)
+  end
+
+  defp load_and_cache(model_name) do
+    {:ok, tokenizer} = Tokenizers.Tokenizer.from_pretrained(model_name)
+    :ets.insert(:tinkex_tokenizers, {model_name, tokenizer})
+    tokenizer
+  end
+end
+```
+
+**Why the Llama-3 hack matters:**
+- Llama-3 models have gating issues on HuggingFace
+- Without this hack, tokenizer loading fails immediately
+- Python SDK includes this workaround
+- We must match it for compatibility
 
 ## Next Steps
 

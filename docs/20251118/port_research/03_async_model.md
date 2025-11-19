@@ -1,6 +1,6 @@
 # Async Model and Futures Implementation
 
-**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202. See `203_claude_sonnet_response_to_critiques.md` for details.
+**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202, 300-302. See `303_claude_sonnet_response_to_critiques.md` for details.
 
 **Key Corrections (Round 1 - Critiques 100-102):**
 - **Training requests**: Clarified that requests are sent **sequentially** (one at a time), but polling is concurrent
@@ -10,6 +10,10 @@
 - **Race condition fixed**: GenServer must block during send phase, not spawn Task immediately
 - **Sequencing guarantee**: All training operations share same `request_id_counter`
 - **No parallel sends**: Requests sent synchronously inside `handle_call`, polling async
+
+**Key Corrections (Round 3 - Critiques 300-302):**
+- **Task error handling**: Added try/rescue wrappers to prevent infinite hangs when Task crashes
+- **API consistency**: All public client methods return Tasks (not direct GenServer.call results)
 
 ## Overview
 
@@ -316,13 +320,14 @@ end
 
 **Usage:**
 ```elixir
-# In TrainingClient
-
-def forward_backward(client, data, loss_fn, opts) do
-  GenServer.call(client, {:forward_backward, data, loss_fn, opts}, :infinity)
+# ⚠️ UPDATED (Round 3): Public API returns Task for consistency
+def forward_backward(client, data, loss_fn, opts \\ []) do
+  Task.async(fn ->
+    GenServer.call(client, {:forward_backward, data, loss_fn, opts}, :infinity)
+  end)
 end
 
-# In GenServer handle_call ⚠️ CORRECTED
+# In GenServer handle_call ⚠️ CORRECTED (Round 2 + 3)
 def handle_call({:forward_backward, data, loss_fn, _opts}, from, state) do
   # Chunk data
   chunks = chunk_data(data)
@@ -336,15 +341,29 @@ def handle_call({:forward_backward, data, loss_fn, _opts}, from, state) do
     send_forward_backward_chunk(chunk, loss_fn, req_id, state)
   end)
 
-  # NOW spawn background task for polling (non-blocking)
+  # ⚠️ CRITICAL (Round 3): Spawn background task with error handling
+  # If task crashes, GenServer.reply must still be called to prevent infinite hang
   Task.start(fn ->
-    polling_tasks = Enum.map(untyped_futures, fn future ->
-      Tinkex.Future.poll(future.request_id, state.http_pool)
-    end)
+    result = try do
+      # Poll all futures concurrently
+      polling_tasks = Enum.map(untyped_futures, fn future ->
+        Tinkex.Future.poll(future.request_id, state.http_pool)
+      end)
 
-    results = Task.await_many(polling_tasks, :infinity)
-    combined = combine_forward_backward_results(results)
-    GenServer.reply(from, {:ok, combined})
+      results = Task.await_many(polling_tasks, :infinity)
+      combined = combine_forward_backward_results(results)
+      {:ok, combined}
+    rescue
+      e ->
+        # Ensure we always reply, even on failure
+        {:error, %Tinkex.Error{
+          message: "Polling failed: #{Exception.message(e)}",
+          exception: e
+        }}
+    end
+
+    # ALWAYS reply, whether success or failure
+    GenServer.reply(from, result)
   end)
 
   new_state = %{state | request_id_counter: new_counter}
