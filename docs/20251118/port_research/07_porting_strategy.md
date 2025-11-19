@@ -1270,6 +1270,55 @@ Before shipping v1.0, you MUST verify the following against actual API behavior:
 
 **Action:** If race occurs, use application callback to block until tables ready.
 
+### 9. Tokenizer NIF Safety Verification
+
+**Why:** The `tokenizers` NIF stores opaque resources under the hood. If those resources are not safe to use from arbitrary BEAM processes, caching them in ETS would crash the VM.
+
+**Verification plan:**
+
+```elixir
+test "tokenizer resources are safe across processes" do
+  :ets.new(:tinkex_tokenizers_test, [:set, :public, :named_table])
+
+  {:ok, tok} = Tokenizers.Tokenizer.from_pretrained("gpt2")
+  :ets.insert(:tinkex_tokenizers_test, {:tokenizer, tok})
+
+  task =
+    Task.async(fn ->
+      [{:tokenizer, tok2}] = :ets.lookup(:tinkex_tokenizers_test, :tokenizer)
+      {:ok, enc} = Tokenizers.Tokenizer.encode(tok2, "hello")
+      assert is_list(Tokenizers.Encoding.get_ids(enc))
+    end)
+
+  assert {:ok, _} = Task.await(task)
+end
+```
+
+**Fallback plan if unsafe:**
+
+1. Remove ETS caching of tokenizer structs.
+2. Either:
+   * Introduce a `TokenizerServer` process that owns each tokenizer and exposes encode/decode calls, **or**
+   * Cache tokenizer configs only and reconstruct handles per-process (slower but safe).
+
+Document the chosen approach so future maintainers know the trade-off.
+
+### 10. Wire-Format Sanity Tests
+
+Run these quick checks before coding against the live API:
+
+```bash
+# RequestErrorCategory casing
+curl -s -X POST "$TINKER_BASE_URL/some/invalid/endpoint" \
+  -H "X-Tinker-Api-Key: bad-key" | jq '.category'
+
+# Retry-After variants (429 path)
+curl -i "$TINKER_BASE_URL/rate_limited_endpoint" \
+  -H "X-Tinker-Api-Key: $TINKER_API_KEY" | grep -i retry-after
+```
+
+Record the observed casing (should be "User"/"Server"/"Unknown") and note whether the service ever emits HTTP-date Retry-After headers.
+
 ---
 
 ## Pre-Implementation Checklist
@@ -1287,6 +1336,7 @@ Before writing code, verify your assumptions:
 - [ ] RequestErrorCategory casing (logged from error response)
 - [ ] Rate limit scope (confirmed `{base_url, api_key}` sharing; verify mixed keys don’t interfere)
 - [ ] x-should-retry header presence (logged from 5xx responses)
+- [ ] Retry-After formats observed (numeric vs HTTP-date) and documented fallback behavior
 - [ ] Image upload method (JSON vs multipart)
 - [ ] Chat template requirements (tested with instruct model)
 - [ ] GenServer call timeout needs (measured with large batch)

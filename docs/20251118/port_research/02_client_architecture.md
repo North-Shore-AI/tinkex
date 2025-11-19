@@ -33,7 +33,7 @@
 - **Config threading**: Updated all API examples to pass config through opts, not Application.get_env
 
 **Key Corrections (Round 7 - Concrete Bugs):**
-- **RateLimiter scope**: Clarified that backoff state is per `ServiceClient`/`InternalClientHolder`, matching Python’s `_sample_backoff_until`
+- **RateLimiter scope**: Clarified that backoff state is shared per `{base_url, api_key}` combination (staging/prod split), matching Python’s holder-level behavior
 - **GenServer.reply safety**: Added ArgumentError rescue when caller dies before reply
 - **SamplingClient retries**: Use the same retry loop + shared backoff (`execute_with_retries`) as Python instead of surfacing raw 429s
 - **Multi-tenancy pools**: Added CRITICAL limitation - Finch pools defined at app start with single base_url. Multi-base_url requires dynamic pool management (see note below).
@@ -633,6 +633,10 @@ end
 - More "OTP-idiomatic"
 
 **For v1.0:** Current blocking approach is **approved and acceptable**. Document the trade-off and proceed.
+
+> **Timing difference vs Python:** In the Python SDK, chunk submission happens inside the async `_take_turn` context so the holder can begin accepting the next request as soon as the semaphore is released. In Tinkex the GenServer processes all chunk sends synchronously before yielding, which means a large batch (many chunks) can occupy the server for a noticeable window. This does **not** break ordering semantics but it can delay subsequent `forward_backward/4` calls compared to Python’s partially-overlapped sends. The guidance is to keep chunk counts reasonable (larger examples vs many tiny ones) for v1.0.
+
+> **Future improvement (v2.0 idea):** Move the synchronous send loop into a `handle_continue/2` work queue or dedicated worker processes. That would let the GenServer acknowledge calls immediately, restore responsiveness during long send phases, and more closely mirror Python’s “async send, async poll” timing without sacrificing strict ordering.
 
 **Why This Works (avoiding race condition):**
 ```

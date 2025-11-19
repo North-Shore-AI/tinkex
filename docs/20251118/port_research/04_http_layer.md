@@ -610,7 +610,8 @@ defmodule Tinkex.API do
 
   # ⚠️ UPDATED (Round 7): Parse Retry-After headers from server
   # Supports: retry-after-ms (milliseconds), retry-after (seconds ONLY)
-  # HTTP Date format (IMF-fixdate) is NOT supported in v1.0
+  # Python also parses HTTP-date headers; v1.0 intentionally falls back to 1s.
+  # TODO(v2.0): Parse IMF-fixdate per RFC 7231 (e.g. "Fri, 31 Dec 2025 23:59:59 GMT")
   defp parse_retry_after(headers) do
     # Try retry-after-ms first (milliseconds)
     case List.keyfind(headers, "retry-after-ms", 0) do

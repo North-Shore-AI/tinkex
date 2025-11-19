@@ -562,6 +562,12 @@ defmodule Tinkex.MetricsReduction do
   @doc """
   Reduce metrics from multiple chunk results using suffix-based strategies.
 
+  **Metric naming conventions**
+  - Backend owns the metric keys; we never invent new names.
+  - Keys may be bare (`"loss"`, `"grad_norm"`) or suffixed (`"loss:mean"`, `"tokens_processed:sum"`).
+  - If both `"foo"` and `"foo:mean"` are present they are treated as distinct metrics.
+  - Unknown suffixes fall back to the `:mean` reducer (matching Python’s default).
+
   Weights are computed based on number of loss_fn_outputs per result.
   """
   @spec reduce([result()]) :: metrics()
