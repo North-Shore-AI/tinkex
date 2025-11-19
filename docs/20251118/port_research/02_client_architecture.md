@@ -32,6 +32,12 @@
 - **SamplingRegistry**: Added process monitoring to clean up ETS entries on client crash
 - **Config threading**: Updated all API examples to pass config through opts, not Application.get_env
 
+**Key Corrections (Round 7 - Concrete Bugs):**
+- **RateLimiter scope**: Changed from `for_api_key(api_key)` to `for_key({base_url, api_key})` - same key against staging/prod must not share limits
+- **GenServer.reply safety**: Added ArgumentError rescue when caller dies before reply
+- **429 responsibility split**: SamplingClient has RateLimiter for backoff, but does NOT retry. HTTP layer (TrainingClient/futures) handles retries.
+- **Multi-tenancy pools**: Added CRITICAL limitation - Finch pools defined at app start with single base_url. Multi-base_url requires dynamic pool management (see note below).
+
 ## Overview
 
 The Tinker SDK uses a hierarchical client architecture with three main client types, each backed by a shared `InternalClientHolder` for connection management.
@@ -235,13 +241,8 @@ defmodule Tinkex.ServiceClient do
 
   @impl true
   def init(opts) do
-    # ⚠️ UPDATED (Round 3): Thread config through state for multi-tenancy
-    config = %{
-      api_key: opts[:api_key] || Application.get_env(:tinkex, :api_key) || System.get_env("TINKER_API_KEY"),
-      base_url: opts[:base_url] || Application.get_env(:tinkex, :base_url),
-      http_pool: opts[:http_pool] || Tinkex.HTTP.Pool,
-      user_metadata: opts[:user_metadata] || %{}
-    }
+    # ⚠️ UPDATED (Round 7): Use Tinkex.Config.new/1 for consistency
+    config = opts[:config] || Tinkex.Config.new(opts)
 
     # Create session on server (pass config)
     # Start heartbeat process
@@ -487,7 +488,16 @@ defmodule Tinkex.TrainingClient do
       end
 
       # ALWAYS call GenServer.reply, whether success or failure
-      GenServer.reply(from, reply)
+      # ⚠️ UPDATED (Round 7): Handle case where caller died/timed out
+      try do
+        GenServer.reply(from, reply)
+      rescue
+        ArgumentError ->
+          # Caller process died before we could reply
+          # This is normal if client timed out or crashed
+          # Just log and continue (don't crash the background task)
+          :ok
+      end
     end)
 
     new_state = %{state | request_id_counter: new_counter}
@@ -616,36 +626,46 @@ async def _sample_async_impl(self, ...):
 
 **CRITICAL FIX (Round 2):** Even "thin GenServer" with `GenServer.call` creates a bottleneck at 400 concurrent requests. The solution is **ETS for lock-free reads** and **atomics for shared backoff state**.
 
-#### Step 1: RateLimiter Module (Shared Backoff State) ⚠️ CRITICAL - Per API Key
+#### Step 1: RateLimiter Module (Shared Backoff State) ⚠️ CORRECTED (Round 7)
 
-**IMPORTANT:** Rate limits are enforced **per API key**, not per client process. All clients using the same API key must share backoff state.
+**CRITICAL:** Rate limits are enforced **per {base_url, api_key}** combination. All clients using the same API key against the same server must share backoff state.
+
+**Why {base_url, api_key} not just api_key:**
+- Same API key might be used against staging AND production
+- Those are independent rate limit buckets
+- Matches Python SDK's per-ClientHolder behavior
 
 ```elixir
 defmodule Tinkex.RateLimiter do
   @moduledoc """
   Shared backoff state for rate limiting.
 
-  CRITICAL: Rate limits are per API key, so ALL clients with the
-  same API key must share ONE RateLimiter instance.
+  CRITICAL: Rate limits are per {base_url, api_key}, so ALL clients
+  with the same combination share ONE RateLimiter instance.
 
-  When ONE request gets 429, ALL requests using that API key back off.
-  Uses ETS + atomics for lock-free coordination across processes.
+  When ONE request gets 429, ALL requests to that {base_url, api_key}
+  back off. Uses ETS + atomics for lock-free coordination.
   """
 
   @doc """
-  Get or create rate limiter for an API key.
+  Get or create rate limiter for a {base_url, api_key} combination.
 
-  ⚠️ IMPORTANT: This ensures all clients with the same API key
-  share the same backoff state (required for correct 429 handling).
+  ⚠️ IMPORTANT: Keys by both base_url AND api_key to handle:
+  - Same API key against staging vs production (independent limits)
+  - Different API keys against same server (independent limits)
   """
-  def for_api_key(api_key) do
-    case :ets.lookup(:tinkex_rate_limiters, {:limiter, api_key}) do
+  def for_key({base_url, api_key}) do
+    # Normalize base_url to avoid "http://foo" vs "http://foo/" duplicates
+    normalized_url = Tinkex.PoolKey.normalize_base_url(base_url)
+    key = {:limiter, {normalized_url, api_key}}
+
+    case :ets.lookup(:tinkex_rate_limiters, key) do
       [{_, limiter}] ->
         limiter
       [] ->
         # Create new limiter
         limiter = :atomics.new(1, signed: true)
-        :ets.insert(:tinkex_rate_limiters, {{:limiter, api_key}, limiter})
+        :ets.insert(:tinkex_rate_limiters, {key, limiter})
         limiter
     end
   end
@@ -750,10 +770,10 @@ defmodule Tinkex.SamplingClient do
     # Create lock-free request ID counter (per-client)
     request_id_counter = :atomics.new(1, signed: false)
 
-    # ⚠️ CRITICAL (Round 6): Get SHARED rate limiter for this API key
-    # All clients with same API key must share backoff state!
+    # ⚠️ CRITICAL (Round 7): Get SHARED rate limiter for {base_url, api_key}
+    # All clients with same combination must share backoff state!
     config = opts[:config]
-    rate_limiter = Tinkex.RateLimiter.for_api_key(config.api_key)
+    rate_limiter = Tinkex.RateLimiter.for_key({config.base_url, config.api_key})
 
     # Write THIS client's config to global ETS table
     # Table created in Tinkex.Application.start/2
@@ -795,6 +815,64 @@ end
 - **GenServer.call approach**: 400 requests × 5μs = 2ms serialization overhead
 - **ETS approach**: 400 requests × 100ns = 40μs total overhead
 - **Speedup**: 50x faster at high concurrency
+
+### 429 Retry Responsibility ⚠️ CLARIFIED (Round 7)
+
+**CRITICAL:** The 429 handling is split between two layers:
+
+**SamplingClient (this module):**
+- ✅ Has RateLimiter for coordinated backoff
+- ✅ Sets backoff when 429 received (`retry_after_ms` from server)
+- ✅ Waits before sending if in backoff period
+- ❌ Does **NOT** retry the request itself
+- Returns `{:error, %Tinkex.Error{status: 429}}` to caller
+
+**HTTP Layer (04_http_layer.md):**
+- TrainingClient/futures: HTTP-level retries with exponential backoff
+- Retries 429s according to retry policy
+- Uses x-should-retry header
+
+**Why This Split?**
+```elixir
+# SamplingClient just handles backoff coordination:
+def sample(client, prompt, ...) do
+  Task.async(fn ->
+    Tinkex.RateLimiter.wait_for_backoff(config.rate_limiter)  # ← Wait if backing off
+
+    case Tinkex.API.Sampling.asample(request, pool, opts) do
+      {:error, %{status: 429, retry_after_ms: ms}} = error ->
+        Tinkex.RateLimiter.set_backoff(config.rate_limiter, ms)  # ← Set backoff
+        {:error, error}  # ← Return error, don't retry!
+
+      result ->
+        result
+    end
+  end)
+end
+```
+
+**User's Responsibility:**
+```elixir
+# User must retry if they want retry behavior:
+case Task.await(Tinkex.SamplingClient.sample(...)) do
+  {:error, %{status: 429}} ->
+    # Wait and retry manually
+    Process.sleep(1000)
+    retry_sample()
+
+  {:ok, response} ->
+    response
+end
+
+# OR use a retry library like Retry:
+use Retry
+
+retry with: exponential_backoff() |> randomize |> expiry(10_000) do
+  Task.await(Tinkex.SamplingClient.sample(...))
+end
+```
+
+This matches Python SDK behavior where SamplingClient also doesn't auto-retry - the retry logic is in the HTTP client layer, not SamplingClient itself.
 
 ## 4. InternalClientHolder
 
@@ -899,6 +977,73 @@ defmodule Tinkex.Application do
 end
 ```
 
+### Multi-Tenancy Pool Limitation ⚠️ CRITICAL (Round 7)
+
+**Current Implementation:**
+- Finch pools are defined **once at application start** with a **single base_url**
+- All clients must share the same base_url (typically production API)
+- Different API keys against the same base_url work fine (pools are shared, RateLimiters are separate)
+
+**What Works:**
+```elixir
+# ✅ SUPPORTED: Different API keys, same base_url
+config_a = Tinkex.Config.new(api_key: "key_a", base_url: "https://api.prod.com")
+config_b = Tinkex.Config.new(api_key: "key_b", base_url: "https://api.prod.com")
+
+{:ok, client_a} = Tinkex.ServiceClient.start_link(config: config_a)
+{:ok, client_b} = Tinkex.ServiceClient.start_link(config: config_b)
+# Both use same Finch pool, different RateLimiters
+```
+
+**What Doesn't Work (without code changes):**
+```elixir
+# ❌ NOT SUPPORTED: Different base_urls (staging + production)
+config_staging = Tinkex.Config.new(api_key: "key", base_url: "https://api.staging.com")
+config_prod = Tinkex.Config.new(api_key: "key", base_url: "https://api.prod.com")
+
+# This will fail! Finch only has pool for one base_url
+```
+
+**Why This Limitation Exists:**
+1. Finch requires pools to be defined at supervision tree start
+2. Pool keys must be known upfront (not dynamic per-request)
+3. Python SDK uses httpx with connection pooling - connections created dynamically per base_url
+
+**Two Solutions:**
+
+**Option 1: Single base_url (simplest, matches most use cases)**
+- Document that all clients must use the same base_url
+- Recommend separate VMs/releases for staging vs production environments
+- This matches typical deployment patterns anyway
+
+**Option 2: Dynamic pool management (if multi-base_url required)**
+```elixir
+# In Tinkex.HTTP module
+defp get_or_create_pool(base_url) do
+  pool_name = pool_atom_for_url(base_url)
+
+  case Process.whereis(pool_name) do
+    nil ->
+      # Start new Finch pool dynamically
+      {:ok, _} = Finch.start_link(
+        name: pool_name,
+        pools: %{
+          default: [protocol: :http2, count: 10]
+        }
+      )
+      pool_name
+    _pid ->
+      pool_name
+  end
+end
+```
+
+**Recommendation (v1.0):**
+- ✅ Support single base_url per application instance
+- ✅ Document limitation clearly
+- ⏭️ Defer dynamic pool management to v1.1+ if users request it
+- ✅ Focus on getting core functionality right first
+
 **Sampling Registry (Process Monitoring) ⚠️ NEW (Round 5):**
 
 Ensures ETS entries are cleaned up even when SamplingClient processes crash without calling `terminate/2`:
@@ -969,16 +1114,18 @@ def init(opts) do
   # Create lock-free request ID counter (per-client)
   request_id_counter = :atomics.new(1, signed: false)
 
-  # Create shared rate limiter (per-client)
-  rate_limiter = Tinkex.RateLimiter.new()
+  # ⚠️ CRITICAL (Round 7): Get SHARED rate limiter for {base_url, api_key}
+  # All clients with same combination must share backoff state!
+  client_config = opts[:config]
+  rate_limiter = Tinkex.RateLimiter.for_key({client_config.base_url, client_config.api_key})
 
   # Prepare config
   config = %{
     sampling_session_id: session_id,
     http_pool: opts[:http_pool] || Tinkex.HTTP.Pool,
     request_id_counter: request_id_counter,
-    rate_limiter: rate_limiter,
-    config: opts[:config]  # Store Tinkex.Config for API calls
+    rate_limiter: rate_limiter,  # Shared by {base_url, api_key}, not per-client!
+    config: client_config  # Store Tinkex.Config for API calls
   }
 
   # ⚠️ UPDATED (Round 5): Register with monitoring instead of direct ETS insert

@@ -103,10 +103,10 @@ class AdamParams(StrictBase):
 
 ### Sampling Requests
 
-**SampleRequest** ⚠️ CORRECTED
+**SampleRequest** ⚠️ CORRECTED (Round 7)
 ```python
-# ACTUAL Python SDK - supports multiple modes
-class SampleRequest(BaseModel):
+# ACTUAL Python SDK (verified from tinker/types/sample_request.py):
+class SampleRequest(StrictBase):
     # Mode 1: Via sampling session (created upfront)
     sampling_session_id: Optional[str] = None
     seq_id: Optional[int] = None
@@ -119,12 +119,48 @@ class SampleRequest(BaseModel):
     prompt: ModelInput
     sampling_params: SamplingParams
 
-    # Optional fields
+    # Optional fields with defaults
     num_samples: int = 1
-    prompt_logprobs: bool = False
+    prompt_logprobs: Optional[bool] = None  # ⚠️ NOT `bool = False`!
     topk_prompt_logprobs: int = 0
 
     # Validation: Must specify EITHER session OR model
+```
+
+**⚠️ CRITICAL:** `prompt_logprobs` is `Optional[bool] = None`, NOT `bool = False`.
+
+This distinction matters:
+- `None` → `{"prompt_logprobs": null}` or omitted
+- `False` → `{"prompt_logprobs": false}` explicitly
+- Python allows distinguishing "not set" from "explicitly false"
+
+**Elixir mapping:**
+```elixir
+defmodule Tinkex.Types.SampleRequest do
+  defstruct [
+    :sampling_session_id,   # nil → null
+    :seq_id,                # nil → null
+    :base_model,            # nil → null
+    :model_path,            # nil → null
+    :prompt,                # required
+    :sampling_params,       # required
+    num_samples: 1,
+    prompt_logprobs: nil,   # ⚠️ nil (NOT false) to match Python
+    topk_prompt_logprobs: 0
+  ]
+
+  @type t :: %__MODULE__{
+    sampling_session_id: String.t() | nil,
+    seq_id: integer() | nil,
+    base_model: String.t() | nil,
+    model_path: String.t() | nil,
+    prompt: ModelInput.t(),
+    sampling_params: SamplingParams.t(),
+    num_samples: pos_integer(),
+    prompt_logprobs: boolean() | nil,  # Tri-state: nil | true | false
+    topk_prompt_logprobs: non_neg_integer()
+  }
+end
 ```
 
 **SamplingParams**
@@ -227,27 +263,88 @@ class EncodedTextChunk(BaseModel):
     def length(self) -> int:
         return len(self.tokens)
 
-class ImageChunk(BaseModel):
-    """Image data encoded as base64 in JSON (NOT multipart)"""
-    image_data: str  # base64-encoded image
-    image_format: str  # "png", "jpeg", etc.
+class ImageChunk(StrictBase):
+    """Image data with base64 encoding in JSON"""
+    data: bytes  # base64-encoded via Pydantic serializer
+    format: Literal["png", "jpeg"]
+    height: int
+    width: int
+    tokens: int  # Context length consumed
+    type: Literal["image"] = "image"
 
-class ImageAssetPointerChunk(BaseModel):
+class ImageAssetPointerChunk(StrictBase):
     """Reference to pre-uploaded image asset"""
-    asset_id: str
+    location: str  # Asset identifier/URL
+    format: Literal["png", "jpeg"]
+    height: int
+    width: int
+    tokens: int  # Context length consumed
+    type: Literal["image_asset_pointer"] = "image_asset_pointer"
 ```
+
+**⚠️ CRITICAL CORRECTION (Round 7):**
+
+Previous docs showed WRONG field names (`image_data`, `image_format`, `asset_id`). **Actual Python SDK fields are:**
+- `data` (NOT `image_data`) - bytes serialized as base64 string
+- `format` (NOT `image_format`) - "png" | "jpeg"
+- `location` (NOT `asset_id`) - for ImageAssetPointerChunk
+- Required dimension fields: `height`, `width`, `tokens`
+- Type discriminator: `type` field
 
 **v1.0 Scope Clarification - Image Handling:**
 
-The Python SDK's `_files.py` supports sophisticated `multipart/form-data` uploads, but the **public Tinker API** uses JSON-based image types:
-- `ImageChunk`: Base64-encoded image data in JSON
-- `ImageAssetPointerChunk`: Reference to pre-uploaded asset
+The Python SDK's `_files.py` supports sophisticated `multipart/form-data` uploads, but the **public Tinker API** uses JSON-based image types with these exact field names.
 
 **Elixir v1.0 Support:**
-- ✅ JSON-based image types (`ImageChunk`, `ImageAssetPointerChunk`)
+- ✅ JSON-based image types with CORRECT field names (`data`, `format`, `location`, `height`, `width`, `tokens`, `type`)
 - ❌ Raw multipart file uploads (deferred to v2.0 unless API requires it)
 
-If future endpoints expose true "file upload" functionality, we'll mirror Python's `_files.py` behavior with `multipart/form-data` via Finch.
+**Elixir Implementation:**
+```elixir
+defmodule Tinkex.Types.ImageChunk do
+  @derive Jason.Encoder
+  defstruct [:data, :format, :height, :width, :tokens, :type]
+
+  @type t :: %__MODULE__{
+    data: String.t(),  # base64-encoded string
+    format: :png | :jpeg,
+    height: pos_integer(),
+    width: pos_integer(),
+    tokens: non_neg_integer(),
+    type: :image
+  }
+
+  def new(image_binary, format, height, width, tokens) do
+    %__MODULE__{
+      data: Base.encode64(image_binary),
+      format: format,
+      height: height,
+      width: width,
+      tokens: tokens,
+      type: :image
+    }
+  end
+end
+
+defmodule Tinkex.Types.ImageAssetPointerChunk do
+  @derive Jason.Encoder
+  defstruct [:location, :format, :height, :width, :tokens, :type]
+
+  @type t :: %__MODULE__{
+    location: String.t(),
+    format: :png | :jpeg,
+    height: pos_integer(),
+    width: pos_integer(),
+    tokens: non_neg_integer(),
+    type: :image_asset_pointer
+  }
+end
+```
+
+**Why This Matters:**
+- Using wrong field names (`image_data` instead of `data`) will generate JSON the API rejects
+- Missing required fields (`height`, `width`, `tokens`, `type`) will cause validation errors
+- This is a **breaking correctness bug** if implemented as originally documented
 
 **TensorData** (Numerical Arrays) ⚠️ CORRECTED
 ```python

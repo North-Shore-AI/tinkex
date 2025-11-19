@@ -34,6 +34,11 @@
 - ✅ Retry-After parsing (retry-after-ms, retry-after seconds, HTTP Date) confirmed (line 551-574)
 - ✅ 429 handling integrated into retry loop with server backoff (line 526-533)
 
+**Key Corrections (Round 7 - Concrete Bugs):**
+- **HTTP Date parsing removed**: Retry-After HTTP Date (IMF-fixdate) NOT implemented - only numeric delays supported (retry-after-ms, retry-after seconds)
+- **Multi-tenancy pool limitation**: Added reference to 02_client_architecture.md section documenting single base_url constraint
+- **Retry responsibility clarified**: Added reference to SamplingClient's no-retry behavior (backoff only)
+
 ## Python Implementation
 
 ### HTTP Client: httpx
@@ -246,6 +251,16 @@ Finch is the recommended HTTP/2 client for Elixir:
 - Prevents sampling burst traffic from starving session heartbeats
 - Different concurrency needs (training: 1-5, sampling: 100+, session: 5)
 - Matches Python SDK's intentional separation
+
+**⚠️ IMPORTANT (Round 7): Multi-Tenancy Pool Limitation**
+
+See **02_client_architecture.md § "Multi-Tenancy Pool Limitation"** for critical constraints:
+- Finch pools are defined **once at app start** with a **single base_url**
+- All clients must share the same base_url (typically production API)
+- Different API keys against the same base_url ✅ SUPPORTED
+- Different base_urls (staging + production) ❌ NOT SUPPORTED (without dynamic pool management)
+
+**Recommendation:** Use separate application instances for staging vs production, or implement dynamic pool management in v1.1+.
 
 ```elixir
 defmodule Tinkex.Application do
@@ -517,6 +532,20 @@ defmodule Tinkex.API do
 
   ## Retry logic ⚠️ UPDATED (Round 5) - Added x-should-retry and 429 support
 
+  # ⚠️ CRITICAL (Round 7): Retry responsibility split
+  # See 02_client_architecture.md § "429 Retry Responsibility" for details:
+  #
+  # - THIS MODULE (HTTP layer): Retries for TrainingClient, futures, session operations
+  #   * Retries 5xx, 408, 429, connection errors with exponential backoff
+  #   * Honors x-should-retry header from server
+  #   * Used by: TrainingClient.forward_backward, Future.poll, etc.
+  #
+  # - SamplingClient: Does NOT use this retry logic!
+  #   * Has RateLimiter for coordinated backoff across clients
+  #   * Returns {:error, %{status: 429}} immediately (no retry)
+  #   * User must implement retry if desired
+  #   * Sets max_retries: 0 to bypass this function
+
   defp with_retries(fun, max_retries, attempt \\ 0) do
     case fun.() do
       {:ok, %Finch.Response{headers: headers} = response} = success ->
@@ -581,8 +610,9 @@ defmodule Tinkex.API do
     |> round()
   end
 
-  # ⚠️ UPDATED (Round 4): Parse Retry-After headers from server
-  # Supports: retry-after-ms (milliseconds), retry-after (seconds or HTTP Date)
+  # ⚠️ UPDATED (Round 7): Parse Retry-After headers from server
+  # Supports: retry-after-ms (milliseconds), retry-after (seconds ONLY)
+  # HTTP Date format (IMF-fixdate) is NOT supported in v1.0
   defp parse_retry_after(headers) do
     # Try retry-after-ms first (milliseconds)
     case List.keyfind(headers, "retry-after-ms", 0) do
@@ -590,7 +620,7 @@ defmodule Tinkex.API do
         String.to_integer(ms_str)
 
       nil ->
-        # Fall back to retry-after (seconds or HTTP Date)
+        # Fall back to retry-after (seconds as integer)
         case List.keyfind(headers, "retry-after", 0) do
           {_, value} ->
             case Integer.parse(value) do
@@ -599,31 +629,18 @@ defmodule Tinkex.API do
                 seconds * 1000
 
               :error ->
-                # retry-after: Fri, 31 Dec 2025 23:59:59 GMT  (HTTP Date)
-                parse_http_date_delay(value)
+                # ⚠️ CRITICAL (Round 7): HTTP Date format NOT supported!
+                # retry-after: Fri, 31 Dec 2025 23:59:59 GMT
+                # This requires IMF-fixdate parsing (RFC 7231), not RFC3339
+                # For v1.0, we just default to 1 second
+                # TODO v2.0: Implement proper HTTP-date parsing or use library
+                1000
             end
 
           nil ->
             1000  # Default 1 second
         end
     end
-  end
-
-  defp parse_http_date_delay(date_string) do
-    # Parse HTTP Date and calculate delay from now
-    # Format: "Fri, 31 Dec 2025 23:59:59 GMT"
-    # Using Calendar for HTTP date parsing is recommended
-    case :calendar.rfc3339_to_system_time(date_string, [{:unit, :millisecond}]) do
-      {:ok, target_time} ->
-        now = System.system_time(:millisecond)
-        max(target_time - now, 1000)  # At least 1 second
-
-      {:error, _} ->
-        # Failed to parse, default to 1 second
-        1000
-    end
-  rescue
-    _ -> 1000  # Fallback on any parsing error
   end
 end
 ```

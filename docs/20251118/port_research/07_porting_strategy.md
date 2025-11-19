@@ -38,6 +38,16 @@
 - **Tokenizer scope**: Documented raw tokenization only, no chat templates in v1.0
 - **Concrete next steps**: Added prioritized action items for immediate implementation
 
+**Key Corrections (Round 7 - Concrete Bugs Fixed):**
+- **Type field names**: Fixed ImageChunk (`data` not `image_data`), ImageAssetPointerChunk (`location` not `asset_id`)
+- **Optional semantics**: Fixed SampleRequest.prompt_logprobs to `Optional[bool] = None` (NOT `bool = False`)
+- **RateLimiter scope**: Changed to `for_key({base_url, api_key})` - same key against staging/prod must not share limits
+- **HTTP date parsing**: Removed incorrect implementation - only numeric Retry-After delays supported in v1.0
+- **Multi-tenancy pools**: Documented single base_url limitation with Finch pool architecture
+- **Retry responsibility**: Clarified SamplingClient (backoff only, no retry) vs HTTP layer (retries with exponential backoff)
+- **GenServer.reply safety**: Added ArgumentError rescue when caller dies before reply
+- **Type verification checklist**: Added comprehensive pre-implementation verification steps
+
 ## Technology Stack Recommendations
 
 ### Core Dependencies ⚠️ UPDATED
@@ -1043,6 +1053,114 @@ With these changes, the v1.0 scope remains **8 weeks** (minimal creep):
 
 ---
 
+## Critical Type Verification (Round 7)
+
+**⚠️ CRITICAL:** The following type mismatches were found during documentation review and MUST be verified against Python SDK source before implementation:
+
+### 1. ImageChunk Field Names ✅ FIXED
+
+**Correct fields (from Python SDK):**
+```python
+# Python: tinker/types.py
+@dataclass
+class ImageChunk:
+    data: str         # base64-encoded image (NOT image_data!)
+    format: Literal["png", "jpeg"]
+    height: int
+    width: int
+    tokens: int
+    type: Literal["image"] = "image"
+```
+
+**Elixir must match exactly:**
+```elixir
+defmodule Tinkex.Types.ImageChunk do
+  defstruct [:data, :format, :height, :width, :tokens, :type]
+  # NOT [:image_data, :image_format, :asset_id] ❌
+end
+```
+
+**Verification:**
+- [ ] Grep Python SDK for `class ImageChunk` definition
+- [ ] Confirm field names: `data`, `format`, `height`, `width`, `tokens`, `type`
+- [ ] Verify JSON encoding sends `{"data": "base64...", "format": "png", ...}`
+
+---
+
+### 2. ImageAssetPointerChunk Field Names ✅ FIXED
+
+**Correct fields (from Python SDK):**
+```python
+@dataclass
+class ImageAssetPointerChunk:
+    location: str     # Asset URL or path (NOT asset_id!)
+    format: Literal["png", "jpeg"]
+    height: int
+    width: int
+    tokens: int
+    type: Literal["image_asset_pointer"] = "image_asset_pointer"
+```
+
+**Verification:**
+- [ ] Confirm field is `location`, not `asset_id` or `url`
+- [ ] Verify all required fields (format, height, width, tokens, type)
+
+---
+
+### 3. SampleRequest.prompt_logprobs Type ✅ FIXED
+
+**Correct type (from Python SDK):**
+```python
+@dataclass
+class SampleRequest:
+    # ...
+    prompt_logprobs: Optional[bool] = None  # Tri-state: None | True | False
+    # NOT: bool = False ❌
+```
+
+**Why this matters:**
+- `None` (null) = "don't compute prompt logprobs"
+- `False` = "explicitly disable" (semantic difference!)
+- Using `bool = False` loses the distinction between "not set" and "explicitly false"
+
+**Elixir must preserve tri-state:**
+```elixir
+defmodule Tinkex.Types.SampleRequest do
+  defstruct [
+    # ...
+    prompt_logprobs: nil,  # nil | true | false
+    # ...
+  ]
+
+  @type t :: %__MODULE__{
+    # ...
+    prompt_logprobs: boolean() | nil,
+    # ...
+  }
+end
+```
+
+**Verification:**
+- [ ] Confirm Python default is `None`, not `False`
+- [ ] Test API with `{"prompt_logprobs": null}` vs `{"prompt_logprobs": false}`
+- [ ] Verify behavior difference (if any)
+
+---
+
+### 4. All Other Optional Fields
+
+**Pattern to verify:**
+For EVERY field marked `Optional[T] = None` in Python, Elixir should use `field: nil` as default (NOT a default value like `false`, `0`, `""`, etc.).
+
+**Quick verification script:**
+```bash
+# In Python SDK repo
+grep -r "Optional\[" tinker/types.py | grep "= None"
+# Verify each one has `nil` default in Elixir, not false/0/""
+```
+
+---
+
 ## Critical Verification Steps (Round 6)
 
 Before shipping v1.0, you MUST verify the following against actual API behavior:
@@ -1148,14 +1266,27 @@ Before shipping v1.0, you MUST verify the following against actual API behavior:
 
 Before writing code, verify your assumptions:
 
+**Type System (Round 7 - CRITICAL):**
+- [ ] ImageChunk fields: `data`, `format`, `height`, `width`, `tokens`, `type` (NOT `image_data`, `image_format`)
+- [ ] ImageAssetPointerChunk: uses `location` (NOT `asset_id`)
+- [ ] SampleRequest.prompt_logprobs: `Optional[bool] = None` (NOT `bool = False`)
+- [ ] All Optional fields: default to `nil`, not false/0/""
+
+**API Behavior (Round 6):**
 - [ ] API key format (logged from successful auth)
 - [ ] RequestErrorCategory casing (logged from error response)
-- [ ] Rate limit scope (tested with multiple keys)
+- [ ] Rate limit scope (tested with multiple keys - confirmed per {base_url, api_key})
 - [ ] x-should-retry header presence (logged from 5xx responses)
 - [ ] Image upload method (JSON vs multipart)
 - [ ] Chat template requirements (tested with instruct model)
 - [ ] GenServer call timeout needs (measured with large batch)
 - [ ] ETS initialization order (tested in clean environment)
+
+**Architectural (Round 7):**
+- [ ] Multi-tenancy base_url limitation documented (single base_url per app instance)
+- [ ] RateLimiter keyed by {base_url, api_key} (NOT just api_key)
+- [ ] GenServer.reply handles ArgumentError when caller dies
+- [ ] 429 retry responsibility split: SamplingClient (backoff only), HTTP layer (retries)
 
 ---
 
