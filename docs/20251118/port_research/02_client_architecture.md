@@ -114,6 +114,8 @@ defmodule Tinkex.Config do
 end
 ```
 
+> ⚠️ **Finch Limitation (v1.0):** Although `Tinkex.Config` allows overriding `base_url`, the underlying Finch pools are instantiated once during application startup for a single normalized base URL. All configs used within the same BEAM instance must therefore share that base URL until dynamic pool management (Option 2 in the multi-tenancy notes) lands.
+
 ### Usage Pattern
 
 **Multi-tenant SaaS example:**
@@ -869,30 +871,25 @@ defmodule Tinkex.SamplingClient do
     config = opts[:config]
     rate_limiter = Tinkex.RateLimiter.for_holder(self())
 
-    # Write THIS client's config to global ETS table
-    # Table created in Tinkex.Application.start/2
-    :ets.insert(:tinkex_sampling_clients, {
-      {:config, self()},
-      %{
-        sampling_session_id: session_id,
-        http_pool: opts[:http_pool] || Tinkex.HTTP.Pool,
-        request_id_counter: request_id_counter,
-        rate_limiter: rate_limiter,  # Holder-local (matches Python semantics)
-        config: config  # Store Tinkex.Config for API calls
-      }
-    })
-
-    state = %{
-      sampling_session_id: session_id
+    config_entry = %{
+      sampling_session_id: session_id,
+      http_pool: opts[:http_pool] || Tinkex.HTTP.Pool,
+      request_id_counter: request_id_counter,
+      rate_limiter: rate_limiter,
+      config: config
     }
+
+    # ⚠️ UPDATED (Round 5): Use Registry so crashes still clean up ETS entry
+    :ok = Tinkex.SamplingRegistry.register(self(), config_entry)
+
+    state = %{sampling_session_id: session_id}
 
     {:ok, state}
   end
 
   @impl true
   def terminate(_reason, _state) do
-    # ⚠️ CRITICAL: Delete only THIS client's entry, NOT the table!
-    :ets.delete(:tinkex_sampling_clients, {:config, self()})
+    # Registry handles cleanup via monitor callbacks
     :ok
   end
 end

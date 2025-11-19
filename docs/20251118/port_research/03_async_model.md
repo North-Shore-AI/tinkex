@@ -290,7 +290,7 @@ defmodule Tinkex.Future do
       # ⚠️ CRITICAL (Round 9): Handle TryAgainResponse with queue_state
       # Python SDK responds to queue-level signals (paused_rate_limit, paused_capacity)
       # before hard 429s occur. We must respect these to avoid unnecessary load.
-      {:ok, %{status: "try_again", queue_state: queue_state}} ->
+      {:ok, %{type: "try_again", queue_state: queue_state}} ->
         # Notify observers (for logging/monitoring)
         notify_queue_state_change(queue_state)
 
@@ -360,7 +360,7 @@ end
 **Critical Addition:** The Python SDK includes a `QueueState` enum and `TryAgainResponse` mechanism that signals queue-level backpressure *before* hard 429 rate limits occur.
 
 **Why This Matters:**
-- Server sends `TryAgainResponse` with `queue_state` when worker queue is paused
+- Server sends `TryAgainResponse` objects (`type: "try_again"`, `queue_state: ...`) when worker queues are paused
 - Clients should respect these signals to avoid unnecessary load
 - Enables graceful degradation before hitting hard rate limits
 
@@ -384,10 +384,10 @@ end
 # In types/try_again_response.ex
 defmodule Tinkex.Types.TryAgainResponse do
   @derive Jason.Encoder
-  defstruct [:status, :queue_state, :retry_after_ms]
+  defstruct [:type, :queue_state, :retry_after_ms]
 
   @type t :: %__MODULE__{
-    status: String.t(),           # "try_again"
+    type: String.t(),             # "try_again"
     queue_state: String.t(),      # "active" | "paused_rate_limit" | "paused_capacity"
     retry_after_ms: integer() | nil
   }
@@ -565,28 +565,47 @@ defmodule Tinkex.MetricsReduction do
   Weights are computed based on number of loss_fn_outputs per result.
   """
   @spec reduce([result()]) :: metrics()
+  def reduce([]), do: %{}
+
   def reduce(results) do
-    # 1. Compute weights based on number of loss_fn_outputs
     weights = Enum.map(results, fn r -> length(r.loss_fn_outputs) end)
     total_weight = Enum.sum(weights)
+    # Matches Python: only metrics present in first chunk are considered
+    first_result_metrics = results |> hd() |> Map.get(:metrics, %{})
+    keys = Map.keys(first_result_metrics)
 
-    # 2. Collect all unique metric keys across results
-    keys =
-      results
-      |> Enum.flat_map(fn r -> Map.keys(r.metrics) end)
-      |> Enum.uniq()
+    Enum.reduce(keys, %{}, fn key, acc ->
+      if Enum.all?(results, fn r -> Map.has_key?(r.metrics, key) end) do
+        suffix =
+          key
+          |> String.split(":")
+          |> List.last()
 
-    # 3. Reduce each metric using suffix-based strategy
-    Enum.into(keys, %{}, fn key ->
-      values = Enum.map(results, &Map.get(&1.metrics, key, 0.0))
+        values = Enum.map(results, fn r -> Map.fetch!(r.metrics, key) end)
 
-      reducer =
-        key
-        |> String.split(":")
-        |> List.last()
-        |> reduction_fun()
+        case suffix do
+          "mean" ->
+            Map.put(acc, key, reduce_mean(values, weights, total_weight))
 
-      {key, reducer.(values, weights, total_weight)}
+          "slack" ->
+            Map.put(acc, key, reduce_slack(values, weights, total_weight))
+
+          "unique" ->
+            [first | rest] = values
+            Enum.reduce(Enum.with_index(rest, 2), Map.put(acc, key, first), fn {value, idx}, acc2 ->
+              Map.put(acc2, "#{key}_#{idx}", value)
+            end)
+
+          "hash_unordered" ->
+            Map.put(acc, key, reduce_hash_unordered(values))
+
+          _ ->
+            reducer = reduction_fun(suffix)
+            Map.put(acc, key, reducer.(values, weights, total_weight))
+        end
+      else
+        acc
+      end
     end)
   end
 
@@ -596,7 +615,7 @@ defmodule Tinkex.MetricsReduction do
   defp reduction_fun("max"), do: &reduce_max/3
   defp reduction_fun("mean"), do: &reduce_mean/3
   defp reduction_fun("slack"), do: &reduce_slack/3
-  defp reduction_fun("unique"), do: &reduce_unique/3
+  defp reduction_fun("hash_unordered"), do: &reduce_hash_unordered_dispatch/3
 
   # Default: weighted mean (matches Python's fallback behavior)
   defp reduction_fun(_), do: &reduce_mean/3
@@ -640,12 +659,21 @@ defmodule Tinkex.MetricsReduction do
     max_val - mean_val
   end
 
-  # Unique reduction (identity-ish behavior for unique values)
-  # For v1.0, return first value. Python expands key space; we simplify.
-  defp reduce_unique(values, _weights, _total_weight) do
-    List.first(values) || 0.0
+  defp reduce_hash_unordered(values) do
+    values
+    |> Enum.sort()
+    |> :erlang.phash2()
+  end
+
+  # Helper so reduction_fun/1 can reuse reduce_hash_unordered/1 signature
+  defp reduce_hash_unordered_dispatch(values, _weights, _total_weight) do
+    reduce_hash_unordered(values)
   end
 end
+
+# Note: For `:unique` metrics we mirror Python's hack—first value stays under the original
+# key and subsequent values are emitted as `key_2`, `key_3`, etc., preserving every actor's
+# value instead of collapsing them.
 
 defp combine_forward_backward_results(results) do
   # Flatten outputs

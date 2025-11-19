@@ -392,7 +392,7 @@ TensorDtype: TypeAlias = Literal["int64", "float32"]
 # float64 and int32 are NOT supported by the backend
 ```
 
-**RequestErrorCategory** ⚠️ REQUIRES RUNTIME VERIFICATION
+**RequestErrorCategory**
 
 ```python
 # Python SDK source code:
@@ -401,27 +401,19 @@ class RequestErrorCategory(StrEnum):
     Server = auto()
     User = auto()
 
-# ⚠️ IMPORTANT: The actual wire format depends on StrEnum implementation!
-# - Standard library StrEnum: auto() → name.lower() → "unknown", "server", "user"
-# - Custom StrEnum or override: Could be "Unknown", "Server", "User" (capitalized)
+# StrEnum.auto() preserves the member name, so the wire format is
+# deterministically "Unknown" | "Server" | "User".
 ```
 
-**CRITICAL - Implementation Verification Step:**
-
-Before implementing the Elixir parser, you MUST:
-1. Log a real `RequestFailedResponse` from the API
-2. Inspect the actual `category` value returned by the server
-3. Verify whether it's `"user"`, `"User"`, or something else
-
-**Defensive Elixir Parser (handles both cases):**
+**Defensive Elixir Parser (handles canonical + lowercase just in case):**
 
 ```python
 defmodule Tinkex.Types.RequestErrorCategory do
   @moduledoc """
   Request error category parser.
 
-  ⚠️ VERIFY WIRE FORMAT: The actual casing from server may vary.
-  This parser handles both lowercase and capitalized variants.
+  Canonical values are \"Unknown\", \"Server\", \"User\" (matches StrEnum auto()).
+  The parser also accepts lowercase variants for safety.
   """
 
   @type t :: :unknown | :server | :user
@@ -735,13 +727,13 @@ defmodule Tinkex.Types.SampleRequest do
     :prompt,                # required
     :sampling_params,       # required
     num_samples: 1,         # has default
-    prompt_logprobs: false, # has default
+    prompt_logprobs: nil,   # tri-state: nil | true | false
     topk_prompt_logprobs: 0 # has default
   ]
 end
 
 # Encoding
-body = Jason.encode!(request)  # nil fields → "null" in JSON
+body = Jason.encode!(request)  # nil fields → "null" in JSON (matches Python's Optional defaults)
 ```
 
 **Approach 2: Field-level omission (if needed later)**

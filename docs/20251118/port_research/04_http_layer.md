@@ -13,7 +13,7 @@
 
 **Key Corrections (Round 3 - Critiques 300-302):**
 - **429 retry support**: Added 429 to retryable conditions with server-provided backoff
-- **Retry-After HTTP Date**: Added support for HTTP Date format parsing (not just integers)
+- **Retry-After HTTP Date**: Documented requirement (implementation deferred to v1.1; see Round 7 note)
 - **Pool key module**: Extracted normalization to `Tinkex.PoolKey` module (single source of truth)
 - **Config parameter**: Added config parameter to API functions (remove global Application.get_env)
 
@@ -21,7 +21,7 @@
 - **429 end-to-end**: Wire parsed `retry_after_ms` from errors to RateLimiter (not hard-coded 1000ms)
 - **Centralized PoolKey**: Actually implement `Tinkex.PoolKey` module (remove duplicate normalize functions)
 - **Config threading**: Remove ALL `Application.get_env` usage from API layer, pass config through clients
-- **Retry-After parsing**: Support both millisecond headers and HTTP Date format
+- **Retry-After parsing**: Support `retry-after-ms` + numeric seconds (HTTP Date still TODO; see Round 7)
 
 **Key Corrections (Round 5 - Final):**
 - **Streaming marked non-production**: Added explicit warnings that streaming example is illustrative only (memory/framing issues)
@@ -31,13 +31,13 @@
 
 **Round 6 Verification:**
 - ✅ x-should-retry header support confirmed (line 518-529) - matches Python SDK `_base_client._should_retry`
-- ✅ Retry-After parsing (retry-after-ms, retry-after seconds, HTTP Date) confirmed (line 551-574)
+- ✅ Retry-After parsing (retry-after-ms + numeric seconds) confirmed (line 551-574). HTTP-date parsing remains open (see Round 7)
 - ✅ 429 handling integrated into retry loop with server backoff (line 526-533)
 
 **Key Corrections (Round 7 - Concrete Bugs):**
-- **HTTP Date parsing removed**: Retry-After HTTP Date (IMF-fixdate) NOT implemented - only numeric delays supported (retry-after-ms, retry-after seconds)
+- **HTTP Date parsing deferred**: Retry-After HTTP Date (IMF-fixdate) still pending; v1.0 only honors numeric headers (retry-after-ms / retry-after seconds)
 - **Multi-tenancy pool limitation**: Added reference to 02_client_architecture.md section documenting single base_url constraint
-- **Retry responsibility clarified**: Added reference to SamplingClient's no-retry behavior (backoff only)
+- **Retry responsibility clarified**: SamplingClient now uses holder-local RateLimiter + execute_with_retries; HTTP layer continues to cover Training/Futures
 
 ## Python Implementation
 
