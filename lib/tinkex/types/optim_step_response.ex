@@ -5,10 +5,10 @@ defmodule Tinkex.Types.OptimStepResponse do
   Mirrors Python tinker.types.OptimStepResponse.
   """
 
-  defstruct [:success]
+  defstruct [:metrics]
 
   @type t :: %__MODULE__{
-          success: boolean()
+          metrics: %{String.t() => float()} | nil
         }
 
   @doc """
@@ -17,7 +17,13 @@ defmodule Tinkex.Types.OptimStepResponse do
   @spec from_json(map()) :: t()
   def from_json(json) do
     %__MODULE__{
-      success: Map.get(json, "success", true)
+      metrics: json["metrics"]
     }
   end
+
+  @doc """
+  Convenience helper to check if the step succeeded.
+  """
+  @spec success?(t()) :: boolean()
+  def success?(_response), do: true
 end

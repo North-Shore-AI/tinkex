@@ -5,12 +5,13 @@ defmodule Tinkex.Types.LoadWeightsRequest do
   Mirrors Python tinker.types.LoadWeightsRequest.
   """
 
-  @derive {Jason.Encoder, only: [:model_id, :checkpoint_name, :seq_id]}
-  defstruct [:model_id, :checkpoint_name, :seq_id]
+  @derive {Jason.Encoder, only: [:model_id, :path, :seq_id, :type]}
+  defstruct [:model_id, :path, :seq_id, type: "load_weights"]
 
   @type t :: %__MODULE__{
           model_id: String.t(),
-          checkpoint_name: String.t(),
-          seq_id: integer() | nil
+          path: String.t(),
+          seq_id: integer() | nil,
+          type: String.t()
         }
 end

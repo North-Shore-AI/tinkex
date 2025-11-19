@@ -5,10 +5,13 @@ defmodule Tinkex.Types.CreateSessionRequest do
   Mirrors Python tinker.types.CreateSessionRequest.
   """
 
-  @derive {Jason.Encoder, only: [:user_metadata]}
-  defstruct [:user_metadata]
+  @derive {Jason.Encoder, only: [:tags, :user_metadata, :sdk_version, :type]}
+  defstruct [:tags, :user_metadata, :sdk_version, type: "create_session"]
 
   @type t :: %__MODULE__{
-          user_metadata: map() | nil
+          tags: [String.t()],
+          user_metadata: map() | nil,
+          sdk_version: String.t(),
+          type: String.t()
         }
 end

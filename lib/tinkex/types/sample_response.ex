@@ -9,10 +9,11 @@ defmodule Tinkex.Types.SampleResponse do
 
   defstruct [:sequences, :prompt_logprobs, :topk_prompt_logprobs, type: "sample"]
 
+  @type topk_entry :: {integer(), float()}
   @type t :: %__MODULE__{
           sequences: [SampledSequence.t()],
           prompt_logprobs: [float() | nil] | nil,
-          topk_prompt_logprobs: map() | nil,
+          topk_prompt_logprobs: [[topk_entry()] | nil] | nil,
           type: String.t()
         }
 
