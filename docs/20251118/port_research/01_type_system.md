@@ -1,12 +1,20 @@
 # Type System Analysis
 
-**⚠️ UPDATED:** This document has been corrected based on critiques 100, 101, 102. See `103_claude_sonnet_response_to_critiques.md` for details.
+**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202. See `203_claude_sonnet_response_to_critiques.md` for details.
 
-**Key Corrections:**
+**Key Corrections (Round 1 - Critiques 100-102):**
 - `AdamParams`: Fixed defaults (beta2: 0.95, eps: 1e-12, learning_rate has default)
 - `TensorDtype`: Only 2 types supported (int64, float32)
 - `StopReason`: Corrected values ("length", "stop")
 - Validation: Using pure functions instead of Ecto for lighter dependencies
+
+**Key Corrections (Round 2 - Critiques 200-202):**
+- `ForwardBackwardOutput`: No `loss` field (use `metrics["loss"]`)
+- `LossFnType`: Added "importance_sampling", "ppo" values
+- `SampleRequest`: Corrected required/optional fields (supports multiple modes)
+- `TensorData`: Handle nil shape gracefully
+- `Datum`: Added plain list conversion support
+- `RequestErrorCategory`: Updated to "unknown", "server", "user"
 
 ## Python Type Infrastructure
 
@@ -78,16 +86,28 @@ class AdamParams(StrictBase):
 
 ### Sampling Requests
 
-**SampleRequest**
+**SampleRequest** ⚠️ CORRECTED
 ```python
+# ACTUAL Python SDK - supports multiple modes
 class SampleRequest(BaseModel):
-    sampling_session_id: str
-    seq_id: int
-    num_samples: int
+    # Mode 1: Via sampling session (created upfront)
+    sampling_session_id: Optional[str] = None
+    seq_id: Optional[int] = None
+
+    # Mode 2: Direct model specification (stateless)
+    base_model: Optional[str] = None
+    model_path: Optional[str] = None
+
+    # Required fields
     prompt: ModelInput
     sampling_params: SamplingParams
+
+    # Optional fields
+    num_samples: int = 1
     prompt_logprobs: bool = False
     topk_prompt_logprobs: int = 0
+
+    # Validation: Must specify EITHER session OR model
 ```
 
 **SamplingParams**
@@ -127,12 +147,14 @@ class LoraConfig(BaseModel):
 
 Response types represent data received from the API:
 
-**ForwardBackwardOutput**
+**ForwardBackwardOutput** ⚠️ CORRECTED
 ```python
+# ACTUAL Python SDK (verified from source):
 class ForwardBackwardOutput(BaseModel):
-    loss: float
-    loss_fn_outputs: List[Dict[str, Any]]  # Per-example outputs
+    loss_fn_output_type: str  # e.g., "cross_entropy_output"
+    loss_fn_outputs: List[LossFnOutput]  # Per-example outputs (typed)
     metrics: Dict[str, float]  # Aggregated metrics
+    # NOTE: No 'loss' field! Loss is in metrics["loss"]
 ```
 
 **SampleResponse**
@@ -189,33 +211,35 @@ class EncodedTextChunk(BaseModel):
         return len(self.tokens)
 ```
 
-**TensorData** (Numerical Arrays)
+**TensorData** (Numerical Arrays) ⚠️ CORRECTED
 ```python
 class TensorData(BaseModel):
     data: List[float] | List[int]  # 1D array
-    dtype: TensorDtype  # "float32" | "float64" | "int32" | "int64"
-    shape: List[int]
+    dtype: TensorDtype  # "int64" | "float32"
+    shape: Optional[List[int]] = None  # ⚠️ OPTIONAL! Can be None
 
     @classmethod
     def from_torch(cls, tensor: torch.Tensor) -> TensorData:
         return cls(
             data=tensor.cpu().numpy().flatten().tolist(),
             dtype=_torch_to_tensor_dtype(tensor.dtype),
-            shape=list(tensor.shape)
+            shape=list(tensor.shape) if tensor.shape else None
         )
 
     @classmethod
     def from_numpy(cls, array: np.ndarray) -> TensorData:
         ...
+
+    # When shape is None, treat as 1D array
 ```
 
 ## 4. Enum Types
 
-**LossFnType**
+**LossFnType** ⚠️ CORRECTED
 ```python
-class LossFnType(str, Enum):
-    CROSS_ENTROPY = "cross_entropy"
-    # Future: other loss functions
+# ACTUAL Python SDK (verified from source):
+LossFnType: TypeAlias = Literal["cross_entropy", "importance_sampling", "ppo"]
+# All 3 values already supported by SDK and backend
 ```
 
 **StopReason** ⚠️ CORRECTED
@@ -233,12 +257,15 @@ TensorDtype: TypeAlias = Literal["int64", "float32"]
 # float64 and int32 are NOT supported by the backend
 ```
 
-**RequestErrorCategory**
+**RequestErrorCategory** ⚠️ CORRECTED
 ```python
-class RequestErrorCategory(str, Enum):
-    USER_ERROR = "user_error"
-    TRANSIENT = "transient"
-    FATAL = "fatal"
+# ACTUAL Python SDK (verified from source):
+class RequestErrorCategory(StrEnum):
+    Unknown = auto()  # Unknown error type
+    Server = auto()   # Server-side error (retryable)
+    User = auto()     # User/client error (not retryable)
+
+# NOT the old values: "user_error", "transient", "fatal"
 ```
 
 ## 5. Future Types
@@ -380,11 +407,24 @@ end
 
 ## Key Porting Considerations
 
-### 1. Tensor Conversion
+### 1. Tensor Conversion ⚠️ UPDATED
 - Python: Direct torch.Tensor → TensorData conversion
 - Elixir: Need Nx (Numerical Elixir) integration
   - Use `Nx.to_flat_list/1` for serialization
   - Store dtype and shape metadata
+  - **Handle nil shape**: When shape is None/nil, treat as 1D array
+    ```elixir
+    def to_nx(%TensorData{shape: nil, data: data, dtype: dtype}) do
+      # No reshape - return as 1D
+      Nx.tensor(data, type: tensor_dtype_to_nx(dtype))
+    end
+
+    def to_nx(%TensorData{shape: shape, data: data, dtype: dtype}) when is_list(shape) do
+      data
+      |> Nx.tensor(type: tensor_dtype_to_nx(dtype))
+      |> Nx.reshape(List.to_tuple(shape))
+    end
+    ```
 
 ### 2. Union Types
 - Python: Pydantic handles `Union[A, B]` with discriminated unions
@@ -399,18 +439,34 @@ end
   ```
 
 ### 3. Validation Strategy
-- Use Ecto.Changeset for complex validation
+- Use pure functions for validation (lighter than Ecto)
 - Simple structs can use pattern matching + guards
 - Consider `norm` or `vex` libraries for additional validation
 
-### 4. Immutability
+### 4. JSON Encoding Strictness ⚠️ NEW
+- Prevent internal fields from leaking to API
+- Use `@derive {Jason.Encoder, only: [...]}` for explicit control
+  ```elixir
+  defmodule Tinkex.Types.SampleRequest do
+    @derive {Jason.Encoder, only: [
+      :sampling_session_id, :seq_id, :num_samples, :base_model, :model_path,
+      :prompt, :sampling_params, :prompt_logprobs, :topk_prompt_logprobs
+    ]}
+
+    defstruct [...]
+  end
+  ```
+- Ensures only specified fields are serialized to JSON
+- Matches Pydantic's `StrictBase` behavior (extra='forbid')
+
+### 5. Immutability
 - Elixir structs are immutable by default (advantage!)
 - Use `Map.put/3` or struct update syntax for "mutations"
   ```elixir
   %{model_input | chunks: new_chunks}
   ```
 
-### 5. Default Values
+### 6. Default Values
 - Elixir structs support default values in defstruct
 - For complex defaults, use constructor functions:
   ```elixir
@@ -426,7 +482,7 @@ end
 3. **Nx**: Numerical computing (tensor operations)
 4. **TypedStruct**: Macro for cleaner struct definitions with types
 
-## Example: Complete Type Definition
+## Example: Complete Type Definition ⚠️ UPDATED
 
 ```elixir
 defmodule Tinkex.Types.Datum do
@@ -437,7 +493,14 @@ defmodule Tinkex.Types.Datum do
     field :loss_fn_inputs, map(), enforce: true
   end
 
-  @doc "Create a new datum with tensor auto-conversion"
+  @doc """
+  Create a new datum with tensor auto-conversion.
+
+  Converts:
+  - Nx.Tensor → TensorData
+  - TensorData → TensorData (passthrough)
+  - Plain lists → TensorData (with dtype inference)
+  """
   def new(attrs) do
     %__MODULE__{
       model_input: attrs[:model_input],
@@ -447,14 +510,35 @@ defmodule Tinkex.Types.Datum do
 
   defp convert_tensors(inputs) when is_map(inputs) do
     Map.new(inputs, fn {key, value} ->
-      {key, maybe_convert_tensor(value)}
+      {key, maybe_convert_tensor(value, key)}
     end)
   end
 
-  defp maybe_convert_tensor(%Nx.Tensor{} = tensor) do
+  # Nx.Tensor → TensorData
+  defp maybe_convert_tensor(%Nx.Tensor{} = tensor, _key) do
     Tinkex.Types.TensorData.from_nx(tensor)
   end
-  defp maybe_convert_tensor(value), do: value
+
+  # TensorData → passthrough
+  defp maybe_convert_tensor(%Tinkex.Types.TensorData{} = td, _key), do: td
+
+  # Plain list → TensorData (with dtype inference)
+  defp maybe_convert_tensor(list, key) when is_list(list) do
+    dtype = infer_dtype(list, key)
+    %Tinkex.Types.TensorData{
+      data: list,
+      dtype: dtype,
+      shape: [length(list)]
+    }
+  end
+
+  # Other values → passthrough
+  defp maybe_convert_tensor(value, _key), do: value
+
+  # Infer dtype from first element or key name
+  defp infer_dtype([first | _], _key) when is_integer(first), do: :int64
+  defp infer_dtype([first | _], _key) when is_float(first), do: :float32
+  defp infer_dtype([], _key), do: :float32
 end
 ```
 

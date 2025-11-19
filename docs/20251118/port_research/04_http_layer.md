@@ -1,10 +1,15 @@
 # HTTP Layer and Connection Pooling
 
-**⚠️ UPDATED:** This document has been corrected based on critiques 100, 101, 102. See `103_claude_sonnet_response_to_critiques.md` for details.
+**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202. See `203_claude_sonnet_response_to_critiques.md` for details.
 
-**Key Corrections:**
+**Key Corrections (Round 1 - Critiques 100-102):**
 - **Finch pools**: Changed from single pool to multiple separated pools (training, sampling, session, futures)
 - **Resource isolation**: Prevents sampling requests from starving critical session heartbeats
+
+**Key Corrections (Round 2 - Critiques 200-202):**
+- **Pool key normalization**: Fixed URL normalization bug (port handling)
+- **Telemetry pool**: Added dedicated pool for telemetry requests
+- **Retry-After headers**: Added support for server backoff signals
 
 ## Python Implementation
 
@@ -228,6 +233,9 @@ defmodule Tinkex.Application do
     base_url = Application.get_env(:tinkex, :base_url,
       "https://tinker.thinkingmachines.dev/services/tinker-prod")
 
+    # Normalize base URL for pool keys (critical for pool lookup)
+    normalized_base = normalize_base_url(base_url)
+
     children = [
       # HTTP connection pools - SEPARATE per operation type
       {Finch,
@@ -240,34 +248,55 @@ defmodule Tinkex.Application do
            max_idle_time: 60_000
          ],
          # Training operations pool (sequential, long-running)
-         {base_url, :training} => [
+         {normalized_base, :training} => [
            protocol: :http2,
            size: 5,          # Few connections
            count: 1,         # Single connection for serial requests
            max_idle_time: 60_000
          ],
          # Sampling operations pool (high concurrency bursts)
-         {base_url, :sampling} => [
+         {normalized_base, :sampling} => [
            protocol: :http2,
            size: 100,        # Many connections for 400 concurrent requests
            max_idle_time: 30_000
          ],
          # Session management pool (critical heartbeats)
-         {base_url, :session} => [
+         {normalized_base, :session} => [
            protocol: :http2,
            size: 5,          # Dedicated for heartbeats
            max_idle_time: :infinity  # Keep alive
          ],
          # Future polling pool (concurrent polling)
-         {base_url, :futures} => [
+         {normalized_base, :futures} => [
            protocol: :http2,
            size: 50,         # Moderate concurrency
+           max_idle_time: 60_000
+         ],
+         # Telemetry pool (prevents telemetry from starving other ops)
+         {normalized_base, :telemetry} => [
+           protocol: :http2,
+           size: 5,
            max_idle_time: 60_000
          ]
        }}
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one)
+  end
+
+  # ⚠️ CRITICAL: Normalize base URL to prevent pool lookup failures
+  defp normalize_base_url(url) do
+    uri = URI.parse(url)
+
+    # Only include port if non-standard (not 80/443/nil)
+    port = case {uri.scheme, uri.port} do
+      {"http", 80} -> ""
+      {"https", 443} -> ""
+      {_, nil} -> ""
+      {_, port} -> ":#{port}"
+    end
+
+    "#{uri.scheme}://#{uri.host}#{port}"
   end
 end
 ```
@@ -351,12 +380,25 @@ defmodule Tinkex.API do
     |> handle_response()
   end
 
-  defp build_pool_key(url, :default), do: :default
+  defp build_pool_key(_url, :default), do: :default
   defp build_pool_key(url, pool_type) do
-    # Extract base URL from full URL
+    # Normalize base URL (MUST match pool config normalization)
+    normalized_base = normalize_base_url(url)
+    {normalized_base, pool_type}
+  end
+
+  # ⚠️ CRITICAL: Same normalization as Application.start
+  defp normalize_base_url(url) do
     uri = URI.parse(url)
-    base_url = "#{uri.scheme}://#{uri.host}#{if uri.port, do: ":#{uri.port}", else: ""}"
-    {base_url, pool_type}
+
+    port = case {uri.scheme, uri.port} do
+      {"http", 80} -> ""
+      {"https", 443} -> ""
+      {_, nil} -> ""
+      {_, port} -> ":#{port}"
+    end
+
+    "#{uri.scheme}://#{uri.host}#{port}"
   end
 
   defp build_url(path) do
@@ -383,6 +425,23 @@ defmodule Tinkex.API do
       {:ok, data} -> {:ok, data}
       {:error, _} = error -> error
     end
+  end
+
+  # Special handling for 429 (rate limit) - parse Retry-After headers
+  defp handle_response({:ok, %Finch.Response{status: 429, headers: headers, body: body}}) do
+    error = case Jason.decode(body) do
+      {:ok, data} -> data
+      {:error, _} -> %{"message" => body}
+    end
+
+    retry_after_ms = parse_retry_after(headers)
+
+    {:error, %Tinkex.Error{
+      status: 429,
+      message: error["message"] || "Rate limited",
+      data: error,
+      retry_after_ms: retry_after_ms
+    }}
   end
 
   defp handle_response({:ok, %Finch.Response{status: status, body: body}}) do
@@ -438,6 +497,22 @@ defmodule Tinkex.API do
 
     min(delay * jitter, max)
     |> round()
+  end
+
+  # ⚠️ NEW: Parse Retry-After headers from server
+  defp parse_retry_after(headers) do
+    # Try retry-after-ms first (milliseconds)
+    case List.keyfind(headers, "retry-after-ms", 0) do
+      {_, ms_str} ->
+        String.to_integer(ms_str)
+
+      nil ->
+        # Fall back to retry-after (seconds)
+        case List.keyfind(headers, "retry-after", 0) do
+          {_, seconds_str} -> String.to_integer(seconds_str) * 1000
+          nil -> 1000  # Default 1 second
+        end
+    end
   end
 end
 ```

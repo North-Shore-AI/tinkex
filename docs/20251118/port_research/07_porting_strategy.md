@@ -1,12 +1,17 @@
 # Porting Strategy and Implementation Roadmap
 
-**⚠️ UPDATED:** This document has been corrected based on critiques 100, 101, 102. See `103_claude_sonnet_response_to_critiques.md` for details.
+**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202. See `203_claude_sonnet_response_to_critiques.md` for details.
 
-**Key Corrections:**
-- **Dependencies**: Added Bumblebee and tokenizers for HuggingFace model tokenization (Phase 1)
+**Key Corrections (Round 1 - Critiques 100-102):**
 - **Validation**: Changed from Ecto to pure functions (lighter dependencies)
 - **Finch pools**: Updated to show separate pool configuration
 - **Tokenizer strategy**: Changed from "user responsibility" to built-in tokenization support
+
+**Key Corrections (Round 2 - Critiques 200-202):**
+- **Dependencies**: Removed Bumblebee and EXLA (bloat) - using tokenizers-only for lean integration
+- **SamplingClient architecture**: Changed to ETS-based for lock-free concurrent reads
+- **RateLimiter**: Added atomics-based shared backoff state module
+- **Telemetry pool**: Added dedicated pool to prevent telemetry from starving other operations
 
 ## Technology Stack Recommendations
 
@@ -25,10 +30,8 @@ defp deps do
     # Numerical computing (tensor operations)
     {:nx, "~> 0.6"},
 
-    # Tokenization (HuggingFace models) ⚠️ ADDED
-    {:bumblebee, "~> 0.5"},      # HuggingFace models in Elixir
-    {:tokenizers, "~> 0.4"},     # Rust-based tokenizers via NIF
-    {:exla, "~> 0.6"},           # Optional: XLA backend for Nx
+    # Tokenization (HuggingFace models) ⚠️ UPDATED - tokenizers-only
+    {:tokenizers, "~> 0.4"},     # Rust-based tokenizers via NIF (lean, no Bumblebee/EXLA bloat)
 
     # Telemetry
     {:telemetry, "~> 1.2"},
@@ -50,7 +53,9 @@ defp deps do
 end
 ```
 
-**Note:** Ecto has been REMOVED from core deps and moved to optional. Using pure functions for validation keeps the SDK lighter.
+**Notes:**
+- **Ecto** has been REMOVED from core deps and moved to optional. Using pure functions for validation keeps the SDK lighter.
+- **Bumblebee and EXLA** have been REMOVED (Round 2 correction). These add 100+ MB of dependencies for features not needed by the SDK. Using `tokenizers` directly provides lean HuggingFace tokenizer access without the overhead.
 
 ### Optional Libraries
 
@@ -237,10 +242,10 @@ tinkex/
    - [x] `optim_step/2` - optimizer step
    - [x] Result combining for chunked requests
 
-3. ✅ Tokenizer integration ⚠️ MOVED FROM "ADVANCED" TO CORE
-   - [x] Bumblebee setup for HuggingFace models
-   - [x] `Tinkex.Tokenizer` module
-   - [x] `ModelInput.from_text/2` helper
+3. ✅ Tokenizer integration ⚠️ UPDATED - tokenizers-only (no Bumblebee)
+   - [x] Direct tokenizers NIF integration
+   - [x] `Tinkex.Tokenizer` module (wrapper around tokenizers library)
+   - [x] `ModelInput.from_text/2` helper using tokenizers.from_pretrained
    - [x] Support for model-specific tokenizers (Qwen, Llama, etc.)
 
 4. ✅ Weight management
@@ -260,20 +265,21 @@ tinkex/
 - Weight save/load tested
 - 80%+ test coverage
 
-### Phase 4: Sampling Operations (Week 7)
+### Phase 4: Sampling Operations (Week 7) ⚠️ UPDATED
 
-**Goal**: Implement SamplingClient
+**Goal**: Implement SamplingClient with ETS-based architecture
 
 #### Tasks:
-1. ✅ SamplingClient GenServer
+1. ✅ SamplingClient GenServer ⚠️ UPDATED - ETS-based
+   - [x] ETS table for lock-free config reads
    - [x] Sampling session management
-   - [x] Request handling
-   - [x] Backpressure logic
+   - [x] Request handling (direct ETS reads, no GenServer calls)
+   - [x] RateLimiter module with atomics-based shared backoff
 
 2. ✅ Sampling operations
-   - [x] `sample/4` - text generation
+   - [x] `sample/4` - text generation (reads ETS directly)
    - [x] `compute_logprobs/1` - get prompt logprobs
-   - [x] Retry with custom config
+   - [x] Shared rate limit backoff across concurrent requests
 
 3. ✅ Testing
    - [x] Mock sampling responses
@@ -352,12 +358,14 @@ defmodule Tinkex.Supervisor do
   end
 
   defp pool_config(base_url) do
+    # ⚠️ UPDATED: Added telemetry pool (Round 2)
     %{
       default: [protocol: :http2, size: 10, max_idle_time: 60_000],
       {base_url, :training} => [size: 5, count: 1, max_idle_time: 60_000],
       {base_url, :sampling} => [size: 100, max_idle_time: 30_000],
       {base_url, :session} => [size: 5, max_idle_time: :infinity],
-      {base_url, :futures} => [size: 50, max_idle_time: 60_000]
+      {base_url, :futures} => [size: 50, max_idle_time: 60_000],
+      {base_url, :telemetry} => [size: 5, max_idle_time: 60_000]  # Prevent telemetry from starving other ops
     }
   end
 end
@@ -659,21 +667,23 @@ end
 
 **Elixir Solution:** Single API returning Tasks. Caller decides sync (`Task.await`) or async (spawn, receive, etc.)
 
-### Challenge 5: Tokenizer Integration ⚠️ CORRECTED
+### Challenge 5: Tokenizer Integration ⚠️ UPDATED (Round 2)
 
 **Python:** Direct HuggingFace transformers integration
 
-**Elixir Solution (UPDATED):**
-Use **Bumblebee + tokenizers** for native Elixir tokenization:
+**Elixir Solution (UPDATED - tokenizers-only):**
+Use **tokenizers** directly (no Bumblebee/EXLA bloat):
 
 ```elixir
 # Dependencies
-{:bumblebee, "~> 0.5"},  # HuggingFace models
-{:tokenizers, "~> 0.4"}, # Rust tokenizers via NIF
+{:tokenizers, "~> 0.4"}, # Rust tokenizers via NIF (lean, ~5MB)
 
 # Usage
 defmodule Tinkex.Tokenizer do
+  @moduledoc "Lean tokenizer wrapper using tokenizers NIF"
+
   def encode(text, model_name) do
+    # Load tokenizer from HuggingFace Hub
     {:ok, tokenizer} = Tokenizers.Tokenizer.from_pretrained(model_name)
     {:ok, encoding} = Tokenizers.Tokenizer.encode(tokenizer, text)
     Tokenizers.Encoding.get_ids(encoding)
@@ -684,7 +694,13 @@ end
 Tinkex.Types.ModelInput.from_text("Hello world", tokenizer: "Qwen/Qwen2.5-7B")
 ```
 
-**Why this matters:** Without built-in tokenization, users must set up Python bridges, making the SDK unusable for pure Elixir projects. Bumblebee provides a production-ready solution.
+**Why tokenizers-only (no Bumblebee)?**
+- **Bumblebee** adds 100+ MB of dependencies (EXLA, XLA compiler, etc.) for model inference features
+- **This SDK only needs tokenization** - we don't run models locally, just send tokens to API
+- **tokenizers** NIF provides direct access to HuggingFace tokenizers with ~5MB footprint
+- **Production-ready**: Same Rust tokenizers used by Python transformers library
+
+**Why this matters:** Without built-in tokenization, users must set up Python bridges, making the SDK unusable for pure Elixir projects. Direct tokenizers NIF provides a lean, production-ready solution.
 
 ## Success Criteria
 

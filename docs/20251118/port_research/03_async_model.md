@@ -1,10 +1,15 @@
 # Async Model and Futures Implementation
 
-**⚠️ UPDATED:** This document has been corrected based on critiques 100, 101, 102. See `103_claude_sonnet_response_to_critiques.md` for details.
+**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202. See `203_claude_sonnet_response_to_critiques.md` for details.
 
-**Key Corrections:**
+**Key Corrections (Round 1 - Critiques 100-102):**
 - **Training requests**: Clarified that requests are sent **sequentially** (one at a time), but polling is concurrent
 - **Task patterns**: Emphasized Elixir's native concurrency advantages over Python's thread-based approach
+
+**Key Corrections (Round 2 - Critiques 200-202):**
+- **Race condition fixed**: GenServer must block during send phase, not spawn Task immediately
+- **Sequencing guarantee**: All training operations share same `request_id_counter`
+- **No parallel sends**: Requests sent synchronously inside `handle_call`, polling async
 
 ## Overview
 
@@ -317,62 +322,67 @@ def forward_backward(client, data, loss_fn, opts) do
   GenServer.call(client, {:forward_backward, data, loss_fn, opts}, :infinity)
 end
 
-# In GenServer handle_call
+# In GenServer handle_call ⚠️ CORRECTED
 def handle_call({:forward_backward, data, loss_fn, _opts}, from, state) do
   # Chunk data
   chunks = chunk_data(data)
 
-  # Spawn process to send chunks SEQUENTIALLY, then poll CONCURRENTLY
+  # Allocate request IDs upfront
+  {request_ids, new_counter} = allocate_request_ids(length(chunks), state.request_id_counter)
+
+  # ⚠️ CRITICAL: Send ALL requests SYNCHRONOUSLY (blocks GenServer)
+  untyped_futures = Enum.zip(request_ids, chunks)
+  |> Enum.map(fn {req_id, chunk} ->
+    send_forward_backward_chunk(chunk, loss_fn, req_id, state)
+  end)
+
+  # NOW spawn background task for polling (non-blocking)
   Task.start(fn ->
-    # Enum.map executes sequentially - sends requests one at a time
-    polling_tasks = Enum.map(chunks, fn chunk ->
-      send_forward_backward_chunk(chunk, loss_fn, state)
+    polling_tasks = Enum.map(untyped_futures, fn future ->
+      Tinkex.Future.poll(future.request_id, state.http_pool)
     end)
 
-    # Now poll all futures concurrently
     results = Task.await_many(polling_tasks, :infinity)
     combined = combine_forward_backward_results(results)
     GenServer.reply(from, {:ok, combined})
   end)
 
-  {:noreply, state}
+  new_state = %{state | request_id_counter: new_counter}
+  {:noreply, new_state}
 end
 
-defp send_forward_backward_chunk(chunk, loss_fn, state) do
-  request_id = state.request_id_counter
-
+defp send_forward_backward_chunk(chunk, loss_fn, req_id, state) do
   request = %Tinkex.Types.ForwardBackwardRequest{
     forward_backward_input: %{data: chunk, loss_fn: loss_fn},
     model_id: state.model_id,
-    seq_id: request_id
+    seq_id: req_id
   }
 
-  # Send request synchronously (blocks until sent)
+  # SYNCHRONOUS send (blocks until sent to server)
   {:ok, untyped_future} = Tinkex.API.Training.forward_backward(
     request,
     state.http_pool
   )
 
-  # Start polling asynchronously (returns Task)
-  Tinkex.Future.poll(untyped_future.request_id, pool: state.http_pool)
+  untyped_future  # Return future for polling
 end
 
 defp combine_forward_backward_results(results) do
-  # Average loss across chunks
-  avg_loss = Enum.sum(Enum.map(results, & &1.loss)) / length(results)
-
   # Flatten outputs
   all_outputs = Enum.flat_map(results, & &1.loss_fn_outputs)
 
-  # Merge metrics
+  # Merge metrics (loss is in metrics["loss"])
   merged_metrics = Enum.reduce(results, %{}, fn result, acc ->
     Map.merge(acc, result.metrics, fn _k, v1, v2 -> (v1 + v2) / 2 end)
   end)
 
+  # Use loss_fn_output_type from first result (should be same for all)
+  loss_fn_output_type = hd(results).loss_fn_output_type
+
   %Tinkex.Types.ForwardBackwardOutput{
-    loss: avg_loss,
+    loss_fn_output_type: loss_fn_output_type,
     loss_fn_outputs: all_outputs,
-    metrics: merged_metrics
+    metrics: merged_metrics  # loss is metrics["loss"]
   }
 end
 ```
