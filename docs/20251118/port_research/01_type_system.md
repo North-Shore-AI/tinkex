@@ -1,6 +1,6 @@
 # Type System Analysis
 
-**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202, 300-302. See `303_claude_sonnet_response_to_critiques.md` for details.
+**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202, 300-302, 400+. See response documents for details.
 
 **Key Corrections (Round 1 - Critiques 100-102):**
 - `AdamParams`: Fixed defaults (beta2: 0.95, eps: 1e-12, learning_rate has default)
@@ -17,9 +17,13 @@
 
 **Key Corrections (Round 3 - Critiques 300-302):**
 - `RequestErrorCategory`: Fixed capitalization - actual values are "Unknown", "Server", "User" (StrEnum.auto() capitalizes)
-- JSON nil encoding: Added `Tinkex.JSON` module with nil-stripping for Pydantic StrictBase compatibility
 - Tensor casting: Explicit f64→f32, s32→s64 casting to match Python SDK aggressive type coercion
 - `seq_id` optionality: Documented that field is optional in wire format but always set by client
+
+**Key Corrections (Round 4 - Critique 400+):**
+- **JSON encoding**: REMOVED global nil-stripping - Python SDK accepts `null` for Optional fields
+- **NotGiven clarification**: `NotGiven` is used in client options, NOT request schemas
+- **Error categories**: Updated to match actual Python values ("Unknown"/"Server"/"User")
 
 ## Python Type Infrastructure
 
@@ -507,64 +511,79 @@ end
 - Simple structs can use pattern matching + guards
 - Consider `norm` or `vex` libraries for additional validation
 
-### 4. JSON Encoding with Nil Stripping ⚠️ UPDATED (Round 3)
+### 4. JSON Encoding Strategy ⚠️ CORRECTED (Round 4)
 
-**CRITICAL:** Python SDK uses `NotGiven` sentinel to distinguish:
-- Field omitted from JSON: `{}`
-- Field set to `None`: `{"param": null}`
+**CRITICAL CORRECTION:** The Python SDK request/response models use `Optional[...] = None`, NOT `NotGiven` types. The server accepts `null` for optional fields.
 
-Pydantic's `StrictBase` in strict mode will **reject** `{"param": null}` when the field should be omitted, causing **422 validation errors**.
+**Previous Understanding (INCORRECT):**
+- ❌ "StrictBase rejects `{"param": null}` when field should be omitted"
+- ❌ "Must globally strip nil values to avoid 422 errors"
 
-**Problem:** Elixir structs default fields to `nil`. `Jason.encode!` encodes `nil` as `null`.
+**Actual Behavior (verified from Python SDK code):**
+- Request/response Pydantic models: `Optional[...] = None`
+- `StrictBase` just sets `extra="forbid"` and `frozen=True`
+- Python SDK **already sends `null` in JSON** for Optional fields
+- `NotGiven` sentinel is used in **client options** (headers, timeout), NOT request schemas
 
-**Solution:** Custom encoder that strips `nil` values:
+**Elixir Strategy:**
+
+**Approach 1: Mirror Python exactly (RECOMMENDED)**
+
+Let Jason encode `nil` as `null` naturally:
+
+```elixir
+defmodule Tinkex.Types.SampleRequest do
+  @derive {Jason.Encoder, only: [
+    :sampling_session_id, :seq_id, :num_samples, :base_model, :model_path,
+    :prompt, :sampling_params, :prompt_logprobs, :topk_prompt_logprobs
+  ]}
+
+  defstruct [
+    :sampling_session_id,   # nil → null
+    :seq_id,                # nil → null
+    :base_model,            # nil → null
+    :model_path,            # nil → null
+    :prompt,                # required
+    :sampling_params,       # required
+    num_samples: 1,         # has default
+    prompt_logprobs: false, # has default
+    topk_prompt_logprobs: 0 # has default
+  ]
+end
+
+# Encoding
+body = Jason.encode!(request)  # nil fields → "null" in JSON
+```
+
+**Approach 2: Field-level omission (if needed later)**
+
+If future fields require omitting `null` vs sending it:
 
 ```elixir
 defmodule Tinkex.JSON do
   @moduledoc """
-  JSON encoding with nil-stripping for Pydantic StrictBase compatibility.
+  JSON encoding with field-level control.
 
-  Python SDK uses NotGiven sentinel to distinguish omitted fields from null.
-  We must strip nil values before encoding to match this behavior.
+  Use when specific fields must be omitted rather than sent as null.
   """
 
-  def encode!(struct) when is_struct(struct) do
-    struct
-    |> Map.from_struct()
-    |> strip_nils()
-    |> Jason.encode!()
-  end
+  @doc "Encode struct, omitting fields listed in :omit_if_nil option"
+  def encode!(struct, opts \\ []) do
+    omit_if_nil = Keyword.get(opts, :omit_if_nil, [])
 
-  def encode!(map) when is_map(map) do
-    map
-    |> strip_nils()
-    |> Jason.encode!()
-  end
-
-  defp strip_nils(map) when is_map(map) do
-    map
-    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-    |> Enum.map(fn {k, v} -> {k, strip_nils(v)} end)
+    map = Map.from_struct(struct)
+    |> Enum.reject(fn {k, v} -> k in omit_if_nil and is_nil(v) end)
     |> Enum.into(%{})
-  end
 
-  defp strip_nils(list) when is_list(list) do
-    Enum.map(list, &strip_nils/1)
+    Jason.encode!(map)
   end
-
-  defp strip_nils(value), do: value
 end
+
+# Usage (only if specific field requires it)
+Tinkex.JSON.encode!(request, omit_if_nil: [:optional_field])
 ```
 
-**Usage:**
-```elixir
-# In Tinkex.API.post/4
-request = Finch.build(:post, url, headers, Tinkex.JSON.encode!(body))
-
-# NOT: Jason.encode!(body) - this will cause 422 errors!
-```
-
-**Field Control:** Still use `@derive {Jason.Encoder, only: [...]}` to prevent internal fields from leaking:
+**Field Control:** Use `@derive {Jason.Encoder, only: [...]}` to prevent internal fields from leaking:
   ```elixir
   defmodule Tinkex.Types.SampleRequest do
     @derive {Jason.Encoder, only: [
@@ -576,17 +595,25 @@ request = Finch.build(:post, url, headers, Tinkex.JSON.encode!(body))
   end
   ```
 
-### 5. Error Category Parsing ⚠️ NEW (Round 3)
+**Why This Matters:**
+- Unconditionally stripping `nil` changes semantics (can't distinguish "not set" from "explicitly null")
+- If server ever differentiates these cases, Elixir client would behave differently than Python
+- Safer to match Python's behavior: let Optional fields be `null` in JSON
 
-**CRITICAL:** Python `StrEnum.auto()` capitalizes values. Actual wire format is `"Unknown" | "Server" | "User"`, **NOT** lowercase.
+### 5. Error Category Parsing ⚠️ UPDATED (Round 3+4)
+
+**CRITICAL:** Python `StrEnum.auto()` capitalizes values. Actual wire format is `"Unknown" | "Server" | "User"`, **NOT** the old `"user_error" | "transient" | "fatal"`.
 
 ```elixir
 defmodule Tinkex.Types.RequestErrorCategory do
   @moduledoc """
   Request error category (matches Python StrEnum with auto()).
 
-  Python: class RequestErrorCategory(StrEnum): Unknown = auto()
-  Result: "Unknown" (capitalized due to StrEnum.auto() behavior)
+  Python SDK (actual code):
+    class RequestErrorCategory(StrEnum):
+        Unknown = auto()  # Produces "Unknown" (capitalized)
+        Server = auto()   # Produces "Server" (capitalized)
+        User = auto()     # Produces "User" (capitalized)
   """
 
   @type t :: :unknown | :server | :user
@@ -604,12 +631,34 @@ defmodule Tinkex.Types.RequestErrorCategory do
 end
 ```
 
-**Usage in error handling:**
+**Usage in error handling (matches Python is_user_error logic):**
 ```elixir
 defmodule Tinkex.Error do
-  defstruct [:status, :message, :category, :data]
+  defstruct [:status, :message, :category, :data, :retry_after_ms]
 
-  @doc "Check if error is a user error (matches Python is_user_error logic)"
+  @type t :: %__MODULE__{
+    status: integer() | nil,
+    message: String.t(),
+    category: Tinkex.Types.RequestErrorCategory.t() | nil,
+    data: map() | nil,
+    retry_after_ms: non_neg_integer() | nil
+  }
+
+  @doc """
+  Check if error is a user error (matches Python is_user_error logic).
+
+  Truth table:
+  | Condition | User Error? | Retryable? |
+  |-----------|-------------|------------|
+  | category == :user | YES | NO |
+  | status 4xx (except 408, 429) | YES | NO |
+  | category == :server | NO | YES |
+  | category == :unknown | NO | YES |
+  | status 5xx | NO | YES |
+  | status 408 | NO | YES |
+  | status 429 | NO | YES (with backoff) |
+  | Connection errors | NO | YES |
+  """
   def user_error?(%__MODULE__{status: status, category: category}) do
     cond do
       # RequestFailedError with category User
@@ -618,9 +667,14 @@ defmodule Tinkex.Error do
       # 4xx except 408 (timeout) and 429 (rate limit)
       status in 400..499 and status not in [408, 429] -> true
 
-      # Everything else (5xx, connection errors, etc.)
+      # Everything else (5xx, server/unknown category, connection errors)
       true -> false
     end
+  end
+
+  @doc "Check if error is retryable"
+  def retryable?(error) do
+    not user_error?(error)
   end
 end
 ```

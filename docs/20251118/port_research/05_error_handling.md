@@ -1,5 +1,13 @@
 # Error Handling and Retry Logic
 
+**⚠️ UPDATED:** This document has been corrected based on critique 400+.
+
+**Key Corrections (Round 4 - Critique 400+):**
+- **Error categories**: Updated from `USER_ERROR/TRANSIENT/FATAL` to `Unknown/Server/User` (actual Python SDK values)
+- **Truth table**: Added explicit error handling decision table
+- **429 handling**: Clarified retry behavior with Retry-After support
+- **Retry logic**: Updated `retryable?` to match Python `is_retryable` behavior
+
 ## Python Exception Hierarchy
 
 The Tinker SDK defines a comprehensive exception hierarchy:
@@ -58,67 +66,76 @@ class RequestFailedError(TinkerError):
         self.details = details
 ```
 
-## Error Categories
+## Error Categories ⚠️ UPDATED (Round 4)
+
+**ACTUAL Python SDK values** (verified from source):
+
+```python
+class RequestErrorCategory(StrEnum):
+    Unknown = auto()  # Produces "Unknown" (capitalized)
+    Server = auto()   # Produces "Server" (capitalized)
+    User = auto()     # Produces "User" (capitalized)
+```
 
 ### 1. User Errors (Non-Retryable)
 
+**Category:** `RequestErrorCategory.User` (wire: `"User"`)
+
 Errors caused by invalid input:
 
-```python
-class RequestErrorCategory(str, Enum):
-    USER_ERROR = "user_error"
-
-# Examples:
-# - Invalid tensor shapes
-# - Missing required fields
-# - Invalid parameter values
-# - Model not found
-```
+**Examples:**
+- Invalid tensor shapes
+- Missing required fields
+- Invalid parameter values
+- Model not found
+- 4xx HTTP errors (except 408, 429)
 
 **Handling:**
 - Never retry
 - Propagate immediately to user
 - Include detailed error message
 
-### 2. Transient Errors (Retryable)
+### 2. Server Errors (Retryable)
 
-Temporary failures:
+**Category:** `RequestErrorCategory.Server` (wire: `"Server"`)
 
-```python
-class RequestErrorCategory(str, Enum):
-    TRANSIENT = "transient"
+Server-side failures that may succeed on retry:
 
-# Examples:
-# - 500 Internal Server Error
-# - 503 Service Unavailable
-# - 408 Request Timeout
-# - Network connection errors
-# - Rate limiting (429)
-```
+**Examples:**
+- 500 Internal Server Error
+- 503 Service Unavailable
+- Queue overload
+- Temporary resource exhaustion
 
 **Handling:**
 - Retry with exponential backoff
 - Maximum retry attempts
 - Track retry count in telemetry
 
-### 3. Fatal Errors (Non-Retryable)
+### 3. Unknown Errors (Retryable)
 
-Unrecoverable server errors:
+**Category:** `RequestErrorCategory.Unknown` (wire: `"Unknown"`)
 
-```python
-class RequestErrorCategory(str, Enum):
-    FATAL = "fatal"
+Errors where cause is unclear - assume retryable for safety:
 
-# Examples:
-# - Out of memory
-# - GPU error
-# - Model corruption
-```
+**Examples:**
+- Network connection errors
+- Timeout errors (408)
+- Unexpected failures
 
 **Handling:**
-- Never retry
-- Propagate with full context
-- Log for debugging
+- Retry with exponential backoff
+- Log for investigation
+- Treat as potentially transient
+
+### 4. Special Case: Rate Limiting (Retryable with Backoff)
+
+**HTTP Status:** 429 (Not an error category, but special retry behavior)
+
+**Handling:**
+- Retry after backoff period
+- Use server-provided `Retry-After` header
+- Share backoff state across concurrent requests (for SamplingClient)
 
 ## Retry Strategies
 
@@ -272,13 +289,18 @@ class RetryHandler:
     def is_retryable(self, error: Exception) -> bool:
         """Determine if error is retryable"""
         if isinstance(error, APIStatusError):
-            return error.status_code >= 500 or error.status_code == 408
+            # Retry 5xx, 408 (timeout), and 429 (rate limit)
+            return error.status_code >= 500 or error.status_code in (408, 429)
 
         if isinstance(error, (APIConnectionError, APITimeoutError)):
             return True
 
         if isinstance(error, RequestFailedError):
-            return error.error_category == RequestErrorCategory.TRANSIENT
+            # Retry Server and Unknown categories, NOT User
+            return error.error_category in (
+                RequestErrorCategory.Server,
+                RequestErrorCategory.Unknown
+            )
 
         return False
 
@@ -436,13 +458,22 @@ defmodule Tinkex.Retry do
     end
   end
 
-  @doc "Determine if error is retryable"
+  @doc """
+  Determine if error is retryable.
+
+  Matches Python SDK's is_retryable logic.
+  """
   def retryable?(%Tinkex.Error{type: :api_connection}), do: true
   def retryable?(%Tinkex.Error{type: :api_timeout}), do: true
+
+  # Retry 5xx, 408 (timeout), and 429 (rate limit)
   def retryable?(%Tinkex.Error{type: :api_status, status: status})
-      when status >= 500 or status == 408, do: true
-  def retryable?(%Tinkex.Error{type: :request_failed, data: %{category: :transient}}),
-    do: true
+      when status >= 500 or status in [408, 429], do: true
+
+  # Retry Server and Unknown categories, NOT User
+  def retryable?(%Tinkex.Error{type: :request_failed, data: %{category: category}})
+      when category in [:server, :unknown], do: true
+
   def retryable?(_), do: false
 
   defp calculate_delay(config, attempt) do
@@ -506,16 +537,17 @@ defmodule Tinkex.Future do
         {:ok, result}
 
       {:ok, %{"status" => "failed", "error" => error}} ->
-        category = String.to_atom(error["category"])
+        # Parse category from JSON (capitalized: "Unknown", "Server", "User")
+        category = Tinkex.Types.RequestErrorCategory.parse(error["category"])
 
         case category do
-          :transient ->
-            # Retry transient errors
+          cat when cat in [:server, :unknown] ->
+            # Retry server and unknown errors
             Process.sleep(1000)
             poll_loop(request_id, pool, timeout, start_time, iteration + 1)
 
-          _ ->
-            # User/fatal errors
+          :user ->
+            # User errors are NOT retryable
             {:error, Tinkex.Error.request_failed(
               error["message"],
               request_id,

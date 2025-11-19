@@ -1,6 +1,6 @@
 # HTTP Layer and Connection Pooling
 
-**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202, 300-302. See `303_claude_sonnet_response_to_critiques.md` for details.
+**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202, 300-302, 400+. See response documents for details.
 
 **Key Corrections (Round 1 - Critiques 100-102):**
 - **Finch pools**: Changed from single pool to multiple separated pools (training, sampling, session, futures)
@@ -16,6 +16,12 @@
 - **Retry-After HTTP Date**: Added support for HTTP Date format parsing (not just integers)
 - **Pool key module**: Extracted normalization to `Tinkex.PoolKey` module (single source of truth)
 - **Config parameter**: Added config parameter to API functions (remove global Application.get_env)
+
+**Key Corrections (Round 4 - Critique 400+):**
+- **429 end-to-end**: Wire parsed `retry_after_ms` from errors to RateLimiter (not hard-coded 1000ms)
+- **Centralized PoolKey**: Actually implement `Tinkex.PoolKey` module (remove duplicate normalize functions)
+- **Config threading**: Remove ALL `Application.get_env` usage from API layer, pass config through clients
+- **Retry-After parsing**: Support both millisecond headers and HTTP Date format
 
 ## Python Implementation
 
@@ -239,8 +245,8 @@ defmodule Tinkex.Application do
     base_url = Application.get_env(:tinkex, :base_url,
       "https://tinker.thinkingmachines.dev/services/tinker-prod")
 
-    # Normalize base URL for pool keys (critical for pool lookup)
-    normalized_base = normalize_base_url(base_url)
+    # ⚠️ UPDATED (Round 4): Use centralized PoolKey module
+    normalized_base = Tinkex.PoolKey.normalize_base_url(base_url)
 
     children = [
       # HTTP connection pools - SEPARATE per operation type
@@ -290,8 +296,39 @@ defmodule Tinkex.Application do
     Supervisor.start_link(children, strategy: :one_for_one)
   end
 
-  # ⚠️ CRITICAL: Normalize base URL to prevent pool lookup failures
-  defp normalize_base_url(url) do
+  # ⚠️ REMOVED (Round 4): Moved to Tinkex.PoolKey module
+  # Keeping duplication was identified as a critical issue in critique
+end
+```
+
+### Centralized Pool Key Module ⚠️ NEW (Round 4)
+
+**CRITICAL:** Centralize URL normalization to avoid duplication and drift.
+
+```elixir
+defmodule Tinkex.PoolKey do
+  @moduledoc """
+  Centralized pool key generation and URL normalization.
+
+  Single source of truth for pool key logic - used by both
+  Application.start/2 and Tinkex.API.
+  """
+
+  @doc """
+  Normalize base URL for consistent pool keys.
+
+  Removes non-standard ports (80 for http, 443 for https) to avoid
+  duplicate pool lookups.
+
+  ## Examples
+
+      iex> Tinkex.PoolKey.normalize_base_url("https://example.com:443")
+      "https://example.com"
+
+      iex> Tinkex.PoolKey.normalize_base_url("https://example.com:8443")
+      "https://example.com:8443"
+  """
+  def normalize_base_url(url) when is_binary(url) do
     uri = URI.parse(url)
 
     # Only include port if non-standard (not 80/443/nil)
@@ -304,10 +341,29 @@ defmodule Tinkex.Application do
 
     "#{uri.scheme}://#{uri.host}#{port}"
   end
+
+  @doc """
+  Generate pool key for Finch request.
+
+  ## Examples
+
+      iex> Tinkex.PoolKey.build("https://example.com", :training)
+      {"https://example.com", :training}
+
+      iex> Tinkex.PoolKey.build("https://example.com:443", :sampling)
+      {"https://example.com", :sampling}  # 443 normalized away
+  """
+  def build(base_url, pool_type) when pool_type != :default do
+    {normalize_base_url(base_url), pool_type}
+  end
+
+  def build(_base_url, :default), do: :default
 end
 ```
 
 ### API Module Structure
+
+**UPDATED (Round 4):** Config is now threaded through function calls, not read from Application.get_env.
 
 ```elixir
 defmodule Tinkex.API do
@@ -365,57 +421,42 @@ defmodule Tinkex.API do
     end
   end
 
-  ## Generic HTTP operations
+  ## Generic HTTP operations ⚠️ UPDATED (Round 4)
 
+  @doc """
+  POST request with retry logic.
+
+  Config must be passed via opts[:config] - NO Application.get_env usage.
+  """
   def post(path, body, pool_name, opts \\ []) do
-    url = build_url(path)
-    headers = build_headers(opts)
-    timeout = Keyword.get(opts, :timeout, 120_000)
-    max_retries = Keyword.get(opts, :max_retries, 2)
+    config = Keyword.fetch!(opts, :config)  # REQUIRED!
+
+    url = build_url(config.base_url, path)
+    headers = build_headers(config.api_key, opts)
+    timeout = Keyword.get(opts, :timeout, config.timeout || 120_000)
+    max_retries = Keyword.get(opts, :max_retries, config.max_retries || 2)
     pool_type = Keyword.get(opts, :pool_type, :default)
 
+    # Use standard Jason.encode! (nil → null, matching Python SDK)
     request = Finch.build(:post, url, headers, Jason.encode!(body))
 
     with_retries(fn ->
-      # Specify pool type for resource isolation
+      # Use centralized PoolKey module for consistency
       Finch.request(request, pool_name,
         receive_timeout: timeout,
-        pool: build_pool_key(url, pool_type)
+        pool: Tinkex.PoolKey.build(config.base_url, pool_type)
       )
     end, max_retries)
     |> handle_response()
   end
 
-  defp build_pool_key(_url, :default), do: :default
-  defp build_pool_key(url, pool_type) do
-    # Normalize base URL (MUST match pool config normalization)
-    normalized_base = normalize_base_url(url)
-    {normalized_base, pool_type}
+  defp build_url(base_url, path) do
+    # NO Application.get_env - config is threaded through
+    URI.merge(base_url, path) |> to_string()
   end
 
-  # ⚠️ CRITICAL: Same normalization as Application.start
-  defp normalize_base_url(url) do
-    uri = URI.parse(url)
-
-    port = case {uri.scheme, uri.port} do
-      {"http", 80} -> ""
-      {"https", 443} -> ""
-      {_, nil} -> ""
-      {_, port} -> ":#{port}"
-    end
-
-    "#{uri.scheme}://#{uri.host}#{port}"
-  end
-
-  defp build_url(path) do
-    base = Application.get_env(:tinkex, :base_url, @base_url)
-    URI.merge(base, path) |> to_string()
-  end
-
-  defp build_headers(opts) do
-    api_key = Application.get_env(:tinkex, :api_key) ||
-              System.get_env("TINKER_API_KEY")
-
+  defp build_headers(api_key, opts) do
+    # NO Application.get_env or System.get_env - api_key from config
     base_headers = [
       {"content-type", "application/json"},
       {"x-api-key", api_key}
@@ -505,7 +546,8 @@ defmodule Tinkex.API do
     |> round()
   end
 
-  # ⚠️ NEW: Parse Retry-After headers from server
+  # ⚠️ UPDATED (Round 4): Parse Retry-After headers from server
+  # Supports: retry-after-ms (milliseconds), retry-after (seconds or HTTP Date)
   defp parse_retry_after(headers) do
     # Try retry-after-ms first (milliseconds)
     case List.keyfind(headers, "retry-after-ms", 0) do
@@ -513,12 +555,40 @@ defmodule Tinkex.API do
         String.to_integer(ms_str)
 
       nil ->
-        # Fall back to retry-after (seconds)
+        # Fall back to retry-after (seconds or HTTP Date)
         case List.keyfind(headers, "retry-after", 0) do
-          {_, seconds_str} -> String.to_integer(seconds_str) * 1000
-          nil -> 1000  # Default 1 second
+          {_, value} ->
+            case Integer.parse(value) do
+              {seconds, _} ->
+                # retry-after: 5  (delay in seconds)
+                seconds * 1000
+
+              :error ->
+                # retry-after: Fri, 31 Dec 2025 23:59:59 GMT  (HTTP Date)
+                parse_http_date_delay(value)
+            end
+
+          nil ->
+            1000  # Default 1 second
         end
     end
+  end
+
+  defp parse_http_date_delay(date_string) do
+    # Parse HTTP Date and calculate delay from now
+    # Format: "Fri, 31 Dec 2025 23:59:59 GMT"
+    # Using Calendar for HTTP date parsing is recommended
+    case :calendar.rfc3339_to_system_time(date_string, [{:unit, :millisecond}]) do
+      {:ok, target_time} ->
+        now = System.system_time(:millisecond)
+        max(target_time - now, 1000)  # At least 1 second
+
+      {:error, _} ->
+        # Failed to parse, default to 1 second
+        1000
+    end
+  rescue
+    _ -> 1000  # Fallback on any parsing error
   end
 end
 ```

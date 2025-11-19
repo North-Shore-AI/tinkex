@@ -1,6 +1,6 @@
 # Client Architecture Analysis
 
-**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202, 300-302. See `303_claude_sonnet_response_to_critiques.md` for details.
+**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202, 300-302, 400+. See response documents for details.
 
 **Key Corrections (Round 1 - Critiques 100-102):**
 - **SamplingClient**: Changed to "thin GenServer" pattern (state only, HTTP in caller's process)
@@ -19,6 +19,13 @@
 - **Tokenizer heuristics**: Added get_tokenizer_id with Llama-3 special case and caching
 - **Task error handling**: Added try/rescue wrappers to prevent infinite hangs
 - **Defensive ETS**: Added pattern matching for missing entries
+
+**Key Corrections (Round 4 - Critique 400+):**
+- **Task.start safety**: ALL Task.start bodies that call GenServer.reply MUST have try/rescue to prevent infinite hangs
+- **SamplingClient return type**: ALWAYS return Task (never mix {:error, ...} and Task.t)
+- **429 retry_after_ms**: Use error.retry_after_ms from parsed headers, not hard-coded 1000ms
+- **Config struct**: Thread config through all client operations (api_key, base_url, http_pool, timeout)
+- **API consistency**: All public client methods return Task.t({:ok, ...} | {:error, ...})
 
 ## Overview
 
@@ -330,17 +337,31 @@ defmodule Tinkex.TrainingClient do
       untyped_future
     end)
 
-    # NOW spawn background task for polling (non-blocking)
+    # ⚠️ CRITICAL (Round 4): Spawn background task with error handling
+    # If task crashes without try/rescue, GenServer.reply never called → caller hangs forever!
     Task.start(fn ->
-      # Create polling tasks for each future
-      polling_tasks = Enum.map(untyped_futures, fn future ->
-        Tinkex.Future.poll(future.request_id, state.http_pool)
-      end)
+      reply = try do
+        # Create polling tasks for each future
+        polling_tasks = Enum.map(untyped_futures, fn future ->
+          Tinkex.Future.poll(future.request_id, state.http_pool)
+        end)
 
-      # Await all polling tasks concurrently
-      results = Task.await_many(polling_tasks, :infinity)
-      combined = combine_forward_backward_results(results)
-      GenServer.reply(from, {:ok, combined})
+        # Await all polling tasks concurrently
+        results = Task.await_many(polling_tasks, :infinity)
+        combined = combine_forward_backward_results(results)
+        {:ok, combined}
+      rescue
+        e ->
+          # ALWAYS reply, even on failure, to prevent infinite hang
+          {:error, %Tinkex.Error{
+            message: "Polling failed: #{Exception.message(e)}",
+            type: :request_failed,
+            data: %{exception: e, stacktrace: __STACKTRACE__}
+          }}
+      end
+
+      # ALWAYS call GenServer.reply, whether success or failure
+      GenServer.reply(from, reply)
     end)
 
     new_state = %{state | request_id_counter: new_counter}
@@ -523,46 +544,53 @@ defmodule Tinkex.SamplingClient do
 
   @doc """
   Sample from the model. NO GenServer call - reads from ETS directly.
-  Returns a Task that resolves to {:ok, response} | {:error, error}.
+
+  ⚠️ CRITICAL (Round 4): ALWAYS returns Task.t({:ok, response} | {:error, error})
+  Never mixes return types!
   """
   def sample(client, prompt, num_samples, sampling_params, opts \\ []) do
-    # ⚠️ UPDATED (Round 3): Defensive ETS lookup with pattern matching
-    case :ets.lookup(:tinkex_sampling_clients, {:config, client}) do
-      [{_, config}] ->
-
+    # ⚠️ UPDATED (Round 4): ALWAYS return Task for consistency
     Task.async(fn ->
-      # Wait if currently in backoff period
-      Tinkex.RateLimiter.wait_for_backoff(config.rate_limiter)
+      # ⚠️ UPDATED (Round 3): Defensive ETS lookup with pattern matching
+      case :ets.lookup(:tinkex_sampling_clients, {:config, client}) do
+        [{_, config}] ->
+          # Wait if currently in backoff period
+          Tinkex.RateLimiter.wait_for_backoff(config.rate_limiter)
 
-      # Increment request ID (lock-free atomic)
-      request_id = :atomics.add_get(config.request_id_counter, 1, 1)
+          # Increment request ID (lock-free atomic)
+          request_id = :atomics.add_get(config.request_id_counter, 1, 1)
 
-      request = %Tinkex.Types.SampleRequest{
-        sampling_session_id: config.sampling_session_id,
-        seq_id: request_id,
-        num_samples: num_samples,
-        prompt: prompt,
-        sampling_params: sampling_params,
-        prompt_logprobs: opts[:include_prompt_logprobs] || false,
-        topk_prompt_logprobs: opts[:topk_prompt_logprobs] || 0
-      }
+          request = %Tinkex.Types.SampleRequest{
+            sampling_session_id: config.sampling_session_id,
+            seq_id: request_id,
+            num_samples: num_samples,
+            prompt: prompt,
+            sampling_params: sampling_params,
+            prompt_logprobs: opts[:include_prompt_logprobs] || false,
+            topk_prompt_logprobs: opts[:topk_prompt_logprobs] || 0
+          }
 
-        # HTTP call in THIS process
-        case Tinkex.API.Sampling.asample(request, config.http_pool, opts) do
-          {:error, %{status: 429}} = error ->
-            # Got rate limited - set backoff for ALL concurrent requests
-            Tinkex.RateLimiter.set_backoff(config.rate_limiter, 1000)
-            error
+          # HTTP call in THIS process
+          # ⚠️ UPDATED (Round 4): Use retry_after_ms from error, not hard-coded 1000ms
+          case Tinkex.API.Sampling.asample(request, config.http_pool, opts) do
+            {:error, %Tinkex.Error{status: 429, retry_after_ms: retry_ms} = error} ->
+              # Got rate limited - use server-provided backoff
+              backoff_ms = retry_ms || 1000  # Fallback to 1000ms if not provided
+              Tinkex.RateLimiter.set_backoff(config.rate_limiter, backoff_ms)
+              {:error, error}
 
-          result ->
-            result
-        end
-      end)
+            result ->
+              result
+          end
 
-      [] ->
-        # Client not initialized or already terminated
-        {:error, %Tinkex.Error{message: "SamplingClient not initialized"}}
-    end
+        [] ->
+          # Client not initialized or already terminated
+          {:error, %Tinkex.Error{
+            message: "SamplingClient not initialized",
+            type: :validation
+          }}
+      end
+    end)
   end
 
   ## Server Callbacks

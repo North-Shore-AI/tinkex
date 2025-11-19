@@ -1,6 +1,6 @@
 # Async Model and Futures Implementation
 
-**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202, 300-302. See `303_claude_sonnet_response_to_critiques.md` for details.
+**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202, 300-302, 400+. See response documents for details.
 
 **Key Corrections (Round 1 - Critiques 100-102):**
 - **Training requests**: Clarified that requests are sent **sequentially** (one at a time), but polling is concurrent
@@ -14,6 +14,11 @@
 **Key Corrections (Round 3 - Critiques 300-302):**
 - **Task error handling**: Added try/rescue wrappers to prevent infinite hangs when Task crashes
 - **API consistency**: All public client methods return Tasks (not direct GenServer.call results)
+
+**Key Corrections (Round 4 - Critique 400+):**
+- **CRITICAL Task.start safety**: ALL Task.start bodies that call GenServer.reply MUST wrap in try/rescue
+- **Failure modes**: Document what happens when Task crashes without proper error handling
+- **API pattern**: Emphasize Task.t({:ok, ...} | {:error, ...}) return type consistency
 
 ## Overview
 
@@ -341,8 +346,8 @@ def handle_call({:forward_backward, data, loss_fn, _opts}, from, state) do
     send_forward_backward_chunk(chunk, loss_fn, req_id, state)
   end)
 
-  # ⚠️ CRITICAL (Round 3): Spawn background task with error handling
-  # If task crashes, GenServer.reply must still be called to prevent infinite hang
+  # ⚠️ CRITICAL (Round 4): Spawn background task with mandatory error handling
+  # Without try/rescue: If polling task crashes → GenServer.reply never called → caller hangs FOREVER
   Task.start(fn ->
     result = try do
       # Poll all futures concurrently
@@ -355,14 +360,15 @@ def handle_call({:forward_backward, data, loss_fn, _opts}, from, state) do
       {:ok, combined}
     rescue
       e ->
-        # Ensure we always reply, even on failure
+        # ALWAYS reply, even on failure, to prevent infinite hang
         {:error, %Tinkex.Error{
           message: "Polling failed: #{Exception.message(e)}",
-          exception: e
+          type: :request_failed,
+          data: %{exception: e, stacktrace: __STACKTRACE__}
         }}
     end
 
-    # ALWAYS reply, whether success or failure
+    # ALWAYS call GenServer.reply, whether success or failure
     GenServer.reply(from, result)
   end)
 
