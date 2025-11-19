@@ -183,7 +183,7 @@ def is_user_error(error: Exception) -> bool:
     """Determine if error is user-caused (vs SDK/server issue)"""
 
     if isinstance(error, RequestFailedError):
-        return error.error_category == RequestErrorCategory.USER_ERROR
+        return error.error_category == RequestErrorCategory.User
 
     if isinstance(error, APIStatusError):
         # 4xx errors (except 408, 429) are user errors

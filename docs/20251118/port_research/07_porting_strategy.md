@@ -21,7 +21,7 @@
 
 **Key Corrections (Round 4 - Critique 400+):**
 - **JSON encoding**: Removed global nil-stripping - Python SDK accepts `null` for Optional fields
-- **Error categories**: All references updated from `USER_ERROR/TRANSIENT/FATAL` to lowercase wire values `unknown/server/user`
+- **Error categories**: Parser now normalizes casing + adds explicit verification step (repo snapshot only shows StrEnum members)
 - **429 handling**: Wired retry_after_ms from errors to RateLimiter instead of hard-coded values
 - **Config threading**: Centralized config struct, removed Application.get_env from API layer
 - **PoolKey module**: Single source of truth for URL normalization and pool key generation
@@ -481,12 +481,14 @@ defmodule Tinkex.Types.TensorData do
     shape: list(non_neg_integer())
   }
 
-  @doc "Create TensorData from Nx tensor"
+  @doc "Create TensorData from Nx tensor (aggressively cast to supported backing dtypes)"
   def from_nx(%Nx.Tensor{} = tensor) do
+    {normalized, dtype} = normalize_dtype(tensor)
+
     %__MODULE__{
-      data: Nx.to_flat_list(tensor),
-      dtype: nx_dtype_to_tensor_dtype(tensor.type),
-      shape: Tuple.to_list(tensor.shape)
+      data: Nx.to_flat_list(normalized),
+      dtype: dtype,
+      shape: Tuple.to_list(normalized.shape)
     }
   end
 
@@ -497,11 +499,28 @@ defmodule Tinkex.Types.TensorData do
     |> Nx.reshape(List.to_tuple(tensor_data.shape))
   end
 
-  # Only map supported types (int64, float32)
-  defp nx_dtype_to_tensor_dtype({:f, 32}), do: :float32
-  defp nx_dtype_to_tensor_dtype({:f, 64}), do: :float32  # Downcast to float32
-  defp nx_dtype_to_tensor_dtype({:s, 32}), do: :int64    # Upcast to int64
-  defp nx_dtype_to_tensor_dtype({:s, 64}), do: :int64
+  defp normalize_dtype(%Nx.Tensor{type: {:f, 32}} = tensor), do: {tensor, :float32}
+
+  defp normalize_dtype(%Nx.Tensor{type: {:f, 64}} = tensor) do
+    casted = Nx.as_type(tensor, {:f, 32})
+    {casted, :float32}
+  end
+
+  defp normalize_dtype(%Nx.Tensor{type: {:s, 64}} = tensor), do: {tensor, :int64}
+
+  defp normalize_dtype(%Nx.Tensor{type: {:s, 32}} = tensor) do
+    casted = Nx.as_type(tensor, {:s, 64})
+    {casted, :int64}
+  end
+
+  defp normalize_dtype(%Nx.Tensor{type: {:u, _bits}} = tensor) do
+    casted = Nx.as_type(tensor, {:s, 64})
+    {casted, :int64}
+  end
+
+  defp normalize_dtype(%Nx.Tensor{type: other}) do
+    raise ArgumentError, "unsupported Nx dtype #{inspect(other)}"
+  end
 
   defp tensor_dtype_to_nx(:float32), do: {:f, 32}
   defp tensor_dtype_to_nx(:int64), do: {:s, 64}
@@ -1161,7 +1180,22 @@ end
 
 ---
 
-### 4. All Other Optional Fields
+---
+
+### 4. StopReason Wire Values ⚠️ NEW
+
+**Why:** The Python repo bundled with this plan defines `StopReason: Literal["length", "stop"]`, while earlier docs (and possibly newer server builds) mention `"max_tokens" | "stop_sequence" | "eos"`. Implementing the wrong enum will break pattern matching on streaming/sampling responses.
+
+**Verification:**
+- [ ] Call the sampling endpoint and capture raw JSON for at least one response that stops due to token limit and one due to stop condition.
+- [ ] Record the exact `stop_reason` strings emitted by the API.
+- [ ] Document whether `"length"`/`"stop"` are the only values or if `"max_tokens"/"stop_sequence"/"eos"` are present in newer deployments.
+
+**Action:** Elixir atoms should match whatever the live API emits. If `"max_tokens"` et al. come back, update the docs/code before GA; if not, stick with `"length"`/`"stop"` but leave a compatibility note.
+
+---
+
+### 5. All Other Optional Fields
 
 **Pattern to verify:**
 For EVERY field marked `Optional[T] = None` in Python, Elixir should use `field: nil` as default (NOT a default value like `false`, `0`, `""`, etc.).
@@ -1179,17 +1213,28 @@ grep -r "Optional\[" tinker/types.py | grep "= None"
 
 Before shipping v1.0, you MUST verify the following against actual API behavior:
 
-### 1. RequestErrorCategory Wire Format
+### 0. StopReason Wire Format
 
-**Status:** ✅ Already correct - the plan uses lowercase ("unknown", "server", "user") matching Python's _types.py StrEnum patching.
+**Status:** ⚠️ Repo snapshot emits `"length"`/`"stop"` only; live service may still use `"max_tokens" | "stop_sequence" | "eos"`.
 
 **Verification:**
-1. Trigger a RequestFailedError from the API (e.g., invalid model_id)
-2. Log the raw JSON response body
-3. Inspect `response["category"]` value
-4. Verify if it's `"user"`, `"User"`, or something else
+1. Send a sampling request that naturally ends due to max tokens.
+2. Send another that stops via an explicit stop sequence.
+3. Capture the raw JSON responses and log `sequence.stop_reason`.
 
-**Action:** The parser already uses lowercase ("unknown", "server", "user") matching the Python SDK's _types.py StrEnum patching.
+**Action:** Update the Elixir enum + pattern matches to whatever values are observed. If backend still uses `"length"/"stop"`, keep the pared-down enum but document the divergence from historical strings.
+
+### 1. RequestErrorCategory Wire Format
+
+**Status:** ❓ Unknown - `_types.StrEnum` patch is not present in this repo snapshot, so responses could be `"Unknown"/"Server"/"User"` or lowercase.
+
+**Verification:**
+1. Trigger a RequestFailedError from the API (e.g., invalid model_id).
+2. Log the raw JSON response body.
+3. Inspect `response["category"]` value.
+4. Record the exact casing.
+
+**Action:** Parser already normalizes casing, but we must document the observed format (capitalized vs lowercase) in release notes/tests.
 
 ### 2. JSON null Handling for Optional Fields
 
@@ -1308,6 +1353,12 @@ Document the chosen approach so future maintainers know the trade-off.
 Run these quick checks before coding against the live API:
 
 ```bash
+# StopReason values emitted by sampling endpoint
+curl -s -X POST "$TINKER_BASE_URL/api/v1/sample" \
+  -H "X-Tinker-Api-Key: $TINKER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d @sample_request.json | jq '.sequences[].stop_reason'
+
 # RequestErrorCategory casing
 curl -s -X POST "$TINKER_BASE_URL/some/invalid/endpoint" \
   -H "X-Tinker-Api-Key: bad-key" | jq '.category'
@@ -1317,7 +1368,7 @@ curl -i "$TINKER_BASE_URL/rate_limited_endpoint" \
   -H "X-Tinker-Api-Key: $TINKER_API_KEY" | grep -i retry-after
 ```
 
-Record the observed casing (should be lowercase: "user"/"server"/"unknown") and note whether the service ever emits HTTP-date Retry-After headers.
+Record the observed `stop_reason` values plus RequestErrorCategory casing (repo snapshot suggests `"length"/"stop"` and capitalized `"Unknown"/"Server"/"User"`, but treat whatever the API returns as truth). Note whether the service ever emits HTTP-date Retry-After headers.
 
 ---
 
@@ -1329,11 +1380,12 @@ Before writing code, verify your assumptions:
 - [ ] ImageChunk fields: `data`, `format`, `height`, `width`, `tokens`, `type` (NOT `image_data`, `image_format`)
 - [ ] ImageAssetPointerChunk: uses `location` (NOT `asset_id`)
 - [ ] SampleRequest.prompt_logprobs: `Optional[bool] = None` (NOT `bool = False`)
+- [ ] StopReason values: capture actual `sequence.stop_reason` responses (repo snapshot shows `"length"`/`"stop"`)
 - [ ] All Optional fields: default to `nil`, not false/0/""
 
 **API Behavior (Round 6):**
 - [ ] API key format (logged from successful auth)
-- [ ] RequestErrorCategory casing (logged from error response)
+- [ ] RequestErrorCategory casing (log whether API returns `"Unknown"/"Server"/"User"` or lowercase)
 - [ ] Rate limit scope (confirmed `{base_url, api_key}` sharing; verify mixed keys don’t interfere)
 - [ ] x-should-retry header presence (logged from 5xx responses)
 - [ ] Retry-After formats observed (numeric vs HTTP-date) and documented fallback behavior

@@ -67,7 +67,7 @@ class RequestFailedError(TinkerError):
     ):
         super().__init__(message)
         self.request_id = request_id
-        self.error_category = error_category  # USER_ERROR | TRANSIENT | FATAL
+        self.error_category = error_category  # RequestErrorCategory (Unknown/Server/User)
         self.details = details
 ```
 
@@ -77,14 +77,21 @@ class RequestFailedError(TinkerError):
 
 ```python
 class RequestErrorCategory(StrEnum):
-    Unknown = auto()  # Produces "Unknown" (capitalized)
-    Server = auto()   # Produces "Server" (capitalized)
-    User = auto()     # Produces "User" (capitalized)
+    Unknown = auto()
+    Server = auto()
+    User = auto()
+
+# ⚠️ Wire casing is ambiguous:
+# - Default StrEnum.auto() returns "Unknown"/"Server"/"User".
+# - Earlier docs referenced lowercase due to an _types.StrEnum patch,
+#   but that patch is not visible in this repo snapshot.
+# Treat responses as case-insensitive until verified at runtime.
 ```
 
 ### 1. User Errors (Non-Retryable)
 
-**Category:** `RequestErrorCategory.User` (wire: `"User"`)
+**Category:** `RequestErrorCategory.User`
+**Wire value:** `"User"` (default StrEnum) **or** `"user"` if `_types` lowercases (parser handles both)
 
 Errors caused by invalid input:
 
@@ -102,7 +109,8 @@ Errors caused by invalid input:
 
 ### 2. Server Errors (Retryable)
 
-**Category:** `RequestErrorCategory.Server` (wire: `"Server"`)
+**Category:** `RequestErrorCategory.Server`
+**Wire value:** `"Server"` (default StrEnum) **or** `"server"` if `_types` lowercases
 
 Server-side failures that may succeed on retry:
 
@@ -119,7 +127,8 @@ Server-side failures that may succeed on retry:
 
 ### 3. Unknown Errors (Retryable)
 
-**Category:** `RequestErrorCategory.Unknown` (wire: `"Unknown"`)
+**Category:** `RequestErrorCategory.Unknown`
+**Wire value:** `"Unknown"` (default StrEnum) **or** `"unknown"` if `_types` lowercases
 
 Errors where cause is unclear - assume retryable for safety:
 
@@ -463,7 +472,7 @@ Use standard `{:ok, result} | {:error, reason}` pattern:
 # User error (don't retry)
 {:error, %Tinkex.Error{
   type: :request_failed,
-  data: %{category: :user_error}
+  data: %{category: :user}
 }}
 
 # Transient error (can retry)
@@ -591,7 +600,7 @@ case Tinkex.Retry.with_retry(fn -> do_request() end) do
     # Success
     process_response(response)
 
-  {:error, %Tinkex.Error{type: :request_failed, data: %{category: :user_error}}} = error ->
+  {:error, %Tinkex.Error{type: :request_failed, data: %{category: :user}}} = error ->
     # User error, don't retry
     Logger.error("User error: #{inspect(error)}")
     {:error, error}
@@ -613,7 +622,7 @@ defmodule Tinkex.Future do
         {:ok, result}
 
       {:ok, %{"status" => "failed", "error" => error}} ->
-        # Parse category from JSON (capitalized: "Unknown", "Server", "User")
+        # Parse category from JSON (case-insensitive: handles "Unknown"/"unknown")
         category = Tinkex.Types.RequestErrorCategory.parse(error["category"])
 
         case category do

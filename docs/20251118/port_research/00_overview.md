@@ -146,12 +146,13 @@ Elixir is an excellent fit for this SDK port because:
 - **Llama-3 tokenizer**: Verified exact mapping to `"baseten/Meta-Llama-3-tokenizer"` matches Python SDK
 
 **⚠️ UPDATED (Round 10 - SDK v0.4.1 Type Corrections):** Verified type alignment with actual Tinker Python SDK v0.4.1:
-- **StopReason enum**: ✅ Correct - `"max_tokens" | "stop_sequence" | "eos"` (docs already aligned)
-- **RequestErrorCategory wire format**: ✅ Correct - lowercase `"unknown" | "server" | "user"` (Python's _types.py patches StrEnum to lowercase auto() values)
-- **ForwardBackwardOutput**: Includes `loss_fn_output_type` field (type discriminator for loss_fn_outputs)
-- **LossFnType enum**: 3 values only: `"cross_entropy"`, `"importance_sampling"`, `"ppo"` (kl_divergence not in v0.4.1 REDUCE_MAP)
-- **MetricsReduction**: Implements 6 reduction strategies matching Python's REDUCE_MAP: `sum`, `min`, `max`, `mean`, `slack`, `unique` (hash_unordered not in v0.4.1)
-- **Telemetry session indexing**: Reporter maintains incrementing `event_session_index` counter (matches Python's `_session_index`)
+- **StopReason enum**: ❌ Docs previously assumed `"max_tokens" | "stop_sequence" | "eos"`. Actual `tinker/types/stop_reason.py` exposes only `Literal["length", "stop"]`. All port docs have been updated to match and now flag a follow-up verification step in case the upstream server has evolved.
+- **RequestErrorCategory wire format**: ❓ `_types.StrEnum` patching is not observable in this repo snapshot, so capitalization is unknown. Plan now specifies a case-insensitive parser plus an explicit verification task instead of claiming lowercase as fact.
+- **FutureRetrieveResponse union**: ✅ Docs now mirror the Python `Union[...]` shape, including the discrete `TryAgainResponse` variant surfaced via queue state backpressure.
+- **ForwardBackwardOutput**: ✅ Still includes `loss_fn_output_type` as discriminator for `loss_fn_outputs`.
+- **LossFnType enum**: ✅ Exactly 3 values: `"cross_entropy"`, `"importance_sampling"`, `"ppo"` (kl_divergence not in v0.4.1 REDUCE_MAP)
+- **MetricsReduction**: ✅ Implements 6 reduction strategies matching Python's REDUCE_MAP: `sum`, `min`, `max`, `mean`, `slack`, `unique` (hash_unordered not in v0.4.1)
+- **Telemetry session indexing**: ✅ Reporter maintains incrementing `event_session_index` counter (matches Python's `_session_index`)
 
 This port research is organized into the following documents:
 

@@ -5,7 +5,7 @@
 **Key Corrections (Round 1 - Critiques 100-102):**
 - `AdamParams`: Fixed defaults (beta2: 0.95, eps: 1e-12, learning_rate has default)
 - `TensorDtype`: Only 2 types supported (int64, float32)
-- `StopReason`: Corrected values ("max_tokens", "stop_sequence", "eos")
+- `StopReason`: **NEW discrepancy** — current Python repo exposes `Literal["length", "stop"]` (no `"max_tokens"/"eos"`). Docs updated plus runtime verification note.
 - Validation: Using pure functions instead of Ecto for lighter dependencies
 
 **Key Corrections (Round 2 - Critiques 200-202):**
@@ -16,7 +16,7 @@
 - `Datum`: Added plain list conversion support
 
 **Key Corrections (Round 3 - Critiques 300-302):**
-- `RequestErrorCategory`: Fixed capitalization - actual values are "Unknown", "Server", "User" (StrEnum.auto() capitalizes)
+- `RequestErrorCategory`: Parser is now case-insensitive with explicit runtime verification (this repo snapshot does **not** include the lowercase `_types` patch)
 - Tensor casting: Explicit f64→f32, s32→s64 casting to match Python SDK aggressive type coercion
 - `seq_id` optionality: Documented that field is optional in wire format but always set by client
 
@@ -222,7 +222,7 @@ class SampleResponse(BaseModel):
 class SampledSequence(BaseModel):
     tokens: List[int]
     logprobs: List[float]
-    stop_reason: StopReason  # "max_tokens" | "stop_sequence" | "eos"
+    stop_reason: StopReason  # Literal["length", "stop"] in repo snapshot
 ```
 
 **CreateModelResponse**
@@ -379,12 +379,13 @@ LossFnType: TypeAlias = Literal["cross_entropy", "importance_sampling", "ppo"]
 
 **StopReason** ⚠️ CORRECTED (v0.4.1)
 ```python
-# ACTUAL Python SDK v0.4.1 (verified from source):
-class StopReason(StrEnum):
-    MAX_TOKENS = auto()        # "max_tokens"
-    STOP_SEQUENCE = auto()     # "stop_sequence"
-    EOS = auto()               # "eos"
-# Wire values: "max_tokens" | "stop_sequence" | "eos"
+# tinker/types/stop_reason.py (repo snapshot used for this port):
+StopReason: TypeAlias = Literal["length", "stop"]
+
+# ⚠️ Action item:
+# Older releases reportedly exposed "max_tokens" | "stop_sequence" | "eos".
+# The current repo emits ONLY "length" and "stop". Confirm with live API
+# before shipping to ensure we are not missing newer wire values.
 ```
 
 **TensorDtype** ⚠️ CORRECTED
@@ -398,34 +399,44 @@ TensorDtype: TypeAlias = Literal["int64", "float32"]
 **RequestErrorCategory** ⚠️ CORRECTED (v0.4.1)
 
 ```python
-# Python SDK v0.4.1 source code (with _types.py StrEnum patching):
+# tinker/types/request_error_category.py
 class RequestErrorCategory(StrEnum):
-    Unknown = auto()  # Wire value: "unknown" (lowercase!)
-    Server = auto()   # Wire value: "server" (lowercase!)
-    User = auto()     # Wire value: "user" (lowercase!)
+    Unknown = auto()
+    Server = auto()
+    User = auto()
 
-# The _types.py module patches StrEnum metaclass to lowercase auto() values.
-# Wire format: "unknown" | "server" | "user" (all lowercase)
+# NOTE:
+# - Standard StrEnum.auto() returns the member name ("Unknown", "Server", "User").
+# - Earlier docs assumed _types.StrEnum lowercased the values, but that patch
+#   is NOT visible in this repo snapshot.
+# - Treat the wire casing as "Unknown"/"Server"/"User" until verified.
 ```
 
-**Elixir Parser (matches actual wire format):**
+**Elixir Parser (case-insensitive + verification hook):**
 
 ```elixir
 defmodule Tinkex.Types.RequestErrorCategory do
   @moduledoc """
   Request error category parser.
 
-  Wire values are LOWERCASE: \"unknown\", \"server\", \"user\"
-  (Python SDK's _types.py patches StrEnum to lowercase auto() values)
+  The Python repo exposes StrEnum members Unknown/Server/User. We normalize
+  casing and keep a runtime verification hook to confirm whether the live
+  service still lowercases values.
   """
 
   @type t :: :unknown | :server | :user
 
-  @doc "Parse from JSON string (lowercase wire format)"
-  def parse("unknown"), do: :unknown
-  def parse("server"), do: :server
-  def parse("user"), do: :user
-  def parse(_), do: :unknown  # Safe fallback
+  @spec parse(String.t() | nil) :: t()
+  def parse(value) when is_binary(value) do
+    case String.downcase(value) do
+      "server" -> :server
+      "user" -> :user
+      "unknown" -> :unknown
+      _ -> :unknown
+    end
+  end
+
+  def parse(_), do: :unknown
 
   @doc "Check if error category is retryable"
   def retryable?(:server), do: true
@@ -435,9 +446,9 @@ end
 ```
 
 **Why This Matters:**
-- Python SDK's `_types.py` patches `StrEnum` to lowercase all auto() values
-- Actual wire format is lowercase, not capitalized
-- Parser must match actual API responses
+- Insisting on lowercase broke parity with this repo snapshot.
+- A case-insensitive parser keeps us compatible with historical `"Unknown"` as well as any future lowercase patch.
+- Runtime logging (see 07_porting_strategy.md) remains mandatory to confirm the true wire format before shipping.
 
 ## 5. Future Types
 
@@ -453,13 +464,38 @@ class FutureRetrieveRequest(BaseModel):
     request_id: str
 ```
 
-**FutureRetrieveResponse**
+**FutureRetrieveResponse** ⚠️ CORRECTED (v0.4.1)
 ```python
-class FutureRetrieveResponse(BaseModel):
-    status: str  # "pending" | "completed" | "failed"
-    result: Optional[Dict[str, Any]] = None
-    error: Optional[RequestFailedResponse] = None
+class FuturePendingResponse(BaseModel):
+    status: Literal["pending"]
+
+class FutureCompletedResponse(BaseModel):
+    status: Literal["completed"]
+    result: Dict[str, Any]
+
+class FutureFailedResponse(BaseModel):
+    status: Literal["failed"]
+    error: RequestFailedResponse
+
+# New in repo snapshot: queue-state backpressure
+class TryAgainResponse(BaseModel):
+    type: Literal["try_again"]
+    request_id: str
+    queue_state: Literal["active", "paused_capacity", "paused_rate_limit"]
+    retry_after_ms: int | None = None
+
+FutureRetrieveResponse: TypeAlias = Union[
+    FuturePendingResponse,
+    FutureCompletedResponse,
+    FutureFailedResponse,
+    TryAgainResponse,
+]
 ```
+
+**Why This Matters:**
+- The simplified `{status,result,error}` struct in earlier docs would have dropped `TryAgainResponse`.
+- `_APIFuture._result_async` branches on each variant, so the Elixir port must mirror the union.
+- `queue_state` is critical for matching Python's graceful backpressure behavior.
 
 ## Elixir Mapping Strategy
 
@@ -783,26 +819,26 @@ Tinkex.JSON.encode!(request, omit_if_nil: [:optional_field])
 
 ### 5. Error Category Parsing ⚠️ UPDATED (Round 3+4)
 
-**CRITICAL:** Python `StrEnum.auto()` capitalizes values. Actual wire format is `"Unknown" | "Server" | "User"`, **NOT** the old `"user_error" | "transient" | "fatal"`.
+**CRITICAL:** This repo snapshot only shows the StrEnum declarations, so we must tolerate either `"Unknown"/"Server"/"User"` (default StrEnum) or lowercase variants if `_types.py` applies the patch in other builds.
 
 ```elixir
 defmodule Tinkex.Types.RequestErrorCategory do
   @moduledoc """
-  Request error category (matches Python StrEnum with auto()).
-
-  Python SDK (actual code):
-    class RequestErrorCategory(StrEnum):
-        Unknown = auto()  # Produces "Unknown" (capitalized)
-        Server = auto()   # Produces "Server" (capitalized)
-        User = auto()     # Produces "User" (capitalized)
+  Request error category (StrEnum in Python). Normalize to lowercase atoms.
   """
 
   @type t :: :unknown | :server | :user
 
-  @doc "Parse from JSON string (capitalized) to atom (lowercase)"
-  def parse("Unknown"), do: :unknown
-  def parse("Server"), do: :server
-  def parse("User"), do: :user
+  @doc "Parse from JSON string (any casing) to atom (lowercase)"
+  def parse(value) when is_binary(value) do
+    case String.downcase(value) do
+      "server" -> :server
+      "user" -> :user
+      "unknown" -> :unknown
+      _ -> :unknown
+    end
+  end
+
   def parse(_), do: :unknown
 
   @doc "Check if error category is retryable"
