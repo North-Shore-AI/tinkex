@@ -1224,17 +1224,20 @@ Before shipping v1.0, you MUST verify the following against actual API behavior:
 
 **Action:** Update the Elixir enum + pattern matches to whatever values are observed. If backend still uses `"length"/"stop"`, keep the pared-down enum but document the divergence from historical strings.
 
-### 1. RequestErrorCategory Wire Format
+### 1. RequestErrorCategory Wire Format ✅ CONFIRMED
 
-**Status:** ❓ Unknown - `_types.StrEnum` patch is not present in this repo snapshot, so responses could be `"Unknown"/"Server"/"User"` or lowercase.
+**Status:** ✅ Confirmed from source code - wire format is **lowercase**
 
-**Verification:**
-1. Trigger a RequestFailedError from the API (e.g., invalid model_id).
-2. Log the raw JSON response body.
-3. Inspect `response["category"]` value.
-4. Record the exact casing.
+**Evidence:**
+- Python's `StrEnum` with `auto()` returns lowercase member names in Python 3.11+
+- `RequestErrorCategory.Unknown.value == "unknown"` (lowercase!)
+- `RequestErrorCategory.Server.value == "server"` (lowercase!)
+- `RequestErrorCategory.User.value == "user"` (lowercase!)
+- Pydantic serializes enums using `.value`, so JSON contains lowercase strings
 
-**Action:** Parser already normalizes casing, but we must document the observed format (capitalized vs lowercase) in release notes/tests.
+**Wire format:** `{"category": "unknown" | "server" | "user"}`
+
+**Action:** Parser uses case-insensitive matching for defensive robustness, but the expected wire format is lowercase. No runtime verification needed - this is confirmed from the Python source code.
 
 ### 2. JSON null Handling for Optional Fields
 
@@ -1247,16 +1250,19 @@ Before shipping v1.0, you MUST verify the following against actual API behavior:
 
 **Action:** If API rejects `null` for specific fields, use per-field omission (NOT global nil-stripping).
 
-### 3. Rate Limit Scope (Per `{base_url, api_key}`)
+### 3. Rate Limit Scope (Per `{base_url, api_key}`) ⚠️ UPDATED
 
-**Why:** Python’s `_sample_backoff_until` sits on the shared `InternalClientHolder`, meaning all clients using the same API key against the same base URL pause together. We need to confirm the API doesn’t expect broader/global coordination.
+**Why:** The visible Python SDK code does **not** show a shared `_sample_backoff_until` attribute. Retry/backoff logic appears to be per-call/per-handler. However, the **Elixir port adds shared rate limiting** as an enhancement to prevent concurrent requests from independently hitting rate limits.
+
+**Elixir Design Decision:** Implement shared backoff per `{base_url, api_key}` bucket to coordinate rate limiting across concurrent SamplingClient requests.
 
 **Verification:**
 1. Create two SamplingClients with the **same** API key/base URL and a third with a different key.
 2. Trigger a 429 on one of the shared-key clients.
-3. Ensure the other shared-key client pauses, while the different-key client keeps sending.
+3. Ensure the Elixir implementation shares backoff (design goal), then verify this doesn't cause issues with actual API behavior.
+4. Confirm different API keys remain isolated (staging vs production don't interfere).
 
-**Action:** Implementation keys the RateLimiter on `{normalized_base_url, api_key}`. If real-world behavior differs, adjust before shipping.
+**Action:** Implementation keys the RateLimiter on `{normalized_base_url, api_key}`. This is an enhancement over Python's per-call retry logic.
 
 ### 4. x-should-retry Header Presence
 
@@ -1368,7 +1374,11 @@ curl -i "$TINKER_BASE_URL/rate_limited_endpoint" \
   -H "X-Tinker-Api-Key: $TINKER_API_KEY" | grep -i retry-after
 ```
 
-Record the observed `stop_reason` values plus RequestErrorCategory casing (repo snapshot suggests `"length"/"stop"` and capitalized `"Unknown"/"Server"/"User"`, but treat whatever the API returns as truth). Note whether the service ever emits HTTP-date Retry-After headers.
+Record the observed `stop_reason` values plus RequestErrorCategory values. The repo snapshot confirms:
+- `stop_reason`: `"length"` | `"stop"`
+- `category`: `"unknown"` | `"server"` | `"user"` (lowercase due to StrEnum.auto() behavior)
+
+Note whether the service ever emits HTTP-date Retry-After headers.
 
 ---
 
@@ -1385,7 +1395,7 @@ Before writing code, verify your assumptions:
 
 **API Behavior (Round 6):**
 - [ ] API key format (logged from successful auth)
-- [ ] RequestErrorCategory casing (log whether API returns `"Unknown"/"Server"/"User"` or lowercase)
+- [ ] RequestErrorCategory wire format (confirmed lowercase: `"unknown"/"server"/"user"` per StrEnum.auto())
 - [ ] Rate limit scope (confirmed `{base_url, api_key}` sharing; verify mixed keys don’t interfere)
 - [ ] x-should-retry header presence (logged from 5xx responses)
 - [ ] Retry-After formats observed (numeric vs HTTP-date) and documented fallback behavior

@@ -699,32 +699,21 @@ class SamplingClient(TelemetryProvider, QueueStateObserver):
         ...
 ```
 
-### Backpressure Handling
+### Backpressure Handling ⚠️ UPDATED (Source Code Analysis)
 
-The SamplingClient implements client-side backpressure:
+**Important Note:** The Python SDK's visible source code does **not** show a `_sample_backoff_until` attribute on `InternalClientHolder`. The actual retry/backoff logic appears to be implemented with **local state per call** (via `RetryHandler`) rather than shared holder-level backoff.
 
-```python
-async def _sample_async_impl(self, ...):
-    async with self.holder._sample_dispatch_semaphore:
-        while True:
-            # Check backoff
-            if (self.holder._sample_backoff_until and
-                time.time() < self.holder._sample_backoff_until):
-                await asyncio.sleep(1)
-                continue
+**Python SDK Retry Mechanism (from visible code):**
+- Retry logic is in `execute_with_retries` using local `attempt_count` and computed `time_to_wait`
+- `RetryHandler` instances manage their own retry state (per-handler, not global)
+- No observable shared backoff timestamp across all concurrent requests
 
-            # Try to send request
-            future = await send_request(...)
-            if future is not None:
-                break
-
-            # Got 429, back off
-            self.holder._sample_backoff_until = time.time() + 1
-```
+**Elixir Design Decision:**
+Despite Python not having shared backoff in the visible code, the **Elixir port adds shared rate limiting** as an enhancement. This prevents multiple concurrent SamplingClient requests from all hitting rate limits independently, which would amplify server load.
 
 ### Elixir Port Strategy ⚠️ CORRECTED - ETS-Based Architecture
 
-**CRITICAL FIX (Round 2):** Even "thin GenServer" with `GenServer.call` creates a bottleneck at 400 concurrent requests. The solution is **ETS for lock-free reads** and **atomics for shared backoff state**.
+**CRITICAL FIX (Round 2):** Even "thin GenServer" with `GenServer.call` creates a bottleneck at 400 concurrent requests. The solution is **ETS for lock-free reads** and **atomics for shared backoff state** (an enhancement over Python).
 
 #### Step 1: RateLimiter Module (Shared Backoff State) ⚠️ CORRECTED (Round 7)
 

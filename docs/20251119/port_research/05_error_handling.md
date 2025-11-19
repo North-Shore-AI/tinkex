@@ -71,7 +71,7 @@ class RequestFailedError(TinkerError):
         self.details = details
 ```
 
-## Error Categories ⚠️ UPDATED (Round 4)
+## Error Categories ⚠️ UPDATED (Round 4+)
 
 **ACTUAL Python SDK values** (verified from source):
 
@@ -81,17 +81,19 @@ class RequestErrorCategory(StrEnum):
     Server = auto()
     User = auto()
 
-# ⚠️ Wire casing is ambiguous:
-# - Default StrEnum.auto() returns "Unknown"/"Server"/"User".
-# - Earlier docs referenced lowercase due to an _types.StrEnum patch,
-#   but that patch is not visible in this repo snapshot.
-# Treat responses as case-insensitive until verified at runtime.
+# Wire format (CONFIRMED):
+# - StrEnum.auto() in Python 3.11+ returns LOWERCASE member names
+# - RequestErrorCategory.User.value == "user" (lowercase!)
+# - RequestErrorCategory.Server.value == "server" (lowercase!)
+# - RequestErrorCategory.Unknown.value == "unknown" (lowercase!)
+# - Pydantic serializes enums using .value, so JSON wire format is lowercase
+# - JSON: {"category": "unknown" | "server" | "user"}
 ```
 
 ### 1. User Errors (Non-Retryable)
 
 **Category:** `RequestErrorCategory.User`
-**Wire value:** `"User"` (default StrEnum) **or** `"user"` if `_types` lowercases (parser handles both)
+**Wire value:** `"user"` (lowercase - StrEnum.auto() behavior)
 
 Errors caused by invalid input:
 
@@ -110,7 +112,7 @@ Errors caused by invalid input:
 ### 2. Server Errors (Retryable)
 
 **Category:** `RequestErrorCategory.Server`
-**Wire value:** `"Server"` (default StrEnum) **or** `"server"` if `_types` lowercases
+**Wire value:** `"server"` (lowercase - StrEnum.auto() behavior)
 
 Server-side failures that may succeed on retry:
 
@@ -128,7 +130,7 @@ Server-side failures that may succeed on retry:
 ### 3. Unknown Errors (Retryable)
 
 **Category:** `RequestErrorCategory.Unknown`
-**Wire value:** `"Unknown"` (default StrEnum) **or** `"unknown"` if `_types` lowercases
+**Wire value:** `"unknown"` (lowercase - StrEnum.auto() behavior)
 
 Errors where cause is unclear - assume retryable for safety:
 

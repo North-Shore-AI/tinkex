@@ -121,7 +121,7 @@ Elixir is an excellent fit for this SDK port because:
 - **Streaming**: Marked as illustrative/non-production for v1.0
 
 **⚠️ UPDATED (Round 6 - Verification Focus):** Added comprehensive pre-implementation verification steps:
-- **RequestErrorCategory**: Wire format verification (Unknown/Server/User vs Unknown/Server/USER)
+- **RequestErrorCategory**: Wire format confirmed as lowercase ("unknown"/"server"/"user") per StrEnum.auto() behavior
 - **Rate limiting**: Confirmed shared `{base_url, api_key}` scope (staging/prod remain isolated)
 - **Pre-implementation checklist**: 8 critical verification steps before coding
 
@@ -147,7 +147,7 @@ Elixir is an excellent fit for this SDK port because:
 
 **⚠️ UPDATED (Round 10 - SDK v0.4.1 Type Corrections):** Verified type alignment with actual Tinker Python SDK v0.4.1:
 - **StopReason enum**: ❌ Docs previously assumed `"max_tokens" | "stop_sequence" | "eos"`. Actual `tinker/types/stop_reason.py` exposes only `Literal["length", "stop"]`. All port docs have been updated to match and now flag a follow-up verification step in case the upstream server has evolved.
-- **RequestErrorCategory wire format**: ❓ `_types.StrEnum` patching is not observable in this repo snapshot, so capitalization is unknown. Plan now specifies a case-insensitive parser plus an explicit verification task instead of claiming lowercase as fact.
+- **RequestErrorCategory wire format**: ✅ Confirmed as **lowercase** `"unknown"/"server"/"user"` per standard StrEnum.auto() behavior in Python 3.11+. Pydantic serializes enum `.value`, so JSON contains lowercase strings. Parser uses case-insensitive matching for defensive robustness.
 - **FutureRetrieveResponse union**: ✅ Docs now mirror the Python `Union[...]` shape, including the discrete `TryAgainResponse` variant surfaced via queue state backpressure.
 - **ForwardBackwardOutput**: ✅ Still includes `loss_fn_output_type` as discriminator for `loss_fn_outputs`.
 - **LossFnType enum**: ✅ Exactly 3 values: `"cross_entropy"`, `"importance_sampling"`, `"ppo"` (kl_divergence not in v0.4.1 REDUCE_MAP)

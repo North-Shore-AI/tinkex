@@ -405,29 +405,32 @@ class RequestErrorCategory(StrEnum):
     Server = auto()
     User = auto()
 
-# NOTE:
-# - Standard StrEnum.auto() returns the member name ("Unknown", "Server", "User").
-# - Earlier docs assumed _types.StrEnum lowercased the values, but that patch
-#   is NOT visible in this repo snapshot.
-# - Treat the wire casing as "Unknown"/"Server"/"User" until verified.
+# WIRE FORMAT:
+# - Standard StrEnum.auto() returns the LOWERCASE member name in Python 3.11+
+# - RequestErrorCategory.Unknown.value == "unknown"  (lowercase!)
+# - RequestErrorCategory.Server.value == "server"    (lowercase!)
+# - RequestErrorCategory.User.value == "user"        (lowercase!)
+# - Pydantic serializes enums using .value, so JSON contains lowercase strings
+# - JSON wire format: {"category": "unknown" | "server" | "user"}
 ```
 
-**Elixir Parser (case-insensitive + verification hook):**
+**Elixir Parser (case-insensitive for robustness):**
 
 ```elixir
 defmodule Tinkex.Types.RequestErrorCategory do
   @moduledoc """
   Request error category parser.
 
-  The Python repo exposes StrEnum members Unknown/Server/User. We normalize
-  casing and keep a runtime verification hook to confirm whether the live
-  service still lowercases values.
+  The Python SDK uses StrEnum with auto(), which produces lowercase wire values:
+  - JSON contains: "unknown" | "server" | "user" (all lowercase)
+  - Parser is case-insensitive as a defensive measure against format changes
   """
 
   @type t :: :unknown | :server | :user
 
   @spec parse(String.t() | nil) :: t()
   def parse(value) when is_binary(value) do
+    # Normalize to lowercase (wire format is already lowercase, but be defensive)
     case String.downcase(value) do
       "server" -> :server
       "user" -> :user
@@ -446,9 +449,10 @@ end
 ```
 
 **Why This Matters:**
-- Insisting on lowercase broke parity with this repo snapshot.
-- A case-insensitive parser keeps us compatible with historical `"Unknown"` as well as any future lowercase patch.
-- Runtime logging (see 07_porting_strategy.md) remains mandatory to confirm the true wire format before shipping.
+- The wire format uses **lowercase** ("unknown", "server", "user") due to StrEnum.auto() behavior
+- Case-insensitive parser provides robustness against potential format changes
+- Using capitalized values in pattern matching would cause API response parsing to fail
+- Elixir atoms (:unknown, :server, :user) correctly represent the lowercase wire values
 
 ## 5. Future Types
 
