@@ -25,6 +25,10 @@
 - **NotGiven clarification**: `NotGiven` is used in client options, NOT request schemas
 - **Error categories**: Updated to match actual Python values ("Unknown"/"Server"/"User")
 
+**Key Corrections (Round 5 - Final):**
+- **Tokenizer scope**: Clarified that `tokenizers` NIF provides raw tokenization only; NO chat template support in v1.0
+- **Image handling**: Clarified v1.0 supports JSON-based images (ImageChunk/ImageAssetPointerChunk); multipart deferred to v2.0
+
 ## Python Type Infrastructure
 
 The Tinker SDK uses Pydantic extensively for type validation and serialization. All types inherit from either `BaseModel` or `StrictBase`.
@@ -214,7 +218,7 @@ class ModelInput(BaseModel):
 **ModelInputChunk** (Abstract)
 ```python
 # Union type for different chunk kinds
-ModelInputChunk = Union[EncodedTextChunk, ImageChunk, ...]
+ModelInputChunk = Union[EncodedTextChunk, ImageChunk, ImageAssetPointerChunk, ...]
 
 class EncodedTextChunk(BaseModel):
     tokens: List[int]
@@ -222,7 +226,28 @@ class EncodedTextChunk(BaseModel):
     @property
     def length(self) -> int:
         return len(self.tokens)
+
+class ImageChunk(BaseModel):
+    """Image data encoded as base64 in JSON (NOT multipart)"""
+    image_data: str  # base64-encoded image
+    image_format: str  # "png", "jpeg", etc.
+
+class ImageAssetPointerChunk(BaseModel):
+    """Reference to pre-uploaded image asset"""
+    asset_id: str
 ```
+
+**v1.0 Scope Clarification - Image Handling:**
+
+The Python SDK's `_files.py` supports sophisticated `multipart/form-data` uploads, but the **public Tinker API** uses JSON-based image types:
+- `ImageChunk`: Base64-encoded image data in JSON
+- `ImageAssetPointerChunk`: Reference to pre-uploaded asset
+
+**Elixir v1.0 Support:**
+- ✅ JSON-based image types (`ImageChunk`, `ImageAssetPointerChunk`)
+- ❌ Raw multipart file uploads (deferred to v2.0 unless API requires it)
+
+If future endpoints expose true "file upload" functionality, we'll mirror Python's `_files.py` behavior with `multipart/form-data` via Finch.
 
 **TensorData** (Numerical Arrays) ⚠️ CORRECTED
 ```python
@@ -679,14 +704,90 @@ defmodule Tinkex.Error do
 end
 ```
 
-### 6. Immutability
+### 6. Tokenizer Responsibilities and Chat Templates ⚠️ NEW (Round 5)
+
+**CRITICAL CLARIFICATION:** The Elixir port uses the `tokenizers` NIF (Rust bindings to HuggingFace tokenizers) instead of the full `transformers` library to keep dependencies lean (~5MB vs 100+MB).
+
+**What This Means for v1.0:**
+
+The `tokenizers` library provides:
+- ✅ Raw text → token IDs encoding
+- ✅ Token IDs → text decoding
+- ✅ Special tokens (BOS, EOS, PAD, etc.)
+- ✅ Vocabulary and merges
+
+It does **NOT** provide:
+- ❌ Chat template application (`chat_template` from tokenizer_config.json)
+- ❌ Instruction formatting for fine-tuned models
+- ❌ Automatic prompt engineering
+
+**Elixir v1.0 Design Decision:**
+
+```elixir
+defmodule Tinkex.Tokenizer do
+  @moduledoc """
+  Text tokenization using HuggingFace tokenizers (Rust NIF).
+
+  IMPORTANT: This module provides RAW tokenization only.
+  You are responsible for applying chat templates or instruction
+  formatting BEFORE passing text to encode/2.
+
+  For chat-based models (ChatML, Llama-3-Instruct, etc.), format
+  your prompts according to the model's expected structure before
+  tokenization.
+  """
+
+  @doc """
+  Encode text to token IDs.
+
+  NOTE: Does NOT apply chat templates. If you're using an instruction-tuned
+  model, format your text according to the model's chat template BEFORE
+  calling this function.
+
+  ## Example
+
+      # Raw tokenization (what we provide)
+      tokens = Tinkex.Tokenizer.encode("Hello, world!", "gpt2")
+
+      # For chat models, YOU format the prompt:
+      formatted_prompt = \"\"\"
+      <|im_start|>system
+      You are a helpful assistant.<|im_end|>
+      <|im_start|>user
+      Hello!<|im_end|>
+      <|im_start|>assistant
+      \"\"\"
+      tokens = Tinkex.Tokenizer.encode(formatted_prompt, "Qwen/Qwen2.5-7B-Instruct")
+  """
+  def encode(text, model_name) do
+    # Implementation using tokenizers NIF
+    ...
+  end
+end
+```
+
+**Alternative (Future v2.0):**
+
+If chat template support becomes critical, we can:
+1. Parse `tokenizer_config.json` to extract `chat_template` (Jinja2 template)
+2. Implement Jinja2 renderer in Elixir or shell out to Python
+3. Add `Tinkex.Chat.format/2` helper
+
+For v1.0, **explicit documentation** that users must handle chat formatting is sufficient.
+
+**Why This Matters:**
+- Prevents surprise when users expect automatic chat template application
+- Aligns expectations with actual HF `tokenizers` library capabilities
+- Provides clear upgrade path for v2.0 if needed
+
+### 7. Immutability
 - Elixir structs are immutable by default (advantage!)
 - Use `Map.put/3` or struct update syntax for "mutations"
   ```elixir
   %{model_input | chunks: new_chunks}
   ```
 
-### 6. Default Values
+### 8. Default Values
 - Elixir structs support default values in defstruct
 - For complex defaults, use constructor functions:
   ```elixir

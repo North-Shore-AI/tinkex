@@ -112,16 +112,22 @@ Elixir is an excellent fit for this SDK port because:
 
 ## Documentation Structure
 
-**⚠️ UPDATED (Round 4):** All documents have been revised based on comprehensive critique 400+ addressing JSON encoding, error categories, 429 handling, and config threading.
+**⚠️ UPDATED (Round 5 - Final):** All documents have been revised based on comprehensive critiques addressing:
+- **JSON encoding**: Removed global nil-stripping; align with Python's Optional field behavior
+- **TrainingClient safety**: Robust Task wrappers with try/rescue for GenServer.reply
+- **Retry semantics**: Integrated x-should-retry header, proper 429 handling with Retry-After
+- **Config threading**: Tinkex.Config struct for true multi-tenancy
+- **ETS cleanup**: Registry pattern with process monitoring
+- **Streaming**: Marked as illustrative/non-production for v1.0
 
 This port research is organized into the following documents:
 
 1. **00_overview.md** (this document) - High-level architecture
-2. **01_type_system.md** - Type definitions and validation ⚠️ Major JSON encoding corrections
-3. **02_client_architecture.md** - Client implementations and state management ⚠️ Task.start safety fixes
-4. **03_async_model.md** - Concurrency and async operations ⚠️ Error handling improvements
-5. **04_http_layer.md** - HTTP/2 client and connection pooling ⚠️ Centralized PoolKey, config threading
-6. **05_error_handling.md** - Exception handling and retry logic ⚠️ Error category corrections
+2. **01_type_system.md** - Type definitions and validation
+3. **02_client_architecture.md** - Client implementations and state management
+4. **03_async_model.md** - Concurrency and async operations
+5. **04_http_layer.md** - HTTP/2 client and connection pooling
+6. **05_error_handling.md** - Exception handling and retry logic
 7. **06_telemetry.md** - Observability and metrics
 8. **07_porting_strategy.md** - Implementation roadmap and recommendations
 

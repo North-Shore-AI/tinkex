@@ -23,6 +23,12 @@
 - **Config threading**: Remove ALL `Application.get_env` usage from API layer, pass config through clients
 - **Retry-After parsing**: Support both millisecond headers and HTTP Date format
 
+**Key Corrections (Round 5 - Final):**
+- **Streaming marked non-production**: Added explicit warnings that streaming example is illustrative only (memory/framing issues)
+- **x-should-retry header**: Added support for server-controlled retry logic (honors "true"/"false" header)
+- **429 retry integrated**: 429 now retries in with_retries/3 using server-provided backoff
+- **Tinkex.Config usage**: Updated all examples to use Config struct, not Application.get_env
+
 ## Python Implementation
 
 ### HTTP Client: httpx
@@ -504,13 +510,35 @@ defmodule Tinkex.API do
     {:error, %Tinkex.Error{message: Exception.message(exception), exception: exception}}
   end
 
-  ## Retry logic
+  ## Retry logic ⚠️ UPDATED (Round 5) - Added x-should-retry and 429 support
 
   defp with_retries(fun, max_retries, attempt \\ 0) do
     case fun.() do
-      {:ok, _} = success ->
-        success
+      {:ok, %Finch.Response{headers: headers} = response} = success ->
+        # ⚠️ NEW: Honor x-should-retry header from server
+        case List.keyfind(headers, "x-should-retry", 0) do
+          {_, "true"} when attempt < max_retries ->
+            # Server explicitly requests retry
+            delay = retry_delay(attempt)
+            Process.sleep(delay)
+            with_retries(fun, max_retries, attempt + 1)
 
+          _ ->
+            # No retry requested, return success
+            success
+        end
+
+      # ⚠️ NEW: 429 rate limit with server-provided backoff
+      {:error, %{status: 429, retry_after_ms: backoff_ms}} = error ->
+        if attempt < max_retries do
+          # Use server-provided backoff
+          Process.sleep(backoff_ms)
+          with_retries(fun, max_retries, attempt + 1)
+        else
+          error
+        end
+
+      # 5xx server errors and 408 timeout
       {:error, %{status: status}} = error when status >= 500 or status == 408 ->
         if attempt < max_retries do
           delay = retry_delay(attempt)
@@ -520,6 +548,7 @@ defmodule Tinkex.API do
           error
         end
 
+      # Connection/transport errors
       {:error, %Mint.TransportError{}} = error ->
         if attempt < max_retries do
           delay = retry_delay(attempt)
@@ -529,6 +558,7 @@ defmodule Tinkex.API do
           error
         end
 
+      # All other errors (4xx except 408/429, validation errors, etc.)
       error ->
         error
     end
@@ -659,19 +689,39 @@ defmodule Tinkex.API do
 end
 ```
 
-### Streaming Support
+### Streaming Support ⚠️ ILLUSTRATIVE ONLY - NOT PRODUCTION READY (Round 5)
 
-For future streaming responses:
+**IMPORTANT:** The following streaming example is **illustrative only** and has known issues that prevent production use:
+
+❌ **Issue 1: Memory accumulation** - Accumulates all events in memory, defeating streaming purpose
+❌ **Issue 2: Partial frames** - TCP/HTTP don't guarantee complete SSE frames per `:data` chunk
+❌ **Issue 3: No buffer management** - Missing stateful buffer across chunks
+
+**v1.0 Scope:** Streaming is **NOT** supported. This section serves as a sketch for future v2.0 implementation.
+
+When streaming is implemented for real (v2.0), it should:
+- Maintain an internal buffer across `:data` chunks
+- Only emit events when complete SSE records are parsed
+- Provide callback or message-based API (not accumulator)
+- Mirror Python's `_streaming.py` buffer logic
 
 ```elixir
 defmodule Tinkex.API.Stream do
-  @doc "Stream server-sent events"
+  @moduledoc """
+  ⚠️ SKETCH ONLY - NOT PRODUCTION READY
+
+  Streaming support deferred to v2.0. This code will NOT work
+  correctly for SSE streams due to framing issues.
+  """
+
+  @doc "Stream server-sent events (ILLUSTRATIVE - DO NOT USE)"
   def stream(path, body, pool, opts \\ []) do
     url = Tinkex.API.build_url(path)
     headers = Tinkex.API.build_headers(opts)
 
     request = Finch.build(:post, url, headers, Jason.encode!(body))
 
+    # ⚠️ PROBLEM: This accumulates ALL events in memory
     Finch.stream(request, pool, nil, fn
       {:status, status}, acc ->
         {:cont, Map.put(acc, :status, status)}
@@ -680,13 +730,15 @@ defmodule Tinkex.API.Stream do
         {:cont, Map.put(acc, :headers, headers)}
 
       {:data, data}, acc ->
-        # Parse SSE data
+        # ⚠️ PROBLEM: Assumes complete SSE frames per chunk (wrong!)
+        # TCP may split "data: {...}\n\n" across multiple :data messages
         events = parse_sse(data)
         {:cont, Map.update(acc, :events, events, &(&1 ++ events))}
     end)
   end
 
   defp parse_sse(data) do
+    # ⚠️ SKETCH ONLY - needs buffer management
     # Parse server-sent event format
     # data: {...}\n\n
     ...
@@ -694,21 +746,96 @@ defmodule Tinkex.API.Stream do
 end
 ```
 
-## Configuration
+**For v2.0 Production Streaming:**
+```elixir
+# Proper implementation would use GenServer with buffer state
+defmodule Tinkex.API.StreamHandler do
+  use GenServer
+
+  def init(callback) do
+    {:ok, %{buffer: "", callback: callback}}
+  end
+
+  def handle_data(chunk, state) do
+    # Append to buffer
+    buffer = state.buffer <> chunk
+
+    # Extract complete SSE records
+    {events, remaining} = extract_complete_events(buffer)
+
+    # Call user callback for each event
+    Enum.each(events, state.callback)
+
+    {:ok, %{state | buffer: remaining}}
+  end
+end
+```
+
+## Configuration ⚠️ UPDATED (Round 5) - Use Tinkex.Config Struct
+
+**IMPORTANT:** For multi-tenancy, use `Tinkex.Config` struct instead of global `Application.get_env/3`.
+
+### Per-Client Configuration (Recommended)
+
+```elixir
+# Create config for each client instance
+config = Tinkex.Config.new(
+  base_url: "https://api.thinkingmachines.ai",
+  api_key: "your_api_key",
+  timeout: 120_000,
+  max_retries: 3
+)
+
+# Pass to client
+{:ok, client} = Tinkex.ServiceClient.start_link(config: config)
+
+# Multi-tenant example: different API keys per client
+config_a = Tinkex.Config.new(api_key: System.get_env("USER_A_API_KEY"))
+config_b = Tinkex.Config.new(api_key: System.get_env("USER_B_API_KEY"))
+
+{:ok, client_a} = Tinkex.ServiceClient.start_link(config: config_a)
+{:ok, client_b} = Tinkex.ServiceClient.start_link(config: config_b)
+```
+
+### Global Defaults (Fallback)
+
+Only used when client doesn't provide explicit config:
 
 ```elixir
 # config/config.exs
 config :tinkex,
-  base_url: "https://tinker.thinkingmachines.dev/services/tinker-prod",
-  api_key: nil,  # Read from env
+  base_url: "https://api.thinkingmachines.ai",
+  api_key: nil,  # Read from env in runtime.exs
   timeout: 120_000,
-  max_retries: 2
+  max_retries: 3
 
 # config/runtime.exs
 import Config
 
 config :tinkex,
   api_key: System.get_env("TINKER_API_KEY")
+```
+
+**How Config is Used:**
+
+```elixir
+# ServiceClient.start_link/1
+def start_link(opts \\ []) do
+  # Construct config once, use Application.get_env here as fallback
+  config = opts[:config] || Tinkex.Config.new(opts)
+  GenServer.start_link(__MODULE__, config, opts)
+end
+
+# HTTP layer receives config via opts
+def post(path, body, pool, opts \\ []) do
+  config = Keyword.fetch!(opts, :config)  # NOT Application.get_env!
+
+  url = build_url(config.base_url, path)
+  headers = build_headers(config.api_key, opts)
+
+  request = Finch.build(:post, url, headers, Jason.encode!(body))
+  Finch.request(request, config.http_pool, pool: pool_key(config.base_url, pool))
+end
 ```
 
 ## Comparison Summary

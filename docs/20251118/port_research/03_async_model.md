@@ -20,6 +20,11 @@
 - **Failure modes**: Document what happens when Task crashes without proper error handling
 - **API pattern**: Emphasize Task.t({:ok, ...} | {:error, ...}) return type consistency
 
+**Key Corrections (Round 5 - Final):**
+- **API consistency verified**: All public client methods consistently return Task.t({:ok, ...} | {:error, ...})
+- **Blocking behavior documented**: TrainingClient handle_call blocking is a conscious tradeoff for request ordering
+- No changes required - document already aligned with Round 5 recommendations
+
 ## Overview
 
 The Tinker SDK implements a sophisticated futures-based async model that allows synchronous-looking code to perform async operations. This is one of the most complex parts of the SDK to port.

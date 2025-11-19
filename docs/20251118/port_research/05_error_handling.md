@@ -8,6 +8,11 @@
 - **429 handling**: Clarified retry behavior with Retry-After support
 - **Retry logic**: Updated `retryable?` to match Python `is_retryable` behavior
 
+**Key Corrections (Round 5 - Final):**
+- **x-should-retry integration**: Added comprehensive decision table with server-controlled retry logic
+- **Unified retry policy**: Documented priority order (header → category → status → type)
+- **should_retry?/2 function**: New function that honors x-should-retry header before standard logic
+
 ## Python Exception Hierarchy
 
 The Tinker SDK defines a comprehensive exception hierarchy:
@@ -136,6 +141,77 @@ Errors where cause is unclear - assume retryable for safety:
 - Retry after backoff period
 - Use server-provided `Retry-After` header
 - Share backoff state across concurrent requests (for SamplingClient)
+
+## Error Handling Decision Table ⚠️ NEW (Round 5)
+
+Comprehensive truth table for retry logic (matches Python SDK + x-should-retry integration):
+
+| Condition | Category | User Error? | Retryable? | Notes |
+|-----------|----------|-------------|------------|-------|
+| **x-should-retry: "true"** | - | NO | **YES** | Server explicitly requests retry (overrides status) |
+| **x-should-retry: "false"** | - | Varies | **NO** | Server explicitly forbids retry |
+| `category == :user` | User | YES | NO | Invalid input, fix required |
+| `status 4xx` (except 408, 429) | User | YES | NO | Client error, no retry |
+| `status 408` | Unknown | NO | YES | Timeout, transient |
+| `status 429` | - | NO | YES | Rate limit (use Retry-After) |
+| `status 5xx` | Server | NO | YES | Server error, retry |
+| `category == :server` | Server | NO | YES | Server-side failure |
+| `category == :unknown` | Unknown | NO | YES | Err on side of retrying |
+| Connection errors | Unknown | NO | YES | Network issues |
+| Transport errors | Unknown | NO | YES | TCP/TLS failures |
+
+**Priority:**
+1. x-should-retry header (if present) - overrides all other logic
+2. Error category (User/Server/Unknown)
+3. HTTP status code
+4. Error type (connection, timeout, etc.)
+
+**Implementation:**
+
+```elixir
+defmodule Tinkex.Retry do
+  @doc """
+  Unified retry logic integrating x-should-retry header.
+
+  Priority:
+  1. x-should-retry header (server-controlled)
+  2. Error category
+  3. HTTP status
+  4. Error type
+  """
+  def should_retry?(response_or_error, headers \\ []) do
+    # Priority 1: Honor x-should-retry header if present
+    case List.keyfind(headers, "x-should-retry", 0) do
+      {_, "true"} -> true
+      {_, "false"} -> false
+      nil ->
+        # Priority 2-4: Use standard retry logic
+        retryable?(response_or_error)
+    end
+  end
+
+  # Standard retry logic (when x-should-retry not present)
+  def retryable?(%Tinkex.Error{type: :api_connection}), do: true
+  def retryable?(%Tinkex.Error{type: :api_timeout}), do: true
+
+  # 5xx, 408, 429 retryable
+  def retryable?(%Tinkex.Error{type: :api_status, status: status})
+      when status >= 500 or status in [408, 429], do: true
+
+  # Server and Unknown categories retryable
+  def retryable?(%Tinkex.Error{type: :request_failed, data: %{category: category}})
+      when category in [:server, :unknown], do: true
+
+  # User category NOT retryable
+  def retryable?(%Tinkex.Error{type: :request_failed, data: %{category: :user}}), do: false
+
+  # 4xx (except 408, 429) NOT retryable
+  def retryable?(%Tinkex.Error{type: :api_status, status: status})
+      when status in 400..499, do: false
+
+  def retryable?(_), do: false
+end
+```
 
 ## Retry Strategies
 

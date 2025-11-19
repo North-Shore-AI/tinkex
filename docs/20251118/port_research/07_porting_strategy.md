@@ -28,6 +28,16 @@
 - **Task.start safety**: All async GenServer.reply patterns now have mandatory try/rescue wrappers
 - **API consistency**: All public client methods return Task.t({:ok, ...} | {:error, ...})
 
+**Key Corrections (Round 5 - Final):**
+- **TrainingClient**: Documented blocking behavior as conscious tradeoff; robust Task wrappers with try/rescue
+- **HTTP & retries**: Integrated x-should-retry header, unified retry policy, proper 429 handling
+- **JSON encoding**: Clarified that nil → null is correct (matches Python), removed global nil-stripping
+- **Config threading**: Implemented Tinkex.Config struct for true multi-tenancy
+- **ETS cleanup**: Added SamplingRegistry with process monitoring for automatic cleanup
+- **Streaming**: Marked as non-production sketch with explicit warnings (v2.0 target)
+- **Tokenizer scope**: Documented raw tokenization only, no chat templates in v1.0
+- **Concrete next steps**: Added prioritized action items for immediate implementation
+
 ## Technology Stack Recommendations
 
 ### Core Dependencies ⚠️ UPDATED
@@ -754,9 +764,280 @@ This port is **highly feasible** and will result in a **superior SDK** leveragin
 
 The estimated timeline of **8 weeks** for a fully-featured v1.0 is realistic with a single developer working full-time.
 
-## Next Steps
+## Concrete Next Steps (Round 5 - Prioritized Actions)
 
-1. Complete Phase 1 (foundation)
-2. Set up CI/CD pipeline
-3. Begin Phase 2 (clients)
+The following changes tighten the v1.0 plan with minimal scope creep and eliminate production-breaking bugs:
+
+### 1. TrainingClient Safety & API Consistency
+
+**Priority:** CRITICAL - Prevents infinite hangs
+
+**Actions:**
+- ✅ Wrap all `Task.start` bodies that call `GenServer.reply/2` in `try/rescue`
+- ✅ Ensure exactly ONE in-progress task at a time (currently done via synchronous sends)
+- ✅ Document timeout behavior (all examples use `:infinity` or large explicit timeout)
+- ✅ Decide public API shape: all methods return `Task.t({:ok, ...} | {:error, ...})`
+
+**Implementation:**
+```elixir
+@impl true
+def handle_call({:forward_backward, data, loss_fn, opts}, from, state) do
+  # Send all chunks synchronously (ensures ordering)
+  {untyped_futures, new_state} = send_all_chunks(data, loss_fn, state)
+
+  # Poll in background with MANDATORY error handling
+  Task.start(fn ->
+    reply = try do
+      polling_tasks = Enum.map(untyped_futures, &Tinkex.Future.poll/1)
+      results = Task.await_many(polling_tasks, :infinity)
+      {:ok, combine_results(results)}
+    rescue
+      e ->
+        {:error, %Tinkex.Error{
+          message: Exception.message(e),
+          type: :request_failed,
+          data: %{exception: e}
+        }}
+    end
+
+    GenServer.reply(from, reply)  # ALWAYS called, even on crash
+  end)
+
+  {:noreply, new_state}
+end
+```
+
+**Why This Matters:**
+- Without `try/rescue`, task crashes leave caller hanging forever
+- Critical for production stability
+
+---
+
+### 2. HTTP Layer & Retry Logic
+
+**Priority:** HIGH - Ensures Python parity
+
+**Actions:**
+- ✅ Add `x-should-retry` header support in `with_retries/3`
+- ✅ Wire 429 handling end-to-end (parse `Retry-After`, use in `RateLimiter.set_backoff/2`)
+- ✅ Unify retry policy with telemetry `is_user_error/1` logic
+
+**Implementation:**
+```elixir
+defp with_retries(fun, max_retries, attempt \\ 0) do
+  case fun.() do
+    {:ok, %Finch.Response{headers: headers} = response} = success ->
+      # NEW: Honor x-should-retry header
+      case List.keyfind(headers, "x-should-retry", 0) do
+        {_, "true"} when attempt < max_retries ->
+          delay = retry_delay(attempt)
+          Process.sleep(delay)
+          with_retries(fun, max_retries, attempt + 1)
+        _ ->
+          success
+      end
+
+    # NEW: 429 with server-provided backoff
+    {:error, %{status: 429, retry_after_ms: backoff_ms}} = error ->
+      if attempt < max_retries do
+        Process.sleep(backoff_ms)
+        with_retries(fun, max_retries, attempt + 1)
+      else
+        error
+      end
+
+    # 5xx, 408
+    {:error, %{status: status}} = error when status >= 500 or status == 408 ->
+      if attempt < max_retries do
+        delay = retry_delay(attempt)
+        Process.sleep(delay)
+        with_retries(fun, max_retries, attempt + 1)
+      else
+        error
+      end
+
+    error -> error
+  end
+end
+```
+
+**Why This Matters:**
+- Python SDK has rich retry logic; Elixir must match
+- 429 handling without server backoff causes rate limit thrashing
+
+---
+
+### 3. JSON Encoding & NotGiven Semantics
+
+**Priority:** MEDIUM - Prevents 422 errors (but only if they occur)
+
+**Actions:**
+- ✅ Remove global `nil`-stripping from JSON encoder
+- ✅ Let Jason encode `nil → "null"` naturally (matches Python)
+- ✅ If specific fields require omission, use per-field approach:
+  ```elixir
+  Tinkex.JSON.encode!(request, omit_if_nil: [:optional_field])
+  ```
+
+**Why This Matters:**
+- Python SDK sends `null` for Optional fields; Elixir must match
+- Global nil-stripping changes semantics ("not set" vs "explicitly null")
+- Only implement field-level omission if API actually rejects `null`
+
+---
+
+### 4. Config Threading for Multi-Tenancy
+
+**Priority:** MEDIUM - Enables production use cases
+
+**Actions:**
+- ✅ Implement `Tinkex.Config` struct:
+  ```elixir
+  defmodule Tinkex.Config do
+    defstruct [:base_url, :api_key, :http_pool, :timeout, :max_retries, :user_metadata]
+
+    def new(opts \\ []) do
+      %__MODULE__{
+        base_url: opts[:base_url] || Application.get_env(:tinkex, :base_url, "https://api.thinkingmachines.ai"),
+        api_key: opts[:api_key] || Application.get_env(:tinkex, :api_key) || System.get_env("TINKER_API_KEY"),
+        http_pool: opts[:http_pool] || Tinkex.HTTP.Pool,
+        timeout: opts[:timeout] || 120_000,
+        max_retries: opts[:max_retries] || 3,
+        user_metadata: opts[:user_metadata]
+      }
+    end
+  end
+  ```
+
+- ✅ Thread config through all HTTP calls (NOT `Application.get_env` at call time)
+- ✅ Update `ServiceClient.start_link/1` to accept `:config` option
+
+**Why This Matters:**
+- Two clients with different API keys can't coexist with global config
+- Testing with mock servers alongside production requires per-client config
+
+---
+
+### 5. ETS Cleanup with Process Monitoring
+
+**Priority:** LOW - Prevents stale entries (graceful termination usually works)
+
+**Actions:**
+- ✅ Add `Tinkex.SamplingRegistry` GenServer:
+  ```elixir
+  defmodule Tinkex.SamplingRegistry do
+    use GenServer
+
+    def register(client_pid, config) do
+      GenServer.call(__MODULE__, {:register, client_pid, config})
+    end
+
+    @impl true
+    def init(:ok) do
+      {:ok, %{monitors: %{}}}
+    end
+
+    @impl true
+    def handle_call({:register, pid, config}, _from, state) do
+      ref = Process.monitor(pid)
+      :ets.insert(:tinkex_sampling_clients, {{:config, pid}, config})
+      {:reply, :ok, %{state | monitors: Map.put(state.monitors, ref, pid)}}
+    end
+
+    @impl true
+    def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
+      :ets.delete(:tinkex_sampling_clients, {:config, pid})
+      {:noreply, %{state | monitors: Map.delete(state.monitors, ref)}}
+    end
+  end
+  ```
+
+- ✅ Update `SamplingClient.init/1` to call `Tinkex.SamplingRegistry.register/2`
+
+**Why This Matters:**
+- Brutal kills (`Process.exit(pid, :kill)`) skip `terminate/2`
+- Registry ensures ETS never accumulates stale entries
+
+---
+
+## Implementation Timeline
+
+With these changes, the v1.0 scope remains **8 weeks** (minimal creep):
+
+| Week | Phase | Tasks |
+|------|-------|-------|
+| 1-2  | Foundation | Types, Config struct, HTTP layer with x-should-retry |
+| 3-4  | Clients | TrainingClient (with try/rescue), SamplingClient (with Registry) |
+| 5-6  | Operations | Forward/backward, optim_step, sampling, retry logic |
+| 7    | CLI & Polish | CLI tools, error handling, telemetry |
+| 8    | Testing & Docs | Integration tests, examples, final documentation |
+
+---
+
+## v1.0 Scope (Final)
+
+### ✅ In Scope
+- Core training/sampling operations
+- Built-in loss functions (cross_entropy, importance_sampling, ppo)
+- Tokenization with caching (raw text → tokens, NO chat templates)
+- Weight management
+- Basic CLI
+- 80% test coverage
+- JSON-based image types (ImageChunk, ImageAssetPointerChunk)
+- Multi-tenancy via Tinkex.Config
+- Process monitoring for ETS cleanup
+
+### ❌ Deferred to v2.0
+- Custom loss functions (requires EXLA)
+- Streaming responses (requires buffer management)
+- Chat template application (requires Jinja2 renderer)
+- Multipart file uploads (beyond JSON-based images)
+- Pagination helpers (manual loops sufficient for v1.0)
+- 100% Python parity in edge cases
+
+---
+
+## Risk Mitigation
+
+**Top Risks Eliminated by Round 5:**
+1. ✅ **Infinite hangs** - Task.start try/rescue mandatory
+2. ✅ **Race conditions** - Synchronous sends in TrainingClient documented
+3. ✅ **JSON 422 errors** - Clarified nil → null is correct
+4. ✅ **ETS singleton crash** - Fixed in Round 3 (global table, per-client entries)
+5. ✅ **Multi-tenant conflicts** - Config struct implemented
+
+**Remaining Risks:**
+- Custom loss function demand (mitigated: explicitly v2.0, most users use built-ins)
+- Streaming requirement surfaces (mitigated: mark as v2.0, provide callback API)
+- Performance bottlenecks (mitigated: ETS for SamplingClient, separate HTTP pools)
+
+---
+
+## Next Actions for Developer
+
+1. **Immediate (Day 1)**
+   - Scaffold Mix project with dependencies
+   - Implement `Tinkex.Config` struct
+   - Set up Finch pools with PoolKey module
+
+2. **Week 1**
+   - Implement all type definitions (01_type_system.md)
+   - Build HTTP layer with x-should-retry (04_http_layer.md)
+   - Create error types and retry logic (05_error_handling.md)
+
+3. **Week 2**
+   - Implement TrainingClient with Task.start safety (02_client_architecture.md)
+   - Build SamplingRegistry and SamplingClient (02_client_architecture.md)
+   - Add Future polling mechanism (03_async_model.md)
+
+4. **Week 3-4**
+   - Wire forward_backward, optim_step operations
+   - Implement sampling with rate limiting
+   - Test multi-tenancy scenarios
+
+5. **Week 5-8**
+   - CLI implementation
+   - Integration tests
+   - Documentation
+   - Final polish
 4. Iterate with testing and refinement

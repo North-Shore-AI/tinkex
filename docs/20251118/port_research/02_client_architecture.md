@@ -27,6 +27,11 @@
 - **Config struct**: Thread config through all client operations (api_key, base_url, http_pool, timeout)
 - **API consistency**: All public client methods return Task.t({:ok, ...} | {:error, ...})
 
+**Key Corrections (Round 5 - Final):**
+- **Tinkex.Config struct**: Complete implementation for multi-tenancy (different API keys/base URLs per client)
+- **SamplingRegistry**: Added process monitoring to clean up ETS entries on client crash
+- **Config threading**: Updated all API examples to pass config through opts, not Application.get_env
+
 ## Overview
 
 The Tinker SDK uses a hierarchical client architecture with three main client types, each backed by a shared `InternalClientHolder` for connection management.
@@ -39,6 +44,112 @@ ServiceClient (Entry Point)
     │   └── SamplingClient (from saved weights)
     ├── SamplingClient (standalone inference)
     └── RestClient (low-level API operations)
+```
+
+## Configuration Threading ⚠️ NEW (Round 5)
+
+**CRITICAL:** All clients must thread a `Tinkex.Config` struct for true multi-tenancy. Global `Application.get_env/3` prevents multiple clients with different API keys or base URLs.
+
+### Tinkex.Config Struct
+
+```elixir
+defmodule Tinkex.Config do
+  @moduledoc """
+  SDK configuration for a single client instance.
+
+  Enables multi-tenancy by allowing multiple ServiceClients with
+  different API keys, base URLs, or timeout settings in the same VM.
+  """
+
+  defstruct [
+    :base_url,
+    :api_key,
+    :http_pool,
+    :timeout,
+    :max_retries,
+    :user_metadata
+  ]
+
+  @type t :: %__MODULE__{
+    base_url: String.t(),
+    api_key: String.t(),
+    http_pool: atom(),
+    timeout: pos_integer(),
+    max_retries: non_neg_integer(),
+    user_metadata: map() | nil
+  }
+
+  @doc """
+  Create config from options, falling back to Application env.
+
+  Only reads Application.get_env when constructing initial config.
+  After that, config is threaded through all operations.
+  """
+  def new(opts \\ []) do
+    %__MODULE__{
+      base_url: opts[:base_url] || Application.get_env(:tinkex, :base_url, "https://api.thinkingmachines.ai"),
+      api_key: opts[:api_key] || Application.get_env(:tinkex, :api_key) || System.get_env("TINKER_API_KEY"),
+      http_pool: opts[:http_pool] || Tinkex.HTTP.Pool,
+      timeout: opts[:timeout] || 120_000,
+      max_retries: opts[:max_retries] || 3,
+      user_metadata: opts[:user_metadata]
+    }
+  end
+end
+```
+
+### Usage Pattern
+
+**Multi-tenant SaaS example:**
+
+```elixir
+# Different API keys for different users (multi-tenant)
+config_user_a = Tinkex.Config.new(api_key: "user_a_api_key")
+config_user_b = Tinkex.Config.new(api_key: "user_b_api_key")
+
+{:ok, client_a} = Tinkex.ServiceClient.start_link(config: config_user_a)
+{:ok, client_b} = Tinkex.ServiceClient.start_link(config: config_user_b)
+
+# These clients use different API keys
+training_a = Tinkex.ServiceClient.create_lora_training_client(client_a, ...)
+training_b = Tinkex.ServiceClient.create_lora_training_client(client_b, ...)
+```
+
+**Why This Matters:**
+- ✅ Multiple clients with different API keys coexist
+- ✅ Testing with mock servers alongside production
+- ✅ Per-client timeout/retry configuration
+- ✅ Predictable behavior in umbrella apps
+- ❌ Without Config struct: all clients share global Application.get_env
+
+### Config Threading Through API Calls
+
+```elixir
+# HTTP layer receives config as argument
+defmodule Tinkex.API do
+  def post(path, body, pool, opts \\ []) do
+    # Extract config from opts
+    config = Keyword.fetch!(opts, :config)
+
+    # Use config values, NOT Application.get_env
+    url = build_url(config.base_url, path)
+    headers = build_headers(config.api_key, opts)
+
+    request = Finch.build(:post, url, headers, Jason.encode!(body))
+    Finch.request(request, config.http_pool, pool: pool_key(config.base_url, pool))
+  end
+
+  defp build_url(base_url, path) do
+    URI.merge(base_url, path) |> to_string()
+  end
+
+  defp build_headers(api_key, opts) do
+    [
+      {"content-type", "application/json"},
+      {"x-api-key", api_key}  # From config argument, NOT global
+    ] ++ Keyword.get(opts, :headers, [])
+  end
+end
 ```
 
 ## 1. ServiceClient
@@ -719,6 +830,10 @@ defmodule Tinkex.Application do
       # HTTP connection pool
       {Finch, name: Tinkex.HTTP.Pool, pools: pool_config()},
 
+      # ⚠️ NEW (Round 5): Sampling registry with process monitoring
+      # Cleans up ETS entries when clients crash
+      Tinkex.SamplingRegistry,
+
       # Session manager
       Tinkex.SessionManager,
 
@@ -740,6 +855,106 @@ defmodule Tinkex.Application do
   end
 end
 ```
+
+**Sampling Registry (Process Monitoring) ⚠️ NEW (Round 5):**
+
+Ensures ETS entries are cleaned up even when SamplingClient processes crash without calling `terminate/2`:
+
+```elixir
+defmodule Tinkex.SamplingRegistry do
+  @moduledoc """
+  Registry for SamplingClient processes with automatic ETS cleanup.
+
+  Monitors all SamplingClient processes and cleans up their ETS entries
+  when they exit (normally or abnormally). This prevents stale entries
+  from accumulating in :tinkex_sampling_clients table.
+  """
+  use GenServer
+
+  def start_link(_opts) do
+    GenServer.start_link(__MODULE__, :ok, name: __MODULE__)
+  end
+
+  @doc "Register a SamplingClient process and its config"
+  def register(client_pid, config) do
+    GenServer.call(__MODULE__, {:register, client_pid, config})
+  end
+
+  @impl true
+  def init(:ok) do
+    # ETS table already created in Application.start/2
+    # We just track monitors
+    {:ok, %{monitors: %{}}}
+  end
+
+  @impl true
+  def handle_call({:register, pid, config}, _from, state) do
+    # Monitor the client process
+    ref = Process.monitor(pid)
+
+    # Write config to ETS
+    :ets.insert(:tinkex_sampling_clients, {{:config, pid}, config})
+
+    # Track monitor reference -> pid mapping
+    new_state = %{state | monitors: Map.put(state.monitors, ref, pid)}
+
+    {:reply, :ok, new_state}
+  end
+
+  @impl true
+  def handle_info({:DOWN, ref, :process, pid, _reason}, state) do
+    # Client process exited (normal or crash)
+    # Clean up its ETS entry
+    :ets.delete(:tinkex_sampling_clients, {:config, pid})
+
+    # Remove from monitors
+    new_state = %{state | monitors: Map.delete(state.monitors, ref)}
+
+    {:noreply, new_state}
+  end
+end
+```
+
+**Updated SamplingClient.init/1 to use Registry:**
+
+```elixir
+@impl true
+def init(opts) do
+  # Create sampling session
+  {:ok, session_id} = create_sampling_session(opts)
+
+  # Create lock-free request ID counter (per-client)
+  request_id_counter = :atomics.new(1, signed: false)
+
+  # Create shared rate limiter (per-client)
+  rate_limiter = Tinkex.RateLimiter.new()
+
+  # Prepare config
+  config = %{
+    sampling_session_id: session_id,
+    http_pool: opts[:http_pool] || Tinkex.HTTP.Pool,
+    request_id_counter: request_id_counter,
+    rate_limiter: rate_limiter,
+    config: opts[:config]  # Store Tinkex.Config for API calls
+  }
+
+  # ⚠️ UPDATED (Round 5): Register with monitoring instead of direct ETS insert
+  # This ensures cleanup even if process crashes before terminate/2
+  :ok = Tinkex.SamplingRegistry.register(self(), config)
+
+  state = %{
+    sampling_session_id: session_id
+  }
+
+  {:ok, state}
+end
+```
+
+**Why This Matters:**
+- **Brutal kills** (`Process.exit(pid, :kill)`) skip `terminate/2`
+- **VM crashes** don't run termination callbacks
+- **Out-of-memory crashes** may prevent cleanup
+- Registry with monitoring ensures ETS never accumulates stale entries
 
 **Session Manager:**
 ```elixir
