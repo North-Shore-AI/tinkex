@@ -7,6 +7,7 @@ defmodule Tinkex.Types.SampledSequence do
 
   alias Tinkex.Types.StopReason
 
+  @enforce_keys [:tokens]
   defstruct [:tokens, :logprobs, :stop_reason]
 
   @type t :: %__MODULE__{

@@ -14,6 +14,7 @@ defmodule Tinkex.Types.SampleRequest do
 
   alias Tinkex.Types.{ModelInput, SamplingParams}
 
+  @enforce_keys [:prompt, :sampling_params]
   @derive {Jason.Encoder,
            only: [
              :sampling_session_id,

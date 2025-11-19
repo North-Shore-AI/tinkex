@@ -5,6 +5,7 @@ defmodule Tinkex.Types.SaveWeightsRequest do
   Mirrors Python tinker.types.SaveWeightsRequest.
   """
 
+  @enforce_keys [:model_id]
   @derive {Jason.Encoder, only: [:model_id, :path, :seq_id, :type]}
   defstruct [:model_id, :path, :seq_id, type: "save_weights"]
 

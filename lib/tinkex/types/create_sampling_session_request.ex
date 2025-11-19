@@ -5,6 +5,7 @@ defmodule Tinkex.Types.CreateSamplingSessionRequest do
   Mirrors Python tinker.types.CreateSamplingSessionRequest.
   """
 
+  @enforce_keys [:session_id, :sampling_session_seq_id]
   @derive {Jason.Encoder, only: [:session_id, :sampling_session_seq_id, :base_model, :model_path, :type]}
   defstruct [:session_id, :sampling_session_seq_id, :base_model, :model_path, type: "create_sampling_session"]
 

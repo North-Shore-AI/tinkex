@@ -15,6 +15,7 @@ defmodule Tinkex.Types.FutureCompletedResponse do
   Response indicating a future has completed successfully.
   """
 
+  @enforce_keys [:status, :result]
   defstruct [:status, :result]
 
   @type t :: %__MODULE__{
@@ -28,6 +29,7 @@ defmodule Tinkex.Types.FutureFailedResponse do
   Response indicating a future has failed.
   """
 
+  @enforce_keys [:status, :error]
   defstruct [:status, :error]
 
   @type t :: %__MODULE__{
@@ -41,6 +43,7 @@ defmodule Tinkex.Types.TryAgainResponse do
   Response indicating queue backpressure - client should retry.
   """
 
+  @enforce_keys [:type, :request_id, :queue_state]
   defstruct [:type, :request_id, :queue_state, :retry_after_ms]
 
   @type queue_state :: :active | :paused_capacity | :paused_rate_limit

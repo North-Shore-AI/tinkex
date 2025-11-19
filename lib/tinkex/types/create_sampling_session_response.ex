@@ -5,6 +5,7 @@ defmodule Tinkex.Types.CreateSamplingSessionResponse do
   Mirrors Python tinker.types.CreateSamplingSessionResponse.
   """
 
+  @enforce_keys [:sampling_session_id]
   defstruct [:sampling_session_id]
 
   @type t :: %__MODULE__{

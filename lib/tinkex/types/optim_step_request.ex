@@ -7,6 +7,7 @@ defmodule Tinkex.Types.OptimStepRequest do
 
   alias Tinkex.Types.AdamParams
 
+  @enforce_keys [:adam_params, :model_id]
   @derive {Jason.Encoder, only: [:adam_params, :model_id, :seq_id]}
   defstruct [:adam_params, :model_id, :seq_id]
 

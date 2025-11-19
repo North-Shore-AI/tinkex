@@ -31,5 +31,39 @@ defmodule Tinkex.Types.SampleResponseTest do
                nil
              ]
     end
+
+    test "accepts map entries and empty inner lists" do
+      json = %{
+        "sequences" => [
+          %{"tokens" => [], "logprobs" => nil, "stop_reason" => nil}
+        ],
+        "topk_prompt_logprobs" => [
+          [%{"token_id" => 42, "logprob" => -0.5}],
+          []
+        ]
+      }
+
+      response = SampleResponse.from_json(json)
+
+      assert response.topk_prompt_logprobs == [
+               [{42, -0.5}],
+               []
+             ]
+    end
+
+    test "raises for malformed entries" do
+      json = %{
+        "sequences" => [
+          %{"tokens" => [], "logprobs" => nil, "stop_reason" => nil}
+        ],
+        "topk_prompt_logprobs" => [
+          [["bad"]]
+        ]
+      }
+
+      assert_raise ArgumentError, fn ->
+        SampleResponse.from_json(json)
+      end
+    end
   end
 end

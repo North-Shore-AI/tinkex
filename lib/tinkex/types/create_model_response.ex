@@ -5,6 +5,7 @@ defmodule Tinkex.Types.CreateModelResponse do
   Mirrors Python tinker.types.CreateModelResponse.
   """
 
+  @enforce_keys [:model_id]
   defstruct [:model_id]
 
   @type t :: %__MODULE__{
