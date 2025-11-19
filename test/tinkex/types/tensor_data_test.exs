@@ -28,6 +28,14 @@ defmodule Tinkex.Types.TensorDataTest do
       assert td.data == [1, 2, 3, 4]
     end
 
+    test "sets shape to nil for scalars" do
+      tensor = Nx.tensor(42.5, type: {:f, 64})
+      td = TensorData.from_nx(tensor)
+
+      assert td.shape == nil
+      assert td.data == [42.5]
+    end
+
     test "raises for unsupported dtypes" do
       tensor = Nx.tensor([1, 2], type: {:bf, 16})
 
