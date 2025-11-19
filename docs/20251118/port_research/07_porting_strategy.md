@@ -1,6 +1,6 @@
 # Porting Strategy and Implementation Roadmap
 
-**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202. See `203_claude_sonnet_response_to_critiques.md` for details.
+**⚠️ UPDATED:** This document has been corrected based on critiques 100-102, 200-202, 300-302, 400+. See response documents for details.
 
 **Key Corrections (Round 1 - Critiques 100-102):**
 - **Validation**: Changed from Ecto to pure functions (lighter dependencies)
@@ -18,6 +18,15 @@
 - **Timeline adjusted**: v1.0 scope reduced, realistic 8-week estimate with defined scope cuts
 - **ETS table creation**: Global tables in Application.start/2 documented
 - **Error handling**: Task.start bodies wrapped in try/rescue throughout
+
+**Key Corrections (Round 4 - Critique 400+):**
+- **JSON encoding**: Removed global nil-stripping - Python SDK accepts `null` for Optional fields
+- **Error categories**: All references updated from `USER_ERROR/TRANSIENT/FATAL` to `Unknown/Server/User`
+- **429 handling**: Wired retry_after_ms from errors to RateLimiter instead of hard-coded values
+- **Config threading**: Centralized config struct, removed Application.get_env from API layer
+- **PoolKey module**: Single source of truth for URL normalization and pool key generation
+- **Task.start safety**: All async GenServer.reply patterns now have mandatory try/rescue wrappers
+- **API consistency**: All public client methods return Task.t({:ok, ...} | {:error, ...})
 
 ## Technology Stack Recommendations
 

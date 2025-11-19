@@ -1,5 +1,7 @@
 # Telemetry and Observability
 
+**⚠️ NOTE:** This document remains largely unchanged from Round 3. For changes related to error categories and telemetry pool configuration, see 04_http_layer.md and 05_error_handling.md.
+
 ## Python Telemetry Implementation
 
 The Tinker SDK includes built-in telemetry for tracking operations, errors, and performance metrics.
