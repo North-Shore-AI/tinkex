@@ -1,8 +1,12 @@
+<div align="center">
+  <img src="assets/tinkex.svg" width="400" alt="Tinkex Logo" />
+</div>
+
 # Tinkex
 
 **Elixir SDK for the Tinker ML Training and Inference API**
 
-[![GitHub](https://img.shields.io/github/license/North-Shore-AI/tinkex)](LICENSE)
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the Tinker distributed machine learning platform. It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
