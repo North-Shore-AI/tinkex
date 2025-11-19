@@ -1,5 +1,12 @@
 # Client Architecture Analysis
 
+**⚠️ UPDATED:** This document has been corrected based on critiques 100, 101, 102. See `103_claude_sonnet_response_to_critiques.md` for details.
+
+**Key Corrections:**
+- **SamplingClient**: Changed to "thin GenServer" pattern (state only, HTTP in caller's process)
+- **TrainingClient**: Clarified sequential request sends with concurrent polling
+- **GenServer Pattern**: Emphasis on state management, not work execution
+
 ## Overview
 
 The Tinker SDK uses a hierarchical client architecture with three main client types, each backed by a shared `InternalClientHolder` for connection management.
@@ -282,29 +289,32 @@ defmodule Tinkex.TrainingClient do
     # Chunk the data
     chunks = chunk_data(data)
 
-    # Allocate request IDs
+    # Allocate request IDs for all chunks upfront
     {request_ids, new_counter} = allocate_request_ids(
       length(chunks),
       state.request_id_counter
     )
 
-    # Create async tasks for each chunk
-    tasks = Enum.zip(request_ids, chunks)
-    |> Enum.map(fn {req_id, chunk} ->
-      Task.async(fn ->
-        send_forward_backward_request(
+    # Spawn process that sends requests SEQUENTIALLY, then polls CONCURRENTLY
+    Task.start(fn ->
+      # Send requests one at a time (sequential) to maintain order
+      polling_tasks = Enum.zip(request_ids, chunks)
+      |> Enum.map(fn {req_id, chunk} ->
+        # Synchronous send (blocks until request sent)
+        {:ok, untyped_future} = send_forward_backward_request(
           chunk,
           loss_fn,
           state.model_id,
           req_id,
           state.http_pool
         )
-      end)
-    end)
 
-    # Spawn a process to await all tasks and combine results
-    Task.start(fn ->
-      results = Task.await_many(tasks, :infinity)
+        # Start polling asynchronously (returns Task)
+        Tinkex.Future.poll(untyped_future.request_id, state.http_pool)
+      end)
+
+      # Now await all polling tasks concurrently
+      results = Task.await_many(polling_tasks, :infinity)
       combined = combine_forward_backward_results(results)
       GenServer.reply(from, {:ok, combined})
     end)
@@ -341,9 +351,10 @@ end
 ```
 
 **Key Differences:**
-- Elixir's GenServer message queue provides natural sequencing
-- Use `Task.async/await` for concurrent chunk processing
-- No need for explicit turn-taking (mailbox handles it)
+- Elixir's GenServer message queue provides natural sequencing between operations
+- Requests are sent **sequentially** using `Enum.map` (maintains order)
+- Polling for results happens **concurrently** using `Task.await_many`
+- No need for explicit turn-taking locks (sequential sends ensure ordering)
 
 ## 3. SamplingClient
 
@@ -413,7 +424,10 @@ async def _sample_async_impl(self, ...):
             self.holder._sample_backoff_until = time.time() + 1
 ```
 
-### Elixir Port Strategy
+### Elixir Port Strategy ⚠️ CORRECTED - Thin GenServer Pattern
+
+**CRITICAL FIX:** GenServer should only hold state, NOT execute HTTP requests.
+Executing HTTP in `handle_call` serializes all requests (bottleneck at 1 req/sec instead of 400 concurrent).
 
 ```elixir
 defmodule Tinkex.SamplingClient do
@@ -421,10 +435,30 @@ defmodule Tinkex.SamplingClient do
 
   ## Client API
 
+  @doc """
+  Sample from the model. HTTP request happens in CALLER'S process for concurrency.
+  Returns a Task that resolves to {:ok, response} | {:error, error}.
+  """
   def sample(client, prompt, num_samples, sampling_params, opts \\ []) do
-    # Returns a Task that resolves to the result
+    # Get session config from GenServer (fast, no HTTP)
+    {:ok, config} = GenServer.call(client, :get_session_config)
+
+    # Do HTTP work in caller's process (allows 400 concurrent requests)
     Task.async(fn ->
-      GenServer.call(client, {:sample, prompt, num_samples, sampling_params, opts}, :infinity)
+      request_id = :atomics.add_get(config.request_id_counter, 1, 1)
+
+      request = %Tinkex.Types.SampleRequest{
+        sampling_session_id: config.sampling_session_id,
+        seq_id: request_id,
+        num_samples: num_samples,
+        prompt: prompt,
+        sampling_params: sampling_params,
+        prompt_logprobs: opts[:include_prompt_logprobs] || false,
+        topk_prompt_logprobs: opts[:topk_prompt_logprobs] || 0
+      }
+
+      # HTTP call in THIS process, not GenServer!
+      Tinkex.API.Sampling.asample(request, config.http_pool, opts)
     end)
   end
 
@@ -435,57 +469,50 @@ defmodule Tinkex.SamplingClient do
     # Create sampling session
     {:ok, session_id} = create_sampling_session(opts)
 
+    # Use atomics for lock-free request ID counter
+    request_id_counter = :atomics.new(1, signed: false)
+
     state = %{
       sampling_session_id: session_id,
       model_path: opts[:model_path],
       base_model: opts[:base_model],
       http_pool: opts[:http_pool],
-      request_id_counter: 0,
-      backoff_until: nil,
-      # Rate limiting with semaphore
-      max_concurrent: 400
+      request_id_counter: request_id_counter
     }
 
     {:ok, state}
   end
 
   @impl true
-  def handle_call({:sample, prompt, num_samples, params, opts}, from, state) do
-    # Check backpressure
-    now = System.monotonic_time(:millisecond)
-    state = case state.backoff_until do
-      nil -> state
-      backoff_time when backoff_time > now ->
-        Process.sleep(backoff_time - now)
-        %{state | backoff_until: nil}
-      _ ->
-        %{state | backoff_until: nil}
-    end
+  def handle_call(:get_session_config, _from, state) do
+    # GenServer only returns STATE, no blocking work!
+    config = %{
+      sampling_session_id: state.sampling_session_id,
+      http_pool: state.http_pool,
+      request_id_counter: state.request_id_counter
+    }
 
-    # Send request with retry
-    request = build_sample_request(
-      state.sampling_session_id,
-      state.request_id_counter,
-      prompt,
-      num_samples,
-      params,
-      opts
-    )
-
-    case send_with_retry(request, state.http_pool) do
-      {:ok, response} ->
-        new_state = %{state | request_id_counter: state.request_id_counter + 1}
-        {:reply, {:ok, response}, new_state}
-
-      {:error, %{status: 429}} = error ->
-        # Backoff and retry
-        new_state = %{state | backoff_until: now + 1000}
-        {:reply, error, new_state}
-
-      {:error, _} = error ->
-        {:reply, error, state}
-    end
+    {:reply, {:ok, config}, state}
   end
+end
+```
+
+**Why This Works:**
+1. GenServer mailbox stays empty (only returns config, no blocking)
+2. HTTP requests execute in caller's processes (true concurrency)
+3. 400 concurrent sampling requests work as intended
+4. Request ID counter uses `:atomics` for lock-free increments
+
+**Alternative (Even Faster):**
+Use ETS to cache session config, skip GenServer call entirely:
+```elixir
+def sample(client, prompt, num_samples, sampling_params, opts \\ []) do
+  # Read directly from ETS (no GenServer call)
+  [{_key, config}] = :ets.lookup(:tinkex_sampling_sessions, client)
+
+  Task.async(fn ->
+    # ... build request and call HTTP
+  end)
 end
 ```
 

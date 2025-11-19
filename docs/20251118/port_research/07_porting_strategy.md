@@ -1,8 +1,16 @@
 # Porting Strategy and Implementation Roadmap
 
+**⚠️ UPDATED:** This document has been corrected based on critiques 100, 101, 102. See `103_claude_sonnet_response_to_critiques.md` for details.
+
+**Key Corrections:**
+- **Dependencies**: Added Bumblebee and tokenizers for HuggingFace model tokenization (Phase 1)
+- **Validation**: Changed from Ecto to pure functions (lighter dependencies)
+- **Finch pools**: Updated to show separate pool configuration
+- **Tokenizer strategy**: Changed from "user responsibility" to built-in tokenization support
+
 ## Technology Stack Recommendations
 
-### Core Dependencies
+### Core Dependencies ⚠️ UPDATED
 
 ```elixir
 # mix.exs
@@ -14,11 +22,13 @@ defp deps do
     # JSON encoding/decoding
     {:jason, "~> 1.4"},
 
-    # Schema validation
-    {:ecto, "~> 3.10"},  # For changesets and validation
-
     # Numerical computing (tensor operations)
     {:nx, "~> 0.6"},
+
+    # Tokenization (HuggingFace models) ⚠️ ADDED
+    {:bumblebee, "~> 0.5"},      # HuggingFace models in Elixir
+    {:tokenizers, "~> 0.4"},     # Rust-based tokenizers via NIF
+    {:exla, "~> 0.6"},           # Optional: XLA backend for Nx
 
     # Telemetry
     {:telemetry, "~> 1.2"},
@@ -40,11 +50,16 @@ defp deps do
 end
 ```
 
+**Note:** Ecto has been REMOVED from core deps and moved to optional. Using pure functions for validation keeps the SDK lighter.
+
 ### Optional Libraries
 
 ```elixir
 # Enhanced struct definitions
 {:typed_struct, "~> 0.3"},
+
+# Schema validation (if needed for complex cases) ⚠️ MOVED FROM CORE
+{:ecto, "~> 3.10"},
 
 # Advanced validation
 {:vex, "~> 0.9"},
@@ -206,13 +221,13 @@ tinkex/
 - Future polling mechanism
 - 75%+ test coverage
 
-### Phase 3: Training Operations (Week 5-6)
+### Phase 3: Training Operations (Week 5-6) ⚠️ UPDATED
 
 **Goal**: Implement TrainingClient with full functionality
 
 #### Tasks:
 1. ✅ TrainingClient GenServer
-   - [x] Request sequencing
+   - [x] Request sequencing (sequential sends, concurrent polling)
    - [x] Data chunking
    - [x] State management
 
@@ -222,19 +237,26 @@ tinkex/
    - [x] `optim_step/2` - optimizer step
    - [x] Result combining for chunked requests
 
-3. ✅ Weight management
+3. ✅ Tokenizer integration ⚠️ MOVED FROM "ADVANCED" TO CORE
+   - [x] Bumblebee setup for HuggingFace models
+   - [x] `Tinkex.Tokenizer` module
+   - [x] `ModelInput.from_text/2` helper
+   - [x] Support for model-specific tokenizers (Qwen, Llama, etc.)
+
+4. ✅ Weight management
    - [x] `save_state/2` - save checkpoint
    - [x] `load_state/2` - load checkpoint
    - [x] `save_weights_for_sampler/2` - prepare for inference
 
-4. ✅ Advanced features
-   - [x] Custom loss functions (if needed)
-   - [x] Tokenizer integration (via Python bridge?)
-   - [x] Telemetry integration
+5. ✅ Telemetry integration
+   - [x] Training operation metrics
+   - [x] Loss tracking
+   - [x] Request duration
 
 **Deliverables:**
 - Fully functional TrainingClient
 - All training operations working
+- Tokenization support for common models
 - Weight save/load tested
 - 80%+ test coverage
 
@@ -294,7 +316,7 @@ tinkex/
 
 ## Key Design Decisions
 
-### 1. Supervision Strategy
+### 1. Supervision Strategy ⚠️ UPDATED
 
 ```elixir
 defmodule Tinkex.Supervisor do
@@ -305,9 +327,12 @@ defmodule Tinkex.Supervisor do
   end
 
   def init(_opts) do
+    base_url = Application.get_env(:tinkex, :base_url,
+      "https://tinker.thinkingmachines.dev/services/tinker-prod")
+
     children = [
-      # HTTP pool
-      {Finch, name: Tinkex.HTTP.Pool, pools: pool_config()},
+      # HTTP pool with SEPARATE pools per operation type
+      {Finch, name: Tinkex.HTTP.Pool, pools: pool_config(base_url)},
 
       # Session manager
       Tinkex.SessionManager,
@@ -324,6 +349,16 @@ defmodule Tinkex.Supervisor do
     ]
 
     Supervisor.init(children, strategy: :one_for_one)
+  end
+
+  defp pool_config(base_url) do
+    %{
+      default: [protocol: :http2, size: 10, max_idle_time: 60_000],
+      {base_url, :training} => [size: 5, count: 1, max_idle_time: 60_000],
+      {base_url, :sampling} => [size: 100, max_idle_time: 30_000],
+      {base_url, :session} => [size: 5, max_idle_time: :infinity],
+      {base_url, :futures} => [size: 50, max_idle_time: 60_000]
+    }
   end
 end
 ```
@@ -371,7 +406,7 @@ config :tinkex,
   cloudflare_client_secret: System.get_env("CLOUDFLARE_ACCESS_CLIENT_SECRET")
 ```
 
-### 4. Nx Integration
+### 4. Nx Integration ⚠️ CORRECTED
 
 For tensor operations:
 
@@ -381,7 +416,8 @@ defmodule Tinkex.Types.TensorData do
 
   defstruct [:data, :dtype, :shape]
 
-  @type dtype :: :float32 | :float64 | :int32 | :int64
+  # ONLY 2 types supported by backend (not 4!)
+  @type dtype :: :int64 | :float32
   @type t :: %__MODULE__{
     data: list(number()),
     dtype: dtype(),
@@ -404,14 +440,13 @@ defmodule Tinkex.Types.TensorData do
     |> Nx.reshape(List.to_tuple(tensor_data.shape))
   end
 
+  # Only map supported types (int64, float32)
   defp nx_dtype_to_tensor_dtype({:f, 32}), do: :float32
-  defp nx_dtype_to_tensor_dtype({:f, 64}), do: :float64
-  defp nx_dtype_to_tensor_dtype({:s, 32}), do: :int32
+  defp nx_dtype_to_tensor_dtype({:f, 64}), do: :float32  # Downcast to float32
+  defp nx_dtype_to_tensor_dtype({:s, 32}), do: :int64    # Upcast to int64
   defp nx_dtype_to_tensor_dtype({:s, 64}), do: :int64
 
   defp tensor_dtype_to_nx(:float32), do: {:f, 32}
-  defp tensor_dtype_to_nx(:float64), do: {:f, 64}
-  defp tensor_dtype_to_nx(:int32), do: {:s, 32}
   defp tensor_dtype_to_nx(:int64), do: {:s, 64}
 end
 ```
@@ -612,11 +647,11 @@ end
 
 **Elixir Solution:** GenServer mailbox provides natural sequencing. Send messages in order, they're processed in order.
 
-### Challenge 3: Connection Pooling
+### Challenge 3: Connection Pooling ⚠️ CORRECTED
 
-**Python:** Manual pool management per operation type
+**Python:** Manual pool management per operation type (training, sampling, session, futures)
 
-**Elixir Solution:** Finch handles this automatically. Use single pool with HTTP/2 multiplexing.
+**Elixir Solution:** Finch with MULTIPLE pools keyed by `{base_url, pool_type}` for resource isolation. This prevents sampling bursts from starving critical session heartbeats.
 
 ### Challenge 4: Dual Sync/Async API
 
@@ -624,17 +659,32 @@ end
 
 **Elixir Solution:** Single API returning Tasks. Caller decides sync (`Task.await`) or async (spawn, receive, etc.)
 
-### Challenge 5: Tokenizer Integration
+### Challenge 5: Tokenizer Integration ⚠️ CORRECTED
 
 **Python:** Direct HuggingFace transformers integration
 
-**Elixir Solution:** Options:
-1. **Python NIFs**: Wrap tokenizers via Rustler or ports
-2. **External service**: Run tokenizer microservice
-3. **Pure Elixir**: Use existing tokenizer libs (limited model support)
-4. **User responsibility**: Expect pre-tokenized input
+**Elixir Solution (UPDATED):**
+Use **Bumblebee + tokenizers** for native Elixir tokenization:
 
-**Recommendation:** Start with option 4, add NIFs later if needed.
+```elixir
+# Dependencies
+{:bumblebee, "~> 0.5"},  # HuggingFace models
+{:tokenizers, "~> 0.4"}, # Rust tokenizers via NIF
+
+# Usage
+defmodule Tinkex.Tokenizer do
+  def encode(text, model_name) do
+    {:ok, tokenizer} = Tokenizers.Tokenizer.from_pretrained(model_name)
+    {:ok, encoding} = Tokenizers.Tokenizer.encode(tokenizer, text)
+    Tokenizers.Encoding.get_ids(encoding)
+  end
+end
+
+# Public API
+Tinkex.Types.ModelInput.from_text("Hello world", tokenizer: "Qwen/Qwen2.5-7B")
+```
+
+**Why this matters:** Without built-in tokenization, users must set up Python bridges, making the SDK unusable for pure Elixir projects. Bumblebee provides a production-ready solution.
 
 ## Success Criteria
 

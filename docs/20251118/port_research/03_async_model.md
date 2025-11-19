@@ -1,5 +1,11 @@
 # Async Model and Futures Implementation
 
+**⚠️ UPDATED:** This document has been corrected based on critiques 100, 101, 102. See `103_claude_sonnet_response_to_critiques.md` for details.
+
+**Key Corrections:**
+- **Training requests**: Clarified that requests are sent **sequentially** (one at a time), but polling is concurrent
+- **Task patterns**: Emphasized Elixir's native concurrency advantages over Python's thread-based approach
+
 ## Overview
 
 The Tinker SDK implements a sophisticated futures-based async model that allows synchronous-looking code to perform async operations. This is one of the most complex parts of the SDK to port.
@@ -312,23 +318,24 @@ def forward_backward(client, data, loss_fn, opts) do
 end
 
 # In GenServer handle_call
-def handle_call({:forward_backward, data, loss_fn, _opts}, _from, state) do
+def handle_call({:forward_backward, data, loss_fn, _opts}, from, state) do
   # Chunk data
   chunks = chunk_data(data)
 
-  # Send all chunks concurrently, get futures
-  futures = Enum.map(chunks, fn chunk ->
-    send_forward_backward_chunk(chunk, loss_fn, state)
+  # Spawn process to send chunks SEQUENTIALLY, then poll CONCURRENTLY
+  Task.start(fn ->
+    # Enum.map executes sequentially - sends requests one at a time
+    polling_tasks = Enum.map(chunks, fn chunk ->
+      send_forward_backward_chunk(chunk, loss_fn, state)
+    end)
+
+    # Now poll all futures concurrently
+    results = Task.await_many(polling_tasks, :infinity)
+    combined = combine_forward_backward_results(results)
+    GenServer.reply(from, {:ok, combined})
   end)
 
-  # Combine futures
-  combined_task = Tinkex.Future.Combiner.await_and_combine(
-    futures,
-    &combine_forward_backward_results/1
-  )
-
-  # Return the task to caller
-  {:reply, {:ok, combined_task}, state}
+  {:noreply, state}
 end
 
 defp send_forward_backward_chunk(chunk, loss_fn, state) do
@@ -340,13 +347,13 @@ defp send_forward_backward_chunk(chunk, loss_fn, state) do
     seq_id: request_id
   }
 
-  # Send request, get untyped future (contains request_id)
+  # Send request synchronously (blocks until sent)
   {:ok, untyped_future} = Tinkex.API.Training.forward_backward(
     request,
     state.http_pool
   )
 
-  # Start polling for result
+  # Start polling asynchronously (returns Task)
   Tinkex.Future.poll(untyped_future.request_id, pool: state.http_pool)
 end
 

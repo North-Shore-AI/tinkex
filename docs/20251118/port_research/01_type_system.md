@@ -1,5 +1,13 @@
 # Type System Analysis
 
+**⚠️ UPDATED:** This document has been corrected based on critiques 100, 101, 102. See `103_claude_sonnet_response_to_critiques.md` for details.
+
+**Key Corrections:**
+- `AdamParams`: Fixed defaults (beta2: 0.95, eps: 1e-12, learning_rate has default)
+- `TensorDtype`: Only 2 types supported (int64, float32)
+- `StopReason`: Corrected values ("length", "stop")
+- Validation: Using pure functions instead of Ecto for lighter dependencies
+
 ## Python Type Infrastructure
 
 The Tinker SDK uses Pydantic extensively for type validation and serialization. All types inherit from either `BaseModel` or `StrictBase`.
@@ -57,14 +65,15 @@ class OptimStepRequest(BaseModel):
     seq_id: int
 ```
 
-**AdamParams**
+**AdamParams** ⚠️ CORRECTED
 ```python
-class AdamParams(BaseModel):
-    learning_rate: float
+# ACTUAL Python SDK (verified from source):
+class AdamParams(StrictBase):
+    learning_rate: float = 0.0001  # Has default!
     beta1: float = 0.9
-    beta2: float = 0.999
-    epsilon: float = 1e-8
-    weight_decay: float = 0.0
+    beta2: float = 0.95            # NOT 0.999!
+    eps: float = 1e-12             # Named 'eps', NOT 'epsilon'!
+    # Note: No weight_decay field in actual SDK
 ```
 
 ### Sampling Requests
@@ -209,21 +218,19 @@ class LossFnType(str, Enum):
     # Future: other loss functions
 ```
 
-**StopReason**
+**StopReason** ⚠️ CORRECTED
 ```python
-class StopReason(str, Enum):
-    MAX_TOKENS = "max_tokens"
-    STOP_SEQUENCE = "stop_sequence"
-    EOS = "eos"
+# ACTUAL Python SDK (verified from source):
+StopReason: TypeAlias = Literal["length", "stop"]
+# NOT "max_tokens" | "stop_sequence" | "eos"!
 ```
 
-**TensorDtype**
+**TensorDtype** ⚠️ CORRECTED
 ```python
-class TensorDtype(str, Enum):
-    FLOAT32 = "float32"
-    FLOAT64 = "float64"
-    INT32 = "int32"
-    INT64 = "int64"
+# ACTUAL Python SDK (verified from source):
+TensorDtype: TypeAlias = Literal["int64", "float32"]
+# Only 2 types supported, NOT 4!
+# float64 and int32 are NOT supported by the backend
 ```
 
 **RequestErrorCategory**
@@ -285,39 +292,48 @@ defmodule Tinkex.Types.SamplingParams do
 end
 ```
 
-### 2. Validation with Ecto.Changeset
+### 2. Validation with Pure Functions (Lighter than Ecto) ⚠️ UPDATED
 
 ```elixir
 defmodule Tinkex.Types.AdamParams do
-  use Ecto.Schema
-  import Ecto.Changeset
+  @moduledoc "Adam optimizer parameters - CORRECTED to match Python SDK"
 
-  @primary_key false
-  embedded_schema do
-    field :learning_rate, :float
-    field :beta1, :float, default: 0.9
-    field :beta2, :float, default: 0.999
-    field :epsilon, :float, default: 1.0e-8
-    field :weight_decay, :float, default: 0.0
-  end
+  defstruct [:learning_rate, :beta1, :beta2, :eps]
 
-  def changeset(params) do
-    %__MODULE__{}
-    |> cast(params, [:learning_rate, :beta1, :beta2, :epsilon, :weight_decay])
-    |> validate_required([:learning_rate])
-    |> validate_number(:learning_rate, greater_than: 0)
-    |> validate_number(:beta1, greater_than_or_equal_to: 0, less_than: 1)
-    |> validate_number(:beta2, greater_than_or_equal_to: 0, less_than: 1)
-  end
+  @type t :: %__MODULE__{
+    learning_rate: float(),
+    beta1: float(),
+    beta2: float(),
+    eps: float()
+  }
 
-  def new(params) do
-    case changeset(params) do
-      %{valid?: true} = cs -> {:ok, apply_changes(cs)}
-      cs -> {:error, cs}
+  @doc "Create AdamParams with defaults matching Python SDK"
+  def new(attrs \\ %{}) do
+    with {:ok, lr} <- validate_learning_rate(attrs[:learning_rate] || 0.0001),
+         {:ok, b1} <- validate_beta(attrs[:beta1] || 0.9),
+         {:ok, b2} <- validate_beta(attrs[:beta2] || 0.95),  # NOT 0.999!
+         {:ok, eps} <- validate_epsilon(attrs[:eps] || 1.0e-12) do  # NOT 1e-8!
+      {:ok, %__MODULE__{
+        learning_rate: lr,
+        beta1: b1,
+        beta2: b2,
+        eps: eps  # Field name is 'eps', NOT 'epsilon'!
+      }}
     end
   end
+
+  defp validate_learning_rate(lr) when is_float(lr) and lr > 0, do: {:ok, lr}
+  defp validate_learning_rate(_), do: {:error, "learning_rate must be positive float"}
+
+  defp validate_beta(b) when is_float(b) and b >= 0 and b < 1, do: {:ok, b}
+  defp validate_beta(_), do: {:error, "beta must be in [0, 1)"}
+
+  defp validate_epsilon(eps) when is_float(eps) and eps > 0, do: {:ok, eps}
+  defp validate_epsilon(_), do: {:error, "epsilon must be positive float"}
 end
 ```
+
+**Note:** Using pure functions instead of Ecto.Changeset keeps dependencies lighter for an HTTP client SDK.
 
 ### 3. JSON Encoding/Decoding with Jason
 

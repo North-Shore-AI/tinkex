@@ -1,5 +1,11 @@
 # HTTP Layer and Connection Pooling
 
+**⚠️ UPDATED:** This document has been corrected based on critiques 100, 101, 102. See `103_claude_sonnet_response_to_critiques.md` for details.
+
+**Key Corrections:**
+- **Finch pools**: Changed from single pool to multiple separated pools (training, sampling, session, futures)
+- **Resource isolation**: Prevents sampling requests from starving critical session heartbeats
+
 ## Python Implementation
 
 ### HTTP Client: httpx
@@ -204,33 +210,64 @@ Finch is the recommended HTTP/2 client for Elixir:
 {:jason, "~> 1.4"}  # JSON encoding/decoding
 ```
 
-### Application Setup
+### Application Setup ⚠️ CORRECTED - Separate Pools
+
+**CRITICAL:** Use separate Finch pools per operation type for resource isolation.
+
+**Why separate pools?**
+- Prevents sampling burst traffic from starving session heartbeats
+- Different concurrency needs (training: 1-5, sampling: 100+, session: 5)
+- Matches Python SDK's intentional separation
 
 ```elixir
 defmodule Tinkex.Application do
   use Application
 
   def start(_type, _args) do
+    # Get base URL for pool configuration
+    base_url = Application.get_env(:tinkex, :base_url,
+      "https://tinker.thinkingmachines.dev/services/tinker-prod")
+
     children = [
-      # Main HTTP pool
+      # HTTP connection pools - SEPARATE per operation type
       {Finch,
        name: Tinkex.HTTP.Pool,
        pools: %{
+         # Default pool (for misc operations)
          default: [
            protocol: :http2,
-           count: pool_count(),
+           size: 10,
+           max_idle_time: 60_000
+         ],
+         # Training operations pool (sequential, long-running)
+         {base_url, :training} => [
+           protocol: :http2,
+           size: 5,          # Few connections
+           count: 1,         # Single connection for serial requests
+           max_idle_time: 60_000
+         ],
+         # Sampling operations pool (high concurrency bursts)
+         {base_url, :sampling} => [
+           protocol: :http2,
+           size: 100,        # Many connections for 400 concurrent requests
+           max_idle_time: 30_000
+         ],
+         # Session management pool (critical heartbeats)
+         {base_url, :session} => [
+           protocol: :http2,
+           size: 5,          # Dedicated for heartbeats
+           max_idle_time: :infinity  # Keep alive
+         ],
+         # Future polling pool (concurrent polling)
+         {base_url, :futures} => [
+           protocol: :http2,
+           size: 50,         # Moderate concurrency
            max_idle_time: 60_000
          ]
        }}
     ]
 
     Supervisor.start_link(children, strategy: :one_for_one)
-  end
-
-  defp pool_count do
-    # Adjust based on expected concurrency
-    # Training: low concurrency, sampling: high concurrency
-    System.schedulers_online() * 2
   end
 end
 ```
@@ -246,21 +283,21 @@ defmodule Tinkex.API do
   defmodule Training do
     @moduledoc "Training API endpoints"
 
-    def forward_backward(request, pool, opts \\ []) do
+    def forward_backward(request, pool_name \\ Tinkex.HTTP.Pool, opts \\ []) do
       Tinkex.API.post(
         "/api/v1/forward_backward",
         request,
-        pool,
-        opts
+        pool_name,
+        Keyword.put(opts, :pool_type, :training)  # Use training pool
       )
     end
 
-    def optim_step(request, pool, opts \\ []) do
+    def optim_step(request, pool_name \\ Tinkex.HTTP.Pool, opts \\ []) do
       Tinkex.API.post(
         "/api/v1/optim_step",
         request,
-        pool,
-        opts
+        pool_name,
+        Keyword.put(opts, :pool_type, :training)  # Use training pool
       )
     end
   end
@@ -268,12 +305,14 @@ defmodule Tinkex.API do
   defmodule Sampling do
     @moduledoc "Sampling API endpoints"
 
-    def asample(request, pool, opts \\ []) do
+    def asample(request, pool_name \\ Tinkex.HTTP.Pool, opts \\ []) do
       Tinkex.API.post(
         "/api/v1/asample",
         request,
-        pool,
-        Keyword.merge(opts, max_retries: 0)
+        pool_name,
+        opts
+        |> Keyword.put(:pool_type, :sampling)  # Use sampling pool
+        |> Keyword.put(:max_retries, 0)
       )
     end
   end
@@ -281,30 +320,43 @@ defmodule Tinkex.API do
   defmodule Futures do
     @moduledoc "Future/promise retrieval"
 
-    def retrieve(request, pool, opts \\ []) do
+    def retrieve(request, pool_name \\ Tinkex.HTTP.Pool, opts \\ []) do
       Tinkex.API.post(
         "/api/v1/future/retrieve",
         request,
-        pool,
-        opts
+        pool_name,
+        Keyword.put(opts, :pool_type, :futures)  # Use futures pool
       )
     end
   end
 
   ## Generic HTTP operations
 
-  def post(path, body, pool, opts \\ []) do
+  def post(path, body, pool_name, opts \\ []) do
     url = build_url(path)
     headers = build_headers(opts)
     timeout = Keyword.get(opts, :timeout, 120_000)
     max_retries = Keyword.get(opts, :max_retries, 2)
+    pool_type = Keyword.get(opts, :pool_type, :default)
 
     request = Finch.build(:post, url, headers, Jason.encode!(body))
 
     with_retries(fn ->
-      Finch.request(request, pool, receive_timeout: timeout)
+      # Specify pool type for resource isolation
+      Finch.request(request, pool_name,
+        receive_timeout: timeout,
+        pool: build_pool_key(url, pool_type)
+      )
     end, max_retries)
     |> handle_response()
+  end
+
+  defp build_pool_key(url, :default), do: :default
+  defp build_pool_key(url, pool_type) do
+    # Extract base URL from full URL
+    uri = URI.parse(url)
+    base_url = "#{uri.scheme}://#{uri.host}#{if uri.port, do: ":#{uri.port}", else: ""}"
+    {base_url, pool_type}
   end
 
   defp build_url(path) do
@@ -390,32 +442,42 @@ defmodule Tinkex.API do
 end
 ```
 
-### Connection Pool Strategy
+### Connection Pool Strategy ⚠️ CORRECTED
 
-Unlike Python, Elixir doesn't need separate pool instances:
+**IMPORTANT:** Elixir DOES need separate pool instances, just like Python!
 
-**Why?**
-- Finch handles connection pooling automatically
-- HTTP/2 multiplexing allows concurrent requests on same connection
-- GenServer mailboxes provide natural request queuing
+**Why separate pools are critical:**
+1. **Resource isolation**: Prevents sampling bursts from starving session heartbeats
+2. **Different concurrency profiles**: Training (1-5), Sampling (100+), Session (5)
+3. **Failure isolation**: Issues in one pool don't affect others
+4. **Matches Python intent**: The Python SDK separates pools deliberately, not accidentally
 
 **Python approach:**
 ```python
 # Separate pool per operation type
 pool_train = ClientConnectionPool(max_per_client=1)
 pool_sample = ClientConnectionPool(max_per_client=50)
+pool_session = ClientConnectionPool(max_per_client=50)
+pool_futures = ClientConnectionPool(max_per_client=50)
 ```
 
-**Elixir approach:**
+**Elixir approach (CORRECTED):**
 ```elixir
-# Single pool, concurrency managed by GenServers
+# Multiple pools in Finch, keyed by {base_url, pool_type}
 {Finch, name: Tinkex.HTTP.Pool, pools: %{
-  default: [protocol: :http2, count: 10]
+  default: [protocol: :http2, size: 10],
+  {base_url, :training} => [size: 5, count: 1],
+  {base_url, :sampling} => [size: 100],
+  {base_url, :session} => [size: 5, max_idle_time: :infinity],
+  {base_url, :futures} => [size: 50]
 }}
 
-# TrainingClient GenServer naturally serializes requests
-# SamplingClient can spawn multiple processes for concurrency
+# Usage: Specify pool via :pool option in Finch.request
+Finch.request(req, Tinkex.HTTP.Pool, pool: {base_url, :sampling})
 ```
+
+**Why this matters:**
+If 1000 sampling requests saturate a shared pool, session heartbeats can't get connections → session dies → all clients fail. Separate pools prevent cascading failures.
 
 ### Request Tracing
 
