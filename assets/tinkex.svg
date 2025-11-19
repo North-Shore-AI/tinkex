@@ -1,0 +1,160 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="500" height="500">
+  <defs>
+    <!-- Gradients for depth and visual interest -->
+    <linearGradient id="hexGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#6E40C9;stop-opacity:1" />
+      <stop offset="50%" style="stop-color:#4B0DAF;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#2E0664;stop-opacity:1" />
+    </linearGradient>
+
+    <linearGradient id="innerGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#9D7CE8;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#6E40C9;stop-opacity:1" />
+    </linearGradient>
+
+    <linearGradient id="accentGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#FFD700;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#FFA500;stop-opacity:1" />
+    </linearGradient>
+
+    <linearGradient id="neuralGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#00FFFF;stop-opacity:0.8" />
+      <stop offset="100%" style="stop-color:#00CED1;stop-opacity:0.6" />
+    </linearGradient>
+
+    <!-- Filter for glow effect -->
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Filter for inner shadow -->
+    <filter id="innerShadow">
+      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
+      <feOffset dx="0" dy="2" result="offsetblur"/>
+      <feComponentTransfer>
+        <feFuncA type="linear" slope="0.5"/>
+      </feComponentTransfer>
+      <feMerge>
+        <feMergeNode/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background circle for visual interest -->
+  <circle cx="250" cy="250" r="235" fill="none" stroke="url(#hexGradient)" stroke-width="0.5" opacity="0.2"/>
+
+  <!-- Main hexagon -->
+  <polygon points="250,50 400,125 400,275 250,350 100,275 100,125"
+           fill="url(#hexGradient)"
+           stroke="#9D7CE8"
+           stroke-width="4"
+           filter="url(#innerShadow)"/>
+
+  <!-- Inner hexagon layer -->
+  <polygon points="250,90 370,150 370,260 250,320 130,260 130,150"
+           fill="url(#innerGradient)"
+           opacity="0.6"/>
+
+  <!-- Neural network representation - nodes -->
+  <g id="neuralNodes" opacity="0.9">
+    <!-- Input layer -->
+    <circle cx="170" cy="150" r="8" fill="url(#neuralGradient)" filter="url(#glow)"/>
+    <circle cx="170" cy="200" r="8" fill="url(#neuralGradient)" filter="url(#glow)"/>
+    <circle cx="170" cy="250" r="8" fill="url(#neuralGradient)" filter="url(#glow)"/>
+
+    <!-- Hidden layer -->
+    <circle cx="250" cy="135" r="10" fill="url(#accentGradient)" filter="url(#glow)"/>
+    <circle cx="250" cy="190" r="10" fill="url(#accentGradient)" filter="url(#glow)"/>
+    <circle cx="250" cy="245" r="10" fill="url(#accentGradient)" filter="url(#glow)"/>
+    <circle cx="250" cy="300" r="10" fill="url(#accentGradient)" filter="url(#glow)"/>
+
+    <!-- Output layer -->
+    <circle cx="330" cy="175" r="8" fill="url(#neuralGradient)" filter="url(#glow)"/>
+    <circle cx="330" cy="225" r="8" fill="url(#neuralGradient)" filter="url(#glow)"/>
+  </g>
+
+  <!-- Neural network connections -->
+  <g id="neuralConnections" stroke="#00FFFF" stroke-width="1.5" opacity="0.4">
+    <!-- Input to hidden layer -->
+    <line x1="170" y1="150" x2="250" y2="135"/>
+    <line x1="170" y1="150" x2="250" y2="190"/>
+    <line x1="170" y1="200" x2="250" y2="190"/>
+    <line x1="170" y1="200" x2="250" y2="245"/>
+    <line x1="170" y1="250" x2="250" y2="245"/>
+    <line x1="170" y1="250" x2="250" y2="300"/>
+
+    <!-- Hidden to output layer -->
+    <line x1="250" y1="135" x2="330" y2="175"/>
+    <line x1="250" y1="190" x2="330" y2="175"/>
+    <line x1="250" y1="190" x2="330" y2="225"/>
+    <line x1="250" y1="245" x2="330" y2="225"/>
+    <line x1="250" y1="300" x2="330" y2="225"/>
+  </g>
+
+  <!-- Decorative hex pattern elements -->
+  <g id="hexPattern" opacity="0.15" stroke="#9D7CE8" stroke-width="1" fill="none">
+    <polygon points="250,165 280,182 280,216 250,233 220,216 220,182"/>
+    <polygon points="190,182 205,192 205,208 190,218 175,208 175,192"/>
+    <polygon points="310,182 325,192 325,208 310,218 295,208 295,192"/>
+  </g>
+
+  <!-- Central gear/cog element (representing "tinker" - tinkering with ML models) -->
+  <g id="gear" transform="translate(250, 200)">
+    <!-- Gear teeth -->
+    <g fill="url(#accentGradient)" opacity="0.3">
+      <rect x="-3" y="-45" width="6" height="10" rx="1"/>
+      <rect x="-3" y="35" width="6" height="10" rx="1"/>
+      <rect x="35" y="-3" width="10" height="6" rx="1"/>
+      <rect x="-45" y="-3" width="10" height="6" rx="1"/>
+      <rect x="25" y="-25" width="8" height="8" rx="1" transform="rotate(45 29 -21)"/>
+      <rect x="-33" y="-25" width="8" height="8" rx="1" transform="rotate(-45 -29 -21)"/>
+      <rect x="25" y="17" width="8" height="8" rx="1" transform="rotate(-45 29 21)"/>
+      <rect x="-33" y="17" width="8" height="8" rx="1" transform="rotate(45 -29 21)"/>
+    </g>
+
+    <!-- Gear center -->
+    <circle r="30" fill="none" stroke="url(#accentGradient)" stroke-width="3" opacity="0.5"/>
+    <circle r="15" fill="url(#innerGradient)" opacity="0.7"/>
+    <circle r="8" fill="url(#accentGradient)"/>
+  </g>
+
+  <!-- Text elements -->
+  <g id="text">
+    <text x="250" y="390" font-family="Arial, sans-serif" font-size="48" font-weight="bold"
+          fill="url(#hexGradient)" text-anchor="middle">
+      TINKEX
+    </text>
+    <text x="250" y="415" font-family="Arial, sans-serif" font-size="14"
+          fill="#6E40C9" text-anchor="middle" opacity="0.8">
+      ML TRAINING • ELIXIR
+    </text>
+  </g>
+
+  <!-- Corner accent marks for Elixir style -->
+  <g id="accents" opacity="0.6">
+    <!-- Top corners -->
+    <path d="M 100 125 L 95 120 L 100 115" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
+    <path d="M 400 125 L 405 120 L 400 115" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
+
+    <!-- Bottom corners -->
+    <path d="M 100 275 L 95 280 L 100 285" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
+    <path d="M 400 275 L 405 280 L 400 285" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
+  </g>
+
+  <!-- Subtle sparkle effects -->
+  <g id="sparkles" opacity="0.7">
+    <circle cx="140" cy="110" r="2" fill="#FFD700"/>
+    <circle cx="360" cy="110" r="2" fill="#FFD700"/>
+    <circle cx="140" cy="290" r="2" fill="#FFD700"/>
+    <circle cx="360" cy="290" r="2" fill="#FFD700"/>
+
+    <!-- Small plus shapes for sparkle -->
+    <path d="M 380 140 L 382 140 M 381 139 L 381 141" stroke="#FFD700" stroke-width="1"/>
+    <path d="M 120 140 L 122 140 M 121 139 L 121 141" stroke="#FFD700" stroke-width="1"/>
+  </g>
+</svg>

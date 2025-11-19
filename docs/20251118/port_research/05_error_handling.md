@@ -1,0 +1,614 @@
+# Error Handling and Retry Logic
+
+## Python Exception Hierarchy
+
+The Tinker SDK defines a comprehensive exception hierarchy:
+
+```python
+TinkerError (base exception)
+├── APIError
+│   ├── APIConnectionError (network/connection issues)
+│   ├── APITimeoutError (request timeout)
+│   ├── APIResponseValidationError (invalid response data)
+│   └── APIStatusError (HTTP status errors)
+│       ├── BadRequestError (400)
+│       ├── AuthenticationError (401)
+│       ├── PermissionDeniedError (403)
+│       ├── NotFoundError (404)
+│       ├── ConflictError (409)
+│       ├── UnprocessableEntityError (422)
+│       ├── RateLimitError (429)
+│       └── InternalServerError (500+)
+└── RequestFailedError (server-side operation failed)
+```
+
+### Exception Definitions
+
+```python
+# _exceptions.py
+class TinkerError(Exception):
+    """Base exception for all Tinker SDK errors"""
+    pass
+
+class APIError(TinkerError):
+    """Base for all API-related errors"""
+    pass
+
+class APIStatusError(APIError):
+    """HTTP status code error"""
+    def __init__(self, message: str, *, response: httpx.Response, body: object):
+        super().__init__(message)
+        self.response = response
+        self.body = body
+        self.status_code = response.status_code
+
+class RequestFailedError(TinkerError):
+    """Server reported operation failed"""
+    def __init__(
+        self,
+        message: str,
+        *,
+        request_id: str,
+        error_category: RequestErrorCategory,
+        details: dict | None = None,
+    ):
+        super().__init__(message)
+        self.request_id = request_id
+        self.error_category = error_category  # USER_ERROR | TRANSIENT | FATAL
+        self.details = details
+```
+
+## Error Categories
+
+### 1. User Errors (Non-Retryable)
+
+Errors caused by invalid input:
+
+```python
+class RequestErrorCategory(str, Enum):
+    USER_ERROR = "user_error"
+
+# Examples:
+# - Invalid tensor shapes
+# - Missing required fields
+# - Invalid parameter values
+# - Model not found
+```
+
+**Handling:**
+- Never retry
+- Propagate immediately to user
+- Include detailed error message
+
+### 2. Transient Errors (Retryable)
+
+Temporary failures:
+
+```python
+class RequestErrorCategory(str, Enum):
+    TRANSIENT = "transient"
+
+# Examples:
+# - 500 Internal Server Error
+# - 503 Service Unavailable
+# - 408 Request Timeout
+# - Network connection errors
+# - Rate limiting (429)
+```
+
+**Handling:**
+- Retry with exponential backoff
+- Maximum retry attempts
+- Track retry count in telemetry
+
+### 3. Fatal Errors (Non-Retryable)
+
+Unrecoverable server errors:
+
+```python
+class RequestErrorCategory(str, Enum):
+    FATAL = "fatal"
+
+# Examples:
+# - Out of memory
+# - GPU error
+# - Model corruption
+```
+
+**Handling:**
+- Never retry
+- Propagate with full context
+- Log for debugging
+
+## Retry Strategies
+
+### Base Client Retry
+
+Built into HTTP layer:
+
+```python
+async def _retry_request(
+    self,
+    options: FinalRequestOptions,
+    fn: Callable[[], Awaitable[ResponseT]],
+) -> ResponseT:
+    max_retries = options.get("max_retries", DEFAULT_MAX_RETRIES)
+
+    for attempt in range(max_retries + 1):
+        try:
+            return await fn()
+
+        except (APIConnectionError, APITimeoutError):
+            if attempt >= max_retries:
+                raise
+
+            delay = calculate_backoff(attempt)
+            await asyncio.sleep(delay)
+
+        except APIStatusError as e:
+            # Only retry server errors and timeouts
+            if not is_retryable_status(e.status_code):
+                raise
+
+            if attempt >= max_retries:
+                raise
+
+            delay = calculate_backoff(attempt)
+            await asyncio.sleep(delay)
+
+def is_retryable_status(status_code: int) -> bool:
+    return status_code >= 500 or status_code == 408
+```
+
+### Future Polling Retry
+
+More aggressive retries for promise retrieval:
+
+```python
+async def _result_async(self, timeout: float | None = None) -> T:
+    """Poll server for result, retry on transient errors"""
+    iteration = 0
+
+    while True:
+        iteration += 1
+
+        try:
+            response = await client.futures.retrieve(request_id=self.request_id)
+
+            if response.status == "completed":
+                return parse_result(response.result)
+
+            elif response.status == "failed":
+                error = response.error
+                if error.category == "transient":
+                    # Retry transient errors
+                    await asyncio.sleep(1)
+                    continue
+                else:
+                    # Raise user/fatal errors
+                    raise RequestFailedError(error.message, ...)
+
+            elif response.status == "pending":
+                # Still processing, wait and retry
+                delay = min(1.0 * (2 ** (iteration // 10)), 30.0)
+                await asyncio.sleep(delay)
+                continue
+
+        except APIStatusError as e:
+            if e.status_code == 408:
+                # Timeout, retry immediately
+                continue
+
+            if e.status_code >= 500:
+                # Server error, retry with backoff
+                await asyncio.sleep(calculate_backoff(iteration))
+                continue
+
+            # Other status codes, raise
+            raise
+
+        except APIConnectionError:
+            # Connection error, retry with backoff
+            connection_error_retries += 1
+            if connection_error_retries > 5:
+                raise
+            await asyncio.sleep(calculate_backoff(iteration))
+            continue
+```
+
+### Sampling Retry with Configuration
+
+SamplingClient supports custom retry configuration:
+
+```python
+@dataclass
+class RetryConfig:
+    """Configuration for retry behavior"""
+    max_retries: int = 3
+    initial_delay: float = 1.0
+    max_delay: float = 60.0
+    exponential_base: float = 2.0
+    jitter: bool = True
+
+class RetryHandler:
+    def __init__(self, config: RetryConfig, name: str, telemetry: Telemetry | None):
+        self.config = config
+        self.name = name
+        self.telemetry = telemetry
+
+    async def execute(self, fn: Callable[[], Awaitable[T]]) -> T:
+        """Execute function with retry logic"""
+        last_exception = None
+
+        for attempt in range(self.config.max_retries + 1):
+            try:
+                return await fn()
+
+            except Exception as e:
+                last_exception = e
+
+                if not self.is_retryable(e):
+                    raise
+
+                if attempt >= self.config.max_retries:
+                    raise
+
+                delay = self.calculate_delay(attempt)
+
+                if self.telemetry:
+                    self.telemetry.log(
+                        f"retry.{self.name}",
+                        event_data={
+                            "attempt": attempt,
+                            "delay": delay,
+                            "exception": str(e),
+                        }
+                    )
+
+                await asyncio.sleep(delay)
+
+        raise last_exception
+
+    def is_retryable(self, error: Exception) -> bool:
+        """Determine if error is retryable"""
+        if isinstance(error, APIStatusError):
+            return error.status_code >= 500 or error.status_code == 408
+
+        if isinstance(error, (APIConnectionError, APITimeoutError)):
+            return True
+
+        if isinstance(error, RequestFailedError):
+            return error.error_category == RequestErrorCategory.TRANSIENT
+
+        return False
+
+    def calculate_delay(self, attempt: int) -> float:
+        """Calculate retry delay with exponential backoff and jitter"""
+        delay = self.config.initial_delay * (
+            self.config.exponential_base ** attempt
+        )
+
+        delay = min(delay, self.config.max_delay)
+
+        if self.config.jitter:
+            delay *= (0.5 + random.random() * 0.5)
+
+        return delay
+```
+
+## Elixir Error Handling Strategy
+
+### 1. Error Types
+
+Use tagged tuples and custom exceptions:
+
+```elixir
+defmodule Tinkex.Error do
+  @moduledoc "Base error type for Tinkex SDK"
+
+  defexception [:message, :type, :status, :data, :exception]
+
+  @type t :: %__MODULE__{
+    message: String.t(),
+    type: error_type(),
+    status: integer() | nil,
+    data: map() | nil,
+    exception: Exception.t() | nil
+  }
+
+  @type error_type ::
+    :api_connection
+    | :api_timeout
+    | :api_status
+    | :request_failed
+    | :validation
+
+  def api_connection(message, exception \\ nil) do
+    %__MODULE__{
+      message: message,
+      type: :api_connection,
+      exception: exception
+    }
+  end
+
+  def api_status(status, message, data \\ nil) do
+    %__MODULE__{
+      message: message,
+      type: :api_status,
+      status: status,
+      data: data
+    }
+  end
+
+  def request_failed(message, request_id, category, details \\ nil) do
+    %__MODULE__{
+      message: message,
+      type: :request_failed,
+      data: %{
+        request_id: request_id,
+        category: category,
+        details: details
+      }
+    }
+  end
+end
+```
+
+### 2. Result Tuples
+
+Use standard `{:ok, result} | {:error, reason}` pattern:
+
+```elixir
+# Success
+{:ok, %Tinkex.Types.SampleResponse{}}
+
+# User error (don't retry)
+{:error, %Tinkex.Error{
+  type: :request_failed,
+  data: %{category: :user_error}
+}}
+
+# Transient error (can retry)
+{:error, %Tinkex.Error{
+  type: :api_status,
+  status: 503
+}}
+```
+
+### 3. Retry Logic
+
+```elixir
+defmodule Tinkex.Retry do
+  @moduledoc "Retry logic with exponential backoff"
+
+  @type retry_config :: %{
+    max_retries: non_neg_integer(),
+    initial_delay: non_neg_integer(),
+    max_delay: non_neg_integer(),
+    exponential_base: float(),
+    jitter: boolean()
+  }
+
+  @default_config %{
+    max_retries: 3,
+    initial_delay: 1000,
+    max_delay: 60_000,
+    exponential_base: 2.0,
+    jitter: true
+  }
+
+  @doc """
+  Execute function with retry logic.
+
+  Returns {:ok, result} or {:error, last_error} after all retries exhausted.
+  """
+  @spec with_retry((() -> {:ok, any()} | {:error, any()}), retry_config() | nil) ::
+    {:ok, any()} | {:error, any()}
+  def with_retry(fun, config \\ nil) do
+    config = Map.merge(@default_config, config || %{})
+    do_retry(fun, config, 0, nil)
+  end
+
+  defp do_retry(fun, config, attempt, _last_error) when attempt > config.max_retries do
+    fun.()
+  end
+
+  defp do_retry(fun, config, attempt, _last_error) do
+    case fun.() do
+      {:ok, _} = success ->
+        success
+
+      {:error, error} = result ->
+        if retryable?(error) and attempt < config.max_retries do
+          delay = calculate_delay(config, attempt)
+
+          :telemetry.execute(
+            [:tinkex, :retry],
+            %{attempt: attempt, delay: delay},
+            %{error: error}
+          )
+
+          Process.sleep(delay)
+          do_retry(fun, config, attempt + 1, error)
+        else
+          result
+        end
+    end
+  end
+
+  @doc "Determine if error is retryable"
+  def retryable?(%Tinkex.Error{type: :api_connection}), do: true
+  def retryable?(%Tinkex.Error{type: :api_timeout}), do: true
+  def retryable?(%Tinkex.Error{type: :api_status, status: status})
+      when status >= 500 or status == 408, do: true
+  def retryable?(%Tinkex.Error{type: :request_failed, data: %{category: :transient}}),
+    do: true
+  def retryable?(_), do: false
+
+  defp calculate_delay(config, attempt) do
+    delay = config.initial_delay * :math.pow(config.exponential_base, attempt)
+    delay = min(delay, config.max_delay)
+
+    if config.jitter do
+      jitter = :rand.uniform() * 0.5 + 0.5
+      round(delay * jitter)
+    else
+      round(delay)
+    end
+  end
+end
+```
+
+### 4. Usage Examples
+
+```elixir
+# Simple retry
+result = Tinkex.Retry.with_retry(fn ->
+  Tinkex.API.Training.forward_backward(request, pool)
+end)
+
+# Custom retry config
+config = %{
+  max_retries: 5,
+  initial_delay: 500,
+  max_delay: 30_000
+}
+
+result = Tinkex.Retry.with_retry(fn ->
+  Tinkex.API.Sampling.asample(request, pool)
+end, config)
+
+# Pattern matching on results
+case Tinkex.Retry.with_retry(fn -> do_request() end) do
+  {:ok, response} ->
+    # Success
+    process_response(response)
+
+  {:error, %Tinkex.Error{type: :request_failed, data: %{category: :user_error}}} = error ->
+    # User error, don't retry
+    Logger.error("User error: #{inspect(error)}")
+    {:error, error}
+
+  {:error, error} ->
+    # Other error
+    Logger.error("Request failed: #{inspect(error)}")
+    {:error, error}
+end
+```
+
+### 5. Future Polling with Retries
+
+```elixir
+defmodule Tinkex.Future do
+  defp poll_loop(request_id, pool, timeout, start_time, iteration) do
+    case Tinkex.API.Futures.retrieve(%{request_id: request_id}, pool) do
+      {:ok, %{"status" => "completed", "result" => result}} ->
+        {:ok, result}
+
+      {:ok, %{"status" => "failed", "error" => error}} ->
+        category = String.to_atom(error["category"])
+
+        case category do
+          :transient ->
+            # Retry transient errors
+            Process.sleep(1000)
+            poll_loop(request_id, pool, timeout, start_time, iteration + 1)
+
+          _ ->
+            # User/fatal errors
+            {:error, Tinkex.Error.request_failed(
+              error["message"],
+              request_id,
+              category,
+              error["details"]
+            )}
+        end
+
+      {:ok, %{"status" => "pending"}} ->
+        # Still processing
+        delay = calculate_polling_delay(iteration)
+        Process.sleep(delay)
+        poll_loop(request_id, pool, timeout, start_time, iteration + 1)
+
+      {:error, %{status: 408}} ->
+        # Timeout, retry immediately
+        poll_loop(request_id, pool, timeout, start_time, iteration)
+
+      {:error, %{status: status}} when status >= 500 ->
+        # Server error, retry with backoff
+        delay = calculate_backoff(iteration)
+        Process.sleep(delay)
+        poll_loop(request_id, pool, timeout, start_time, iteration + 1)
+
+      {:error, _} = error ->
+        # Non-retryable error
+        error
+    end
+  end
+
+  defp calculate_polling_delay(iteration) do
+    # Slower backoff for polling: 1s, 2s, 4s, ... max 30s
+    min(1000 * :math.pow(2, div(iteration, 10)), 30_000)
+    |> round()
+  end
+end
+```
+
+## Error Handling Best Practices
+
+### 1. Let It Crash (OTP Philosophy)
+
+Don't try to recover from unrecoverable errors:
+
+```elixir
+# Bad: swallow all errors
+try do
+  dangerous_operation()
+rescue
+  _ -> :ok
+end
+
+# Good: let supervisor restart
+dangerous_operation()
+```
+
+### 2. Use Supervisors
+
+```elixir
+defmodule Tinkex.ClientSupervisor do
+  use DynamicSupervisor
+
+  def start_link(init_arg) do
+    DynamicSupervisor.start_link(__MODULE__, init_arg, name: __MODULE__)
+  end
+
+  @impl true
+  def init(_init_arg) do
+    DynamicSupervisor.init(strategy: :one_for_one, max_restarts: 3, max_seconds: 5)
+  end
+end
+```
+
+### 3. Circuit Breaker Pattern
+
+For repeated failures:
+
+```elixir
+defmodule Tinkex.CircuitBreaker do
+  use GenServer
+
+  # After 5 failures in 60s, open circuit for 30s
+
+  def call(name, fun) do
+    case GenServer.call(name, :check_state) do
+      :closed -> execute_and_record(name, fun)
+      :open -> {:error, :circuit_open}
+      :half_open -> try_recovery(name, fun)
+    end
+  end
+end
+```
+
+## Next Steps
+
+See `06_telemetry.md` for observability and metrics.
