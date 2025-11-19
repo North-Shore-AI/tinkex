@@ -122,12 +122,12 @@ Elixir is an excellent fit for this SDK port because:
 
 **⚠️ UPDATED (Round 6 - Verification Focus):** Added comprehensive pre-implementation verification steps:
 - **RequestErrorCategory**: Wire format verification (Unknown/Server/User vs Unknown/Server/USER)
-- **Rate limiting**: Verified that Python’s backoff scope is per-ServiceClient holder (no global coordination)
+- **Rate limiting**: Confirmed shared `{base_url, api_key}` scope (staging/prod remain isolated)
 - **Pre-implementation checklist**: 8 critical verification steps before coding
 
 **⚠️ UPDATED (Round 7 - Concrete Bugs Fixed):** Addressed type field mismatches and architectural issues:
 - **Type system**: Fixed ImageChunk (`data` not `image_data`), ImageAssetPointerChunk (`location` not `asset_id`), SampleRequest.prompt_logprobs (Optional[bool])
-- **RateLimiter**: Documented per-ServiceClient holder scope to match Python behavior; global coordination deferred/opt-in
+- **RateLimiter**: Finalized `{base_url, api_key}` scoping plus `insert_new` to avoid split-brain instances
 - **HTTP layer**: Removed incorrect HTTP date parsing, clarified retry responsibility split
 - **Multi-tenancy**: Documented Finch pool single base_url limitation
 - **GenServer.reply**: Added ArgumentError rescue for caller death
