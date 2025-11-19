@@ -38,6 +38,12 @@
 - **429 responsibility split**: SamplingClient has RateLimiter for backoff, but does NOT retry. HTTP layer (TrainingClient/futures) handles retries.
 - **Multi-tenancy pools**: Added CRITICAL limitation - Finch pools defined at app start with single base_url. Multi-base_url requires dynamic pool management (see note below).
 
+**Key Corrections (Round 8 - Integration Bugs):**
+- **SamplingClient config injection**: Fixed to inject `entry.config` into API opts - prevents Keyword.fetch! crash in HTTP layer
+- **RateLimiter race condition**: Changed to `:ets.insert_new/2` pattern - prevents split-brain limiters when multiple processes initialize same key
+- **TrainingClient submission errors**: Added `reduce_while` with error handling - prevents GenServer crash on transient HTTP/validation errors
+- **Tokenizer ETS key consistency**: Changed to cache by resolved tokenizer ID (not raw model_name) - prevents duplicate caches for same HF tokenizer
+
 ## Overview
 
 The Tinker SDK uses a hierarchical client architecture with three main client types, each backed by a shared `InternalClientHolder` for connection management.
@@ -449,59 +455,68 @@ defmodule Tinkex.TrainingClient do
       state.request_id_counter
     )
 
-    # ⚠️ CRITICAL: Send ALL requests SYNCHRONOUSLY (blocks GenServer)
+    # ⚠️ CRITICAL (Round 8): Send ALL requests SYNCHRONOUSLY with error handling
     # This ensures requests are sent in order BEFORE next operation starts
-    untyped_futures = Enum.zip(request_ids, chunks)
-    |> Enum.map(fn {req_id, chunk} ->
-      # SYNCHRONOUS send - blocks GenServer until request sent
-      {:ok, untyped_future} = send_forward_backward_request(
-        chunk,
-        loss_fn,
-        state.model_id,
-        req_id,
-        state.http_pool
-      )
-      untyped_future
-    end)
+    # If any send fails, reply with error instead of crashing GenServer
+    send_result =
+      Enum.reduce_while(Enum.zip(request_ids, chunks), {:ok, []}, fn {req_id, chunk}, {:ok, acc} ->
+        case send_forward_backward_request(chunk, loss_fn, state.model_id, req_id, state.http_pool) do
+          {:ok, untyped_future} ->
+            {:cont, {:ok, [untyped_future | acc]}}
 
-    # ⚠️ CRITICAL (Round 4): Spawn background task with error handling
-    # If task crashes without try/rescue, GenServer.reply never called → caller hangs forever!
-    Task.start(fn ->
-      reply = try do
-        # Create polling tasks for each future
-        polling_tasks = Enum.map(untyped_futures, fn future ->
-          Tinkex.Future.poll(future.request_id, state.http_pool)
+          {:error, reason} ->
+            {:halt, {:error, reason}}
+        end
+      end)
+
+    case send_result do
+      {:error, reason} ->
+        # Send failed - reply immediately with error, don't spawn polling task
+        # Prevents crashing GenServer on transient HTTP/validation issues
+        {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
+
+      {:ok, untyped_futures_rev} ->
+        untyped_futures = Enum.reverse(untyped_futures_rev)
+
+        # ⚠️ CRITICAL (Round 4): Spawn background task with error handling
+        # If task crashes without try/rescue, GenServer.reply never called → caller hangs forever!
+        Task.start(fn ->
+          reply = try do
+            # Create polling tasks for each future
+            polling_tasks = Enum.map(untyped_futures, fn future ->
+              Tinkex.Future.poll(future.request_id, state.http_pool)
+            end)
+
+            # Await all polling tasks concurrently
+            results = Task.await_many(polling_tasks, :infinity)
+            combined = combine_forward_backward_results(results)
+            {:ok, combined}
+          rescue
+            e ->
+              # ALWAYS reply, even on failure, to prevent infinite hang
+              {:error, %Tinkex.Error{
+                message: "Polling failed: #{Exception.message(e)}",
+                type: :request_failed,
+                data: %{exception: e, stacktrace: __STACKTRACE__}
+              }}
+          end
+
+          # ALWAYS call GenServer.reply, whether success or failure
+          # ⚠️ UPDATED (Round 7): Handle case where caller died/timed out
+          try do
+            GenServer.reply(from, reply)
+          rescue
+            ArgumentError ->
+              # Caller process died before we could reply
+              # This is normal if client timed out or crashed
+              # Just log and continue (don't crash the background task)
+              :ok
+          end
         end)
 
-        # Await all polling tasks concurrently
-        results = Task.await_many(polling_tasks, :infinity)
-        combined = combine_forward_backward_results(results)
-        {:ok, combined}
-      rescue
-        e ->
-          # ALWAYS reply, even on failure, to prevent infinite hang
-          {:error, %Tinkex.Error{
-            message: "Polling failed: #{Exception.message(e)}",
-            type: :request_failed,
-            data: %{exception: e, stacktrace: __STACKTRACE__}
-          }}
-      end
-
-      # ALWAYS call GenServer.reply, whether success or failure
-      # ⚠️ UPDATED (Round 7): Handle case where caller died/timed out
-      try do
-        GenServer.reply(from, reply)
-      rescue
-        ArgumentError ->
-          # Caller process died before we could reply
-          # This is normal if client timed out or crashed
-          # Just log and continue (don't crash the background task)
-          :ok
-      end
-    end)
-
-    new_state = %{state | request_id_counter: new_counter}
-    {:noreply, new_state}
+        new_state = %{state | request_id_counter: new_counter}
+        {:noreply, new_state}
+    end
   end
 
   defp chunk_data(data) do
@@ -653,20 +668,30 @@ defmodule Tinkex.RateLimiter do
   ⚠️ IMPORTANT: Keys by both base_url AND api_key to handle:
   - Same API key against staging vs production (independent limits)
   - Different API keys against same server (independent limits)
+
+  ⚠️ CRITICAL (Round 8): Uses insert_new to prevent race condition
   """
   def for_key({base_url, api_key}) do
     # Normalize base_url to avoid "http://foo" vs "http://foo/" duplicates
     normalized_url = Tinkex.PoolKey.normalize_base_url(base_url)
     key = {:limiter, {normalized_url, api_key}}
 
-    case :ets.lookup(:tinkex_rate_limiters, key) do
-      [{_, limiter}] ->
+    # ⚠️ UPDATED (Round 8): Use insert_new to prevent split-brain limiters
+    # Race scenario without insert_new:
+    #   Process A: lookup → [], create atomic A, insert
+    #   Process B: lookup → [], create atomic B, insert (overwrites A)
+    #   Result: Process A holds detached atomic A, all others use B → split brain!
+    limiter = :atomics.new(1, signed: true)
+
+    case :ets.insert_new(:tinkex_rate_limiters, {key, limiter}) do
+      true ->
+        # We won the race: our limiter is the canonical one
         limiter
-      [] ->
-        # Create new limiter
-        limiter = :atomics.new(1, signed: true)
-        :ets.insert(:tinkex_rate_limiters, {key, limiter})
-        limiter
+
+      false ->
+        # Another process inserted first; use the existing one
+        [{^key, existing}] = :ets.lookup(:tinkex_rate_limiters, key)
+        existing
     end
   end
 
@@ -733,9 +758,17 @@ defmodule Tinkex.SamplingClient do
             topk_prompt_logprobs: opts[:topk_prompt_logprobs] || 0
           }
 
+          # ⚠️ CRITICAL (Round 8): Inject config into opts for API layer
+          # API layer requires opts[:config] via Keyword.fetch!/2
+          api_opts =
+            opts
+            |> Keyword.delete(:include_prompt_logprobs)  # SamplingClient-only option
+            |> Keyword.delete(:topk_prompt_logprobs)     # SamplingClient-only option
+            |> Keyword.put(:config, config.config)        # Inject Tinkex.Config from ETS
+
           # HTTP call in THIS process
           # ⚠️ UPDATED (Round 4): Use retry_after_ms from error, not hard-coded 1000ms
-          case Tinkex.API.Sampling.asample(request, config.http_pool, opts) do
+          case Tinkex.API.Sampling.asample(request, config.http_pool, api_opts) do
             {:error, %Tinkex.Error{status: 429, retry_after_ms: retry_ms} = error} ->
               # Got rate limited - use server-provided backoff
               backoff_ms = retry_ms || 1000  # Fallback to 1000ms if not provided
@@ -1222,20 +1255,61 @@ defmodule Tinkex.Tokenizer do
 
   Tokenizers are cached in :tinkex_tokenizers ETS table to avoid
   re-downloading from HuggingFace Hub on every call.
+
+  ⚠️ CRITICAL (Round 8): Cache by RESOLVED tokenizer ID, not raw model_name
   """
-  def encode(text, model_name) do
-    tokenizer = case :ets.lookup(:tinkex_tokenizers, model_name) do
-      [{^model_name, tok}] -> tok
-      [] -> load_and_cache(model_name)
+  def encode(text, model_name, training_client \\ nil) do
+    # Resolve the actual tokenizer ID (handles Llama-3 hack, server tokenizer_id, etc.)
+    tokenizer_id = get_tokenizer_id_for_name(model_name, training_client)
+
+    # Cache lookup/load by RESOLVED ID (not raw model_name)
+    tokenizer = case :ets.lookup(:tinkex_tokenizers, tokenizer_id) do
+      [{^tokenizer_id, tok}] -> tok
+      [] -> load_and_cache(tokenizer_id)
     end
 
     {:ok, encoding} = Tokenizers.Tokenizer.encode(tokenizer, text)
     Tokenizers.Encoding.get_ids(encoding)
   end
 
-  defp load_and_cache(model_name) do
-    {:ok, tokenizer} = Tokenizers.Tokenizer.from_pretrained(model_name)
-    :ets.insert(:tinkex_tokenizers, {model_name, tokenizer})
+  @doc """
+  Get resolved tokenizer ID for a model name.
+
+  Checks server-reported tokenizer_id, applies Llama-3 hack, or falls back to model_name.
+  """
+  def get_tokenizer_id_for_name(model_name, training_client \\ nil) do
+    case training_client do
+      nil ->
+        # No client available, apply heuristics only
+        apply_tokenizer_heuristics(model_name)
+
+      client ->
+        # Try to get from server first
+        case Tinkex.TrainingClient.get_info(client) do
+          {:ok, %{model_data: %{tokenizer_id: id}}} when not is_nil(id) ->
+            id
+
+          _ ->
+            apply_tokenizer_heuristics(model_name)
+        end
+    end
+  end
+
+  defp apply_tokenizer_heuristics(model_name) do
+    # Hardcoded Llama-3 hack (matches Python exactly!)
+    if String.contains?(model_name, "Llama-3") do
+      "baseten/Meta-Llama-3-tokenizer"
+    else
+      model_name  # Fallback
+    end
+  end
+
+  defp load_and_cache(tokenizer_id) do
+    # ⚠️ UPDATED (Round 8): Load and cache by resolved tokenizer ID
+    # This ensures "Qwen/Qwen2.5-7B" and another model with same tokenizer_id
+    # share ONE cached tokenizer instance
+    {:ok, tokenizer} = Tokenizers.Tokenizer.from_pretrained(tokenizer_id)
+    :ets.insert(:tinkex_tokenizers, {tokenizer_id, tokenizer})
     tokenizer
   end
 end

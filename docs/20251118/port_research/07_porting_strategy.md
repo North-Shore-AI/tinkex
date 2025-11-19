@@ -48,6 +48,13 @@
 - **GenServer.reply safety**: Added ArgumentError rescue when caller dies before reply
 - **Type verification checklist**: Added comprehensive pre-implementation verification steps
 
+**Key Corrections (Round 8 - Integration & Concurrency Bugs Fixed):**
+- **SamplingClient config injection**: Fixed to inject `entry.config` from ETS into API layer opts (prevents Keyword.fetch! crash at runtime)
+- **RateLimiter race condition**: Changed to `:ets.insert_new/2` pattern to prevent split-brain limiters when multiple processes initialize same key concurrently
+- **TrainingClient submission error handling**: Added `reduce_while` with graceful error replies to prevent GenServer crash on transient HTTP/validation failures
+- **Tokenizer ETS key consistency**: Changed caching to use resolved tokenizer ID (not raw model_name) to prevent duplicate downloads for same HF tokenizer
+- **Tokenizer NIF safety verification**: Added Pre-Implementation Checklist item to verify tokenizers NIF resources are safe to store in ETS and share across processes
+
 ## Technology Stack Recommendations
 
 ### Core Dependencies ⚠️ UPDATED
@@ -1287,6 +1294,17 @@ Before writing code, verify your assumptions:
 - [ ] RateLimiter keyed by {base_url, api_key} (NOT just api_key)
 - [ ] GenServer.reply handles ArgumentError when caller dies
 - [ ] 429 retry responsibility split: SamplingClient (backoff only), HTTP layer (retries)
+
+**Concurrency & Safety (Round 8):**
+- [ ] SamplingClient injects config from ETS into API opts (prevents Keyword.fetch! crash)
+- [ ] RateLimiter uses `:ets.insert_new/2` to prevent split-brain limiters
+- [ ] TrainingClient handles send errors gracefully (doesn't crash GenServer)
+- [ ] Tokenizer ETS caching uses resolved tokenizer ID (not raw model_name)
+- [ ] **Tokenizer NIF resource safety verified:**
+  - [ ] Confirm `tokenizers` NIF resources are safe to store in ETS
+  - [ ] Verify tokenizer handles can be used from arbitrary processes (Tasks/GenServers different from creator)
+  - [ ] Test: Create tokenizer in Process A, store in ETS, use from Process B - must not crash VM
+  - [ ] If unsafe: Use dedicated GenServer for tokenizers OR rebuild handles per-process (no ETS cache)
 
 ---
 

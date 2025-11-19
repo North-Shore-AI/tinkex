@@ -120,6 +120,25 @@ Elixir is an excellent fit for this SDK port because:
 - **ETS cleanup**: Registry pattern with process monitoring
 - **Streaming**: Marked as illustrative/non-production for v1.0
 
+**⚠️ UPDATED (Round 6 - Verification Focus):** Added comprehensive pre-implementation verification steps:
+- **RequestErrorCategory**: Wire format verification (Unknown/Server/User vs Unknown/Server/USER)
+- **Rate limiting**: Confirmed per-{base_url, api_key} scope (not global)
+- **Pre-implementation checklist**: 8 critical verification steps before coding
+
+**⚠️ UPDATED (Round 7 - Concrete Bugs Fixed):** Addressed type field mismatches and architectural issues:
+- **Type system**: Fixed ImageChunk (`data` not `image_data`), ImageAssetPointerChunk (`location` not `asset_id`), SampleRequest.prompt_logprobs (Optional[bool])
+- **RateLimiter**: Changed to `for_key({base_url, api_key})` - prevents staging/prod cross-contamination
+- **HTTP layer**: Removed incorrect HTTP date parsing, clarified retry responsibility split
+- **Multi-tenancy**: Documented Finch pool single base_url limitation
+- **GenServer.reply**: Added ArgumentError rescue for caller death
+
+**⚠️ UPDATED (Round 8 - Integration Bugs Fixed):** Resolved subtle concurrency and integration issues:
+- **SamplingClient**: Fixed config injection into API layer opts (prevents Keyword.fetch! crash)
+- **RateLimiter**: Changed to `:ets.insert_new/2` pattern (prevents split-brain limiters)
+- **TrainingClient**: Added error handling for submission failures (prevents GenServer crash)
+- **Tokenizer**: Fixed ETS caching to use resolved tokenizer ID (prevents duplicate caches)
+- **NIF safety**: Added verification checklist for tokenizers NIF resource sharing
+
 This port research is organized into the following documents:
 
 1. **00_overview.md** (this document) - High-level architecture
