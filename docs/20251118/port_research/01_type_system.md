@@ -200,14 +200,14 @@ class LoraConfig(BaseModel):
 
 Response types represent data received from the API:
 
-**ForwardBackwardOutput** ⚠️ CORRECTED
+**ForwardBackwardOutput** ⚠️ CORRECTED (v0.4.1)
 ```python
-# ACTUAL Python SDK (verified from source):
+# ACTUAL Python SDK v0.4.1 (verified from source):
 class ForwardBackwardOutput(BaseModel):
-    loss_fn_output_type: str  # e.g., "cross_entropy_output"
     loss_fn_outputs: List[LossFnOutput]  # Per-example outputs (typed)
     metrics: Dict[str, float]  # Aggregated metrics
     # NOTE: No 'loss' field! Loss is in metrics["loss"]
+    # NOTE: No 'loss_fn_output_type' field in v0.4.1!
 ```
 
 **SampleResponse**
@@ -370,18 +370,21 @@ class TensorData(BaseModel):
 
 ## 4. Enum Types
 
-**LossFnType** ⚠️ CORRECTED
+**LossFnType** ⚠️ CORRECTED (v0.4.1)
 ```python
-# ACTUAL Python SDK (verified from source):
-LossFnType: TypeAlias = Literal["cross_entropy", "importance_sampling", "ppo"]
-# All 3 values already supported by SDK and backend
+# ACTUAL Python SDK v0.4.1 (verified from source):
+LossFnType: TypeAlias = Literal["cross_entropy", "importance_sampling", "ppo", "kl_divergence"]
+# All 4 values supported by SDK and backend
 ```
 
-**StopReason** ⚠️ CORRECTED
+**StopReason** ⚠️ CORRECTED (v0.4.1)
 ```python
-# ACTUAL Python SDK (verified from source):
-StopReason: TypeAlias = Literal["length", "stop"]
-# NOT "max_tokens" | "stop_sequence" | "eos"!
+# ACTUAL Python SDK v0.4.1 (verified from source):
+class StopReason(StrEnum):
+    MAX_TOKENS = auto()        # "max_tokens"
+    STOP_SEQUENCE = auto()     # "stop_sequence"
+    EOS = auto()               # "eos"
+# Wire values: "max_tokens" | "stop_sequence" | "eos"
 ```
 
 **TensorDtype** ⚠️ CORRECTED
@@ -392,39 +395,36 @@ TensorDtype: TypeAlias = Literal["int64", "float32"]
 # float64 and int32 are NOT supported by the backend
 ```
 
-**RequestErrorCategory**
+**RequestErrorCategory** ⚠️ CORRECTED (v0.4.1)
 
 ```python
-# Python SDK source code:
+# Python SDK v0.4.1 source code (with _types.py StrEnum patching):
 class RequestErrorCategory(StrEnum):
-    Unknown = auto()
-    Server = auto()
-    User = auto()
+    Unknown = auto()  # Wire value: "unknown" (lowercase!)
+    Server = auto()   # Wire value: "server" (lowercase!)
+    User = auto()     # Wire value: "user" (lowercase!)
 
-# StrEnum.auto() preserves the member name, so the wire format is
-# deterministically "Unknown" | "Server" | "User".
+# The _types.py module patches StrEnum metaclass to lowercase auto() values.
+# Wire format: "unknown" | "server" | "user" (all lowercase)
 ```
 
-**Defensive Elixir Parser (handles canonical + lowercase just in case):**
+**Elixir Parser (matches actual wire format):**
 
-```python
+```elixir
 defmodule Tinkex.Types.RequestErrorCategory do
   @moduledoc """
   Request error category parser.
 
-  Canonical values are \"Unknown\", \"Server\", \"User\" (matches StrEnum auto()).
-  The parser also accepts lowercase variants for safety.
+  Wire values are LOWERCASE: \"unknown\", \"server\", \"user\"
+  (Python SDK's _types.py patches StrEnum to lowercase auto() values)
   """
 
   @type t :: :unknown | :server | :user
 
-  @doc "Parse from JSON string (defensive - handles both cases)"
+  @doc "Parse from JSON string (lowercase wire format)"
   def parse("unknown"), do: :unknown
-  def parse("Unknown"), do: :unknown
   def parse("server"), do: :server
-  def parse("Server"), do: :server
   def parse("user"), do: :user
-  def parse("User"), do: :user
   def parse(_), do: :unknown  # Safe fallback
 
   @doc "Check if error category is retryable"
@@ -435,9 +435,9 @@ end
 ```
 
 **Why This Matters:**
-- Python code does `RequestErrorCategory(result_dict.get("category"))` - this will fail if values don't match
-- The actual wire format determines parsing logic
-- Defensive parsing prevents crashes on case mismatches
+- Python SDK's `_types.py` patches `StrEnum` to lowercase all auto() values
+- Actual wire format is lowercase, not capitalized
+- Parser must match actual API responses
 
 ## 5. Future Types
 

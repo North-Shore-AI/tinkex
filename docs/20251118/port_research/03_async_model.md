@@ -690,11 +690,7 @@ defp combine_forward_backward_results(results) do
   # based on metric name suffix (:mean, :sum, :min, :max, :slack, :unique)
   merged_metrics = Tinkex.MetricsReduction.reduce(results)
 
-  # Use loss_fn_output_type from first result (should be same for all)
-  loss_fn_output_type = hd(results).loss_fn_output_type
-
   %Tinkex.Types.ForwardBackwardOutput{
-    loss_fn_output_type: loss_fn_output_type,
     loss_fn_outputs: all_outputs,
     metrics: merged_metrics  # loss is metrics["loss"]
   }
