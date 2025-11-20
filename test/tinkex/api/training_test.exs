@@ -1,25 +1,76 @@
 defmodule Tinkex.API.TrainingTest do
   use Tinkex.HTTPCase, async: false
 
+  alias Tinkex.Types.ForwardBackwardOutput
+  alias Tinkex.Types.OptimStepResponse
   alias Tinkex.API.Training
 
   setup :setup_http_client
 
   describe "forward_backward/2" do
-    test "sends request to correct endpoint", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, "POST", "/api/v1/forward_backward", fn conn ->
-        conn
-        |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, ~s({"metrics":{"loss":0.5}}))
+    test "polls future and returns typed output", %{bypass: bypass, config: config} do
+      Bypass.expect(bypass, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        case conn.request_path do
+          "/api/v1/forward_backward" ->
+            assert Jason.decode!(body)["model_id"] == "test"
+
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(200, ~s({"request_id":"fw-1"}))
+
+          "/api/v1/future/retrieve" ->
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(
+              200,
+              Jason.encode!(%{
+                status: "completed",
+                result: %{
+                  "loss_fn_output_type" => "mean",
+                  "loss_fn_outputs" => [%{"idx" => 1}],
+                  "metrics" => %{"loss" => 0.5}
+                }
+              })
+            )
+        end
       end)
 
-      {:ok, result} = Training.forward_backward(%{model_id: "test"}, config: config)
-      assert result["metrics"]["loss"] == 0.5
+      assert {:ok, %ForwardBackwardOutput{} = output} =
+               Training.forward_backward(%{model_id: "test"}, config: config)
+
+      assert output.metrics["loss"] == 0.5
     end
 
     test "uses training pool", %{bypass: bypass, config: config} do
       attach_telemetry([[:tinkex, :http, :request, :start]])
-      stub_success(bypass, %{metrics: %{loss: 0.25}})
+
+      Bypass.expect(bypass, fn conn ->
+        {:ok, _body, conn} = Plug.Conn.read_body(conn)
+
+        case conn.request_path do
+          "/api/v1/forward_backward" ->
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(200, ~s({"request_id":"fw-2"}))
+
+          "/api/v1/future/retrieve" ->
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(
+              200,
+              Jason.encode!(%{
+                status: "completed",
+                result: %{
+                  "loss_fn_output_type" => "sum",
+                  "loss_fn_outputs" => [],
+                  "metrics" => %{"loss" => 0.25}
+                }
+              })
+            )
+        end
+      end)
 
       {:ok, _} = Training.forward_backward(%{model_id: "model-123"}, config: config)
 
@@ -29,15 +80,30 @@ defmodule Tinkex.API.TrainingTest do
   end
 
   describe "optim_step/2" do
-    test "sends request to correct endpoint", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, "POST", "/api/v1/optim_step", fn conn ->
-        conn
-        |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, ~s({"status":"updated"}))
+    test "polls future to completion", %{bypass: bypass, config: config} do
+      Bypass.expect(bypass, fn conn ->
+        {:ok, _body, conn} = Plug.Conn.read_body(conn)
+
+        case conn.request_path do
+          "/api/v1/optim_step" ->
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(200, ~s({"request_id":"opt-1"}))
+
+          "/api/v1/future/retrieve" ->
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(
+              200,
+              Jason.encode!(%{status: "completed", result: %{"metrics" => %{"lr" => 0.1}}})
+            )
+        end
       end)
 
-      {:ok, result} = Training.optim_step(%{model_id: "model"}, config: config)
-      assert result["status"] == "updated"
+      assert {:ok, %OptimStepResponse{} = response} =
+               Training.optim_step(%{model_id: "model"}, config: config)
+
+      assert response.metrics["lr"] == 0.1
     end
   end
 

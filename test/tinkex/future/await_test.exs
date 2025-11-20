@@ -1,6 +1,8 @@
 defmodule Tinkex.Future.AwaitTest do
   use Supertester.ExUnitFoundation, isolation: :full_isolation
 
+  @moduletag capture_log: true
+
   alias Tinkex.Error
   alias Tinkex.Future
 

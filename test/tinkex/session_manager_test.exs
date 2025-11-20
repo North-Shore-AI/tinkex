@@ -47,6 +47,7 @@ defmodule Tinkex.SessionManagerTest do
     SessionManager.stop_session("session-1", manager)
   end
 
+  @tag capture_log: true
   test "user-error heartbeats drop the session", %{
     bypass: bypass,
     config: config,
