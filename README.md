@@ -91,6 +91,28 @@ params = %Tinkex.Types.SamplingParams{
 {:ok, response} = Task.await(sample_task)
 ```
 
+## Sampling Workflow
+
+Create a `ServiceClient`, derive a `SamplingClient`, and issue sampling requests via Tasks so you can `Task.await/2` or orchestrate concurrency with `Task.await_many/2` or `Task.async_stream/3`.
+
+```elixir
+config = Tinkex.Config.new(api_key: "tenant-key")
+
+{:ok, service} = Tinkex.ServiceClient.start_link(config: config)
+{:ok, sampler} = Tinkex.ServiceClient.create_sampling_client(service, base_model: "Qwen/Qwen2.5-7B")
+
+prompt = Tinkex.Types.ModelInput.from_ints([1, 2, 3])
+params = %Tinkex.Types.SamplingParams{max_tokens: 64, temperature: 0.7}
+
+{:ok, task} = Tinkex.SamplingClient.sample(sampler, prompt, params, num_samples: 2)
+{:ok, response} = Task.await(task, 5_000)
+```
+
+- Sampling requests are lock-free reads from ETS; you can fan out 20–50 tasks safely.
+- Rate limits are enforced per `{base_url, api_key}` bucket using a shared `Tinkex.RateLimiter`; a `429` sets a backoff window that later sampling calls will wait through before hitting the server again.
+- Sampling uses `max_retries: 0` at the HTTP layer: server/user errors (e.g., 5xx, 400) surface immediately so callers can decide how to retry.
+- Multi-tenant safety: different API keys or base URLs use separate rate limiters and stay isolated even when one tenant is backing off.
+
 ## HTTP Connection Pools
 
 Tinkex uses Finch for HTTP/2 with dedicated pools per operation type (training, sampling, telemetry, etc.). The application supervisor boots these pools automatically when `config :tinkex, :enable_http_pools, true` (the default in `config/config.exs`). For most apps you should keep this enabled so requests reuse the tuned pools. If you need to run in a lightweight environment (e.g., unit tests or host applications that manage their own pools), you can temporarily disable them with:
