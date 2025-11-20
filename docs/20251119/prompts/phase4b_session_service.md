@@ -46,12 +46,13 @@ test/tinkex/service_client_test.exs
    - SessionManager should be supervised under `Tinkex.Application` (add it to the children if Phase 4A did not already do so).
 2. **ServiceClient**
    - `start_link(opts)` accepts `config: Tinkex.Config.t()` (or builds one).
-   - On init: request SessionManager to start session, store session_id, start heartbeat reference.
+   - On init: request SessionManager (globally registered `Tinkex.SessionManager`) to start session, store session_id; SessionManager owns heartbeats.
    - Public APIs:
      - `create_lora_training_client/2` -> start TrainingClient via `Tinkex.ClientSupervisor`.
      - `create_sampling_client/2` -> start SamplingClient via supervisor.
      - `create_rest_client/1` (thin wrapper returning config/session info or future RestClient module stub).
    - Manage `model_seq_id` & `sampling_client_id` counters.
+   - On shutdown (`terminate/2` or equivalent), call `SessionManager.stop_session(session_id)` to cleanly end the session.
    - Document blocking behavior (calls GenServer so caller waits until subsystem ready).
 
 ---
@@ -67,6 +68,7 @@ test/tinkex/service_client_test.exs
    - `create_lora_training_client/2` spawns child via `DynamicSupervisor`, returns pid.
    - `create_sampling_client/2` similar.
    - Multi-config: two clients with different configs don’t interfere (stubs acceptable).
+   - It is acceptable in 4B to stub TrainingClient/SamplingClient modules or use Mox until Phase 4C provides real implementations; the focus here is SessionManager interaction and child start calls.
 
 Use Bypass or Mox to simulate API responses.
 
@@ -80,6 +82,7 @@ Use Bypass or Mox to simulate API responses.
 - `ServiceClient` must trap exits? Optional, but handle `terminate/2` to stop session.
 - Use `DynamicSupervisor.start_child/2` with `Tinkex.ClientSupervisor` for child clients.
 - Document `@doc` for `ServiceClient` APIs (how to await tasks later).
+- ServiceClient should not run its own heartbeat; it relies on the globally registered SessionManager that started the session.
 
 ---
 

@@ -39,7 +39,7 @@ test/tinkex/rate_limiter_test.exs
    - Extend the existing `lib/tinkex/application.ex` (it already normalizes base URL, respects `:enable_http_pools`, and configures all Finch pools). Do not discard or rewrite the Finch/pool setup—reuse it and only add the missing pieces.
    - Create ETS tables (`:tinkex_sampling_clients`, `:tinkex_rate_limiters`, `:tinkex_tokenizers`) **before** children start.
    - Start Finch using the existing per-pool configuration (default, :training, :sampling, :session, :futures, :telemetry) wired via `Tinkex.PoolKey`.
-   - Add `Tinkex.SamplingRegistry`, `DynamicSupervisor` for clients (name `Tinkex.ClientSupervisor`), and include `Tinkex.SessionManager` in the supervision tree once implemented in 4B.
+   - Add `Tinkex.SamplingRegistry` and `DynamicSupervisor` for clients (name `Tinkex.ClientSupervisor`). Note: do **not** reference `Tinkex.SessionManager` yet; Phase 4B will introduce it, at which point it can be added to the children.
 2. **SamplingRegistry**
    - `register(pid, config)` API that inserts into ETS and monitors process.
    - On `{:DOWN, _}` remove ETS entry.
@@ -71,6 +71,7 @@ Use ExUnit + Agents/Tasks as needed.
 - No `Application.get_env` inside hot paths—only at `Application.start/2`.
 - Reuse the existing Finch pool configuration in `lib/tinkex/application.ex` (sizes/timeouts + `:enable_http_pools` guard) to avoid drift; base URL should still fall back to `config :tinkex, :base_url`.
 - ETS tables should be `:named_table, :public` with read concurrency.
+- `:tinkex_rate_limiters` should enable `write_concurrency: true` (per 02/07 guidance) since multiple processes may race to create the same limiter.
 - RateLimiter keys: `{Tinkex.PoolKey.normalize_base_url(base_url), api_key}`.
 - Tests must clean up ETS entries (`setup`/`on_exit`), not the tables themselves; avoid test flakiness by ensuring the app (and ETS tables) are started before direct table access.
 

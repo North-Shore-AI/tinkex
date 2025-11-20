@@ -50,12 +50,12 @@ test/tinkex/sampling_client_test.exs
   - **Synchronous sends**: inside `handle_call`, iterate chunks sequentially; each call should use a future-returning Training API (`Tinkex.API.Training.forward_backward/2` updated to return `%{request_id: ...}`) or a new `forward_backward_future/2` helper. If a synchronous helper remains, implement it by awaiting the future.
   - After sending all chunks, spawn `Task.start` that:
     - Wraps body in `try/rescue`.
-    - Starts polling each request via `Tinkex.Future.poll/2`, then uses `Tinkex.Future.await_many/2` and `Tinkex.Future.Combiner.combine_forward_backward_results/1` to produce the final output.
+    - Starts polling each request via `Tinkex.Future.poll/2`, then uses `Tinkex.Future.await_many/2` (short-circuit on first error) and `Tinkex.Future.Combiner.combine_forward_backward_results/1` to produce the final output from successful responses.
     - On success/failure, calls `GenServer.reply/2`, rescuing `ArgumentError` (caller may die).
 - `optim_step/2` similar (single request), with API returning a future/request_id and the client awaiting/polling it.
 - `save_weights_for_sampler/2` (if part of scope) can return future or immediate result; document which.
 - Document blocking trade-off (GenServer busy during send phase).
-- Update `Tinkex.API.Training` (and its tests) to match the future-returning shape (`%{request_id: ...}`) or expose a clearly named synchronous helper that awaits the future so call sites choose explicitly.
+- Update `Tinkex.API.Training` (and its tests) to match the future-returning shape (`%{request_id: ...}`). To preserve backwards compatibility, prefer adding `forward_backward_future/2` (request_id) and implementing `forward_backward/2` as a synchronous helper that awaits the future via `Tinkex.Future.poll/2` + `Tinkex.Future.await/2`, so existing metrics-based callers keep working while TrainingClient uses the future-returning API.
 
 ### 2.3 SamplingClient Requirements
 
@@ -70,6 +70,7 @@ test/tinkex/sampling_client_test.exs
   - Calls `Tinkex.API.Sampling.sample_async/2` with opts merged + `config: entry.config`.
   - On 429 error, call `Tinkex.RateLimiter.set_backoff/2` using `error.retry_after_ms`.
   - No automatic retry (document expectation).
+  - If ETS lookup fails (e.g., stale pid), return a Task that yields `{:error, %Tinkex.Error{type: :validation, message: "SamplingClient not initialized"}}` instead of crashing.
 - GenServer `terminate/2` should rely on registry to cleanup.
 
 ---
