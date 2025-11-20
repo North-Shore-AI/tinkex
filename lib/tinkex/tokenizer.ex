@@ -5,7 +5,8 @@ defmodule Tinkex.Tokenizer do
   This module will wrap the HuggingFace `tokenizers` NIF, resolve tokenizer IDs
   (TrainingClient metadata + Llama-3 hack), and coordinate caching strategy via
   ETS handles. Tokenizers are keyed by the resolved tokenizer ID and reused
-  across calls to avoid repeated downloads.
+  across calls to avoid repeated downloads. Chat templating is out of scope for
+  v1.0; callers must provide fully formatted prompts/strings before encoding.
   """
 
   alias Tokenizers.{Encoding, Tokenizer}
@@ -82,7 +83,8 @@ defmodule Tinkex.Tokenizer do
   Encode text into token IDs using a cached tokenizer.
 
   Loads (or reuses) the tokenizer keyed by the resolved tokenizer ID and returns
-  `{:ok, [integer()]}`.
+  `{:ok, [integer()]}`. Does not apply chat templates; pass the already
+  formatted string you want to tokenize.
 
   ## Examples
 
@@ -115,6 +117,18 @@ defmodule Tinkex.Tokenizer do
       {:error, reason} ->
         {:error, Error.new(:validation, "Failed to encode text: #{format_reason(reason)}")}
     end
+  end
+
+  @doc """
+  Convenience alias for `encode/3`.
+
+  Accepts the same options and returns the same tuple contract. Useful for
+  user-facing API symmetry with `Tinkex.Types.ModelInput.from_text/2`.
+  """
+  @spec encode_text(String.t(), tokenizer_id() | String.t(), keyword()) ::
+          {:ok, [integer()]} | {:error, Error.t()}
+  def encode_text(text, model_name, opts \\ []) do
+    encode(text, model_name, opts)
   end
 
   @doc """

@@ -5,6 +5,10 @@ defmodule Tinkex.TrainingClient do
   Requests are **sent sequentially** within the GenServer while polling is
   performed concurrently in background tasks. This keeps request ordering
   deterministic at the cost of blocking the GenServer during the send phase.
+
+  Use `Tinkex.Types.ModelInput.from_text/2` to turn raw strings into
+  tokenized `ModelInput` structs before constructing training data. Chat
+  templates are not applied automatically; provide fully formatted text.
   """
 
   use GenServer

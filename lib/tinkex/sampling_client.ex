@@ -6,6 +6,10 @@ defmodule Tinkex.SamplingClient do
   `Tinkex.SamplingRegistry`. Once initialized, `sample/4` reads configuration
   directly from ETS without touching the GenServer, avoiding bottlenecks under
   high load.
+
+  For plain-text prompts, build a `Tinkex.Types.ModelInput` via
+  `Tinkex.Types.ModelInput.from_text/2` with the target model name. Chat
+  templates are not applied automatically.
   """
 
   use GenServer
