@@ -38,6 +38,8 @@ end
 
 ## Quick Start
 
+For a full walkthrough (installation, configuration, CLI), see `docs/guides/getting_started.md`.
+
 ```elixir
 # Configure your API key
 config :tinkex,
@@ -211,9 +213,11 @@ MIX_ENV=prod mix escript.build
 
 ## Documentation
 
-- [API Reference](https://hexdocs.pm/tinkex) (Coming soon)
-- Porting Guide (internal) - Technical deep dive on the Python to Elixir port (excluded from hex docs)
-- [Python SDK Documentation](https://tinker-docs.thinkingmachines.ai/)
+- HexDocs site (API reference + guides): https://hexdocs.pm/tinkex (generate locally with `mix docs`, dev-only).
+- Getting started + CLI walkthrough: `docs/guides/getting_started.md`
+- API overview & parity checklist: `docs/guides/api_reference.md`
+- Troubleshooting playbook: `docs/guides/troubleshooting.md`
+- Tokenization and end-to-end training slices: `docs/guides/tokenization.md`, `docs/guides/training_loop.md`
 
 ## CLI
 
