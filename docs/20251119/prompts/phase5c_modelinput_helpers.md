@@ -38,14 +38,14 @@ docs/guides/tokenization.md      # optional short guide
 
 1. **ModelInput.from_text/2**
    - Accepts `text` (string) and `opts` with tokenizer info (`model_name`, `training_client`, etc.).
-   - Uses `Tinkex.Tokenizer.encode/3` to get tokens.
-   - Returns `%ModelInput{chunks: [%EncodedTextChunk{tokens: ids}]}`.
+   - Uses `Tinkex.Tokenizer.encode/3` (tuple contract) to get tokens; propagate `{:error, reason}` or offer a clearly documented `from_text!/2` that raises.
+   - Returns `{:ok, %ModelInput{chunks: [%EncodedTextChunk{tokens: ids}]}}` on success.
    - Provide `@doc` explaining that chat templates must be applied externally.
 2. **Tokenization Helpers**
    - Expose `Tinkex.Tokenizer.encode_text/2` (alias to encode) if needed.
    - Document how to use for prompts vs training data.
 3. **Client Integration**
-   - Update `TrainingClient` and `SamplingClient` docs to mention from_text helper.
+   - Update `TrainingClient` and `SamplingClient` docs to mention from_text helper (documentation-only integration).
    - Ensure `ModelInput.length/1` still correct.
 
 ---
@@ -53,8 +53,8 @@ docs/guides/tokenization.md      # optional short guide
 ## 3. Tests
 
 1. `ModelInput.from_text/2` test:
-   - Use real tokenizer (e.g., `"gpt2"`) to encode simple string.
-   - Ensure resulting ModelInput matches expected tokens (or at least length > 0).
+   - Prefer a local tokenizer fixture; if using `"gpt2"`/downloads, tag the test (e.g., `@tag :network`) for offline CI.
+   - Ensure resulting ModelInput matches expected tokens (or at least length > 0) and returns `{:ok, model_input}`.
 2. Optional integration test verifying `encode` + `from_text` produce consistent outputs.
 
 Since tokenizer downloads may take time, consider using `:persistent_term` or skip decode check; focus on functionality.
@@ -64,7 +64,7 @@ Since tokenizer downloads may take time, consider using `:persistent_term` or sk
 ## 4. Constraints
 
 - Keep helper pure; no `Application.get_env`.
-- Document that ModelInput.from_text can raise if tokenizer not available (wrap in {:ok, _} tuples if desired).
+- Be consistent about error-handling: primary API returns `{:ok, ModelInput.t()}` / `{:error, reason}`; only add bang versions if clearly documented.
 - Ensure tests clean ETS entries (using `on_exit`).
 - Provide guide snippet (at least add to README or new doc) on using helper.
 
@@ -73,8 +73,8 @@ Since tokenizer downloads may take time, consider using `:persistent_term` or sk
 ## 5. Acceptance Criteria
 
 - [ ] `ModelInput.from_text/2` implemented with documentation and examples.
-- [ ] Tokenizer module exposes user-facing encode helper (if not just alias).
-- [ ] Tests for `from_text/2` pass.
+- [ ] Tokenizer module exposes user-facing encode helper (if not just alias) and documents tuple/bang contracts.
+- [ ] Tests for `from_text/2` pass (mark network-dependent ones).
 - [ ] User guide snippet added (README or docs/guides/tokenization.md).
 - [ ] `mix test` + `mix dialyzer` clean.
 

@@ -31,8 +31,12 @@ test/tinkex/tokenizer/nif_safety_test.exs  # new test verifying ETS sharing
 ### 2.2 Deliverables
 
 1. **NIF Safety Test**
-   - Write the exact test from spec: create tokenizer, store in ETS, use from another task; fail test if unsafe.
-   - If test passes, document result (safe to cache handles). If it fails, update prompt output with fallback plan (GenServer) and skip caching until Phase 5B.
+   - Implement the NIF-safety flow inline (no hunting for other docs):
+     - Create a temporary ETS named table (e.g., `:tinkex_tokenizers_nif_safety`) with `:named_table` + `:public`; do **not** use `:tinkex_tokenizers`.
+     - Load a tokenizer (use a tiny/local fixture if possible; otherwise tag the test `:network` when it requires downloads).
+     - Insert the tokenizer handle into ETS, spawn a separate Task/process, read the handle there, run a simple encode, and assert it returns without crashing the VM.
+     - Clean up the ETS table in `on_exit`.
+   - If test passes, document result (safe to cache handles). If it fails, document the failure in the summary and scaffold the GenServer fallback (`Tinkex.TokenizerServer`) while skipping direct ETS caching until Phase 5B.
 2. **Tokenizer Module Skeleton**
    - Define module with `@moduledoc` describing responsibilities.
    - Stub functions: `get_tokenizer_id/2`, `encode/3`, `decode/3` (if needed), but leave implementations for 5B/5C.
@@ -54,6 +58,7 @@ If the test fails due to NIF limitations:
 
 - Ensure the `:tokenizers` dependency is compiled (mix deps.get / compile).
 - Tests must be deterministic; wrap ETS cleanup in `on_exit`.
+- Tests should **not** rely on the `:tinkex_tokenizers` ETS table or `Tinkex.Application` startup—use a dedicated table to avoid races with other processes.
 - If NIF is safe, note that caching will use ETS table (created in Phase 4A).
 
 ---
