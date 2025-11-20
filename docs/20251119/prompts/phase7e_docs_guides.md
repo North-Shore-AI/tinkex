@@ -33,9 +33,9 @@
    - `docs/guides/troubleshooting.md`: common issues (timeouts, 429, NIF, CLI errors) + resolutions referencing docs.
 3. **README Updates**
    - Include CLI usage summary, QA commands (`mix test`, `mix dialyzer`, `mix credo`, `mix format --check-formatted`).
-   - Link to guides and ExDoc site.
+   - Link to guides and ExDoc site; avoid duplicating full guide content—use short summaries and point to the detailed guides.
 4. **Behavioral Parity Note**
-   - Document how to compare Elixir vs Python results (test template snippet) using the same base model, prompt, and sampling params; emphasize checking for similar outputs/logprobs rather than bit-identical text.
+   - Document how to compare Elixir vs Python results (test template snippet) using the same base model, prompt, sampling params, and seed (if supported) to control randomness; emphasize checking for similar outputs/logprobs rather than bit-identical text.
 5. **Automated Checks**
    - Add `mix docs` to CI or Makefile instructions, noting it may require dev-only deps and should not run in production environments.
 

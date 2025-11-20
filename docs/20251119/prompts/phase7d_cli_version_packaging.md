@@ -26,7 +26,7 @@
 1. **Version Command**
    - `tinkex version` prints current version + git commit (if available).
    - `--json` flag outputs JSON payload (e.g., `{"version":"0.1.0","commit":"abc123"}`); when `git`/`rev-parse` is unavailable (installed builds or outside a repo), omit commit or set it to `null`.
-   - Optionally show dependency versions (`--deps`); define the shape (e.g., JSON list in `--json` mode, or `dep version` lines in text mode) or explicitly defer the feature.
+   - Optionally show dependency versions (`--deps`); for this phase, explicitly **defer** the feature (reserve the flag for a future version and keep behavior identical with/without it).
 2. **Packaging**
    - Ensure `mix escript.build` works; add `mix release` instructions if desired.
    - Provide `Makefile` or script snippet for QA commands (preferred locations: `Makefile` target `qa` or `scripts/qa.sh`).
@@ -40,7 +40,7 @@
 
 ## 3. Constraints & Guidance
 
-- Do not use Mix modules at runtime (use `Application.spec(:tinkex, :vsn)` etc.).
+- Do not use Mix modules at runtime (use `Application.spec(:tinkex, :vsn)` etc.); remember `:vsn` is a charlist, so convert with `to_string/1` before printing/encoding.
 - For git commit, use `System.cmd("git", ["rev-parse", "--short", "HEAD"])` guarded so CLI runs even outside repo (fallback to omitting or returning `nil` when unavailable).
 - Documentation should detail how to build CLI, run QA commands, and what outputs to expect.
 

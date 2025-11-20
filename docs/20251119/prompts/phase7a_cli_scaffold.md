@@ -32,9 +32,9 @@
    - For now, commands can stub out (`IO.puts` placeholders) but parse required options.
 3. **Option Parsing**
    - Use `OptionParser` or CLI library (Optimus, NimbleOptions, etc.).
-   - Help routing: `tinkex --help` shows global usage + commands; `tinkex checkpoint --help` (etc.) shows command-specific help.
+   - Help routing: `tinkex --help` shows global usage + commands; `tinkex checkpoint --help` (etc.) shows command-specific help. Treat `tinkex --version` as an alias for `tinkex version`—share one implementation to avoid drift.
 4. **Tests**
-   - Add `test/tinkex/cli_test.exs` covering parsing + help output.
+   - Add `test/tinkex/cli_test.exs` covering parsing + help output; prefer `run(argv) :: {:ok, code} | {:error, code}` so tests can assert on both the tuple and captured IO.
 5. **Build Scripts**
    - Document how to build CLI (`mix escript.build`) and where binary lands (`./tinkex`).
 
@@ -46,7 +46,7 @@
 - `main/1` must call `System.halt/1` with `0` on success and non-zero on any error (simple mapping of `{:ok, _}` → `0`, `{:error, _}` → `1` is fine for the scaffold).
 - Provide `--help` and `--version` with the global vs subcommand behavior described above.
 - Make routing extensible (Phase 7B-D will fill command bodies).
-- Tests should not call actual network; just verify parsing/output. Prefer a thin `main/1` wrapper that halts and a `run/1` (or similar) that returns `{:ok, _} | {:error, _}` so tests can capture stdout/stderr without halting the VM.
+- Tests should not call actual network; just verify parsing/output. Prefer a thin `main/1` wrapper that halts and a `run/1` (or similar) that returns `{:ok, _} | {:error, _}` so tests can capture stdout/stderr without halting the VM and so `main/1` can keep a consistent `{:ok, _}` → `0`, `{:error, _}` → `1` mapping.
 
 ---
 
