@@ -212,7 +212,7 @@ MIX_ENV=prod mix escript.build
 ## Documentation
 
 - [API Reference](https://hexdocs.pm/tinkex) (Coming soon)
-- [Porting Guide](docs/20251118/port_research/) - Technical deep dive on the Python to Elixir port
+- Porting Guide (internal) - Technical deep dive on the Python to Elixir port (excluded from hex docs)
 - [Python SDK Documentation](https://tinker-docs.thinkingmachines.ai/)
 
 ## CLI
@@ -273,7 +273,7 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## License
 
-Apache License 2.0 - See [LICENSE](LICENSE) for details.
+Apache License 2.0 - See LICENSE for details.
 
 ## Related Projects
 

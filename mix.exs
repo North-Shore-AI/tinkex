@@ -77,8 +77,10 @@ defmodule Tinkex.MixProject do
       source_ref: "v#{@version}",
       source_url: @source_url,
       homepage_url: @docs_url,
+      assets: %{"assets" => "assets"},
       extras: [
         "README.md",
+        "LICENSE",
         "docs/guides/training_loop.md",
         "docs/guides/tokenization.md"
       ],
