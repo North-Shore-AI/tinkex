@@ -20,7 +20,7 @@ defmodule Tinkex.API.TrainingTest do
             |> Plug.Conn.put_resp_content_type("application/json")
             |> Plug.Conn.resp(200, ~s({"request_id":"fw-1"}))
 
-          "/api/v1/future/retrieve" ->
+          "/api/v1/retrieve_future" ->
             conn
             |> Plug.Conn.put_resp_content_type("application/json")
             |> Plug.Conn.resp(
@@ -55,7 +55,7 @@ defmodule Tinkex.API.TrainingTest do
             |> Plug.Conn.put_resp_content_type("application/json")
             |> Plug.Conn.resp(200, ~s({"request_id":"fw-2"}))
 
-          "/api/v1/future/retrieve" ->
+          "/api/v1/retrieve_future" ->
             conn
             |> Plug.Conn.put_resp_content_type("application/json")
             |> Plug.Conn.resp(
@@ -90,7 +90,7 @@ defmodule Tinkex.API.TrainingTest do
             |> Plug.Conn.put_resp_content_type("application/json")
             |> Plug.Conn.resp(200, ~s({"request_id":"opt-1"}))
 
-          "/api/v1/future/retrieve" ->
+          "/api/v1/retrieve_future" ->
             conn
             |> Plug.Conn.put_resp_content_type("application/json")
             |> Plug.Conn.resp(

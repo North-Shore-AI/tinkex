@@ -95,11 +95,11 @@ defmodule Tinkex.API.Training do
   defp await_timeout(opts), do: Keyword.get(opts, :await_timeout, :infinity)
 
   defp handle_forward_backward_response(%{"request_id" => _} = future, opts) do
-    poll_and_parse_future(future, opts, &ForwardBackwardOutput.from_json/1)
+    poll_and_parse_future(future, opts, &ForwardBackwardOutput.from_json/1, "ForwardBackward")
   end
 
   defp handle_forward_backward_response(%{request_id: _} = future, opts) do
-    poll_and_parse_future(future, opts, &ForwardBackwardOutput.from_json/1)
+    poll_and_parse_future(future, opts, &ForwardBackwardOutput.from_json/1, "ForwardBackward")
   end
 
   defp handle_forward_backward_response(%{"loss_fn_output_type" => _} = result, _opts) do
@@ -113,11 +113,11 @@ defmodule Tinkex.API.Training do
   defp handle_forward_backward_response(other, _opts), do: {:ok, other}
 
   defp handle_optim_step_response(%{"request_id" => _} = future, opts) do
-    poll_and_parse_future(future, opts, &OptimStepResponse.from_json/1)
+    poll_and_parse_future(future, opts, &OptimStepResponse.from_json/1, "OptimStep")
   end
 
   defp handle_optim_step_response(%{request_id: _} = future, opts) do
-    poll_and_parse_future(future, opts, &OptimStepResponse.from_json/1)
+    poll_and_parse_future(future, opts, &OptimStepResponse.from_json/1, "OptimStep")
   end
 
   defp handle_optim_step_response(%{"metrics" => _} = result, _opts) do
@@ -126,8 +126,9 @@ defmodule Tinkex.API.Training do
 
   defp handle_optim_step_response(other, _opts), do: {:ok, other}
 
-  defp poll_and_parse_future(future, opts, parse_fun) do
-    poll_task = Future.poll(future, poll_opts(opts))
+  defp poll_and_parse_future(future, opts, parse_fun, request_type) do
+    poll_task =
+      Future.poll(future, Keyword.put(poll_opts(opts), :tinker_request_type, request_type))
 
     case Future.await(poll_task, await_timeout(opts)) do
       {:ok, result} -> {:ok, parse_fun.(result)}

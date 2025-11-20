@@ -7,7 +7,7 @@ defmodule Tinkex.API.FuturesTest do
 
   describe "retrieve/2" do
     test "hits future retrieval endpoint", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, "POST", "/api/v1/future/retrieve", fn conn ->
+      Bypass.expect_once(bypass, "POST", "/api/v1/retrieve_future", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(200, ~s({"status":"done"}))
@@ -24,7 +24,7 @@ defmodule Tinkex.API.FuturesTest do
       {:ok, _} = Futures.retrieve(%{request_id: "req"}, config: config)
 
       assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
-                      %{pool_type: :futures, path: "/api/v1/future/retrieve"}}
+                      %{pool_type: :futures, path: "/api/v1/retrieve_future"}}
     end
   end
 end

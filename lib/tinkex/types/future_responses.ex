@@ -100,4 +100,12 @@ defmodule Tinkex.Types.FutureRetrieveResponse do
       error: json[:error]
     }
   end
+
+  def from_json(%{"type" => _} = json) do
+    %FutureCompletedResponse{status: "completed", result: json}
+  end
+
+  def from_json(%{type: _} = json) do
+    %FutureCompletedResponse{status: "completed", result: json}
+  end
 end

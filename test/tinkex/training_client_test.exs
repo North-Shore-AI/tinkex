@@ -39,7 +39,7 @@ defmodule Tinkex.TrainingClientTest do
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"request_id":"req-#{payload["seq_id"]}"}))
 
-        "/api/v1/future/retrieve" ->
+        "/api/v1/retrieve_future" ->
           payload = Jason.decode!(body)
 
           chunk_result = %{
@@ -123,7 +123,7 @@ defmodule Tinkex.TrainingClientTest do
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"request_id":"opt-2"}))
 
-        "/api/v1/future/retrieve" ->
+        "/api/v1/retrieve_future" ->
           conn
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(

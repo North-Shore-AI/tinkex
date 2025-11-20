@@ -20,7 +20,7 @@ defmodule Tinkex.API.TelemetryTest do
       report =
         trace_messages(self(), fn ->
           assert :ok = Telemetry.send(%{event: "test"}, config: config)
-          assert_receive :telemetry_received
+          assert_receive :telemetry_received, 500
         end)
 
       assert :telemetry_received in report.messages

@@ -24,10 +24,10 @@ defmodule Tinkex.Application do
         "https://tinker.thinkingmachines.dev/services/tinker-prod"
       )
 
-    normalized_base = Tinkex.PoolKey.normalize_base_url(base_url)
+    destination = Tinkex.PoolKey.destination(base_url)
 
     children =
-      maybe_add_http_pool(enable_http_pools?, normalized_base) ++
+      maybe_add_http_pool(enable_http_pools?, destination) ++
         base_children(heartbeat_interval_ms)
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Tinkex.Supervisor)
@@ -72,44 +72,14 @@ defmodule Tinkex.Application do
     ]
   end
 
-  defp maybe_add_http_pool(false, _normalized_base), do: []
+  defp maybe_add_http_pool(false, _destination), do: []
 
-  defp maybe_add_http_pool(true, normalized_base) do
+  defp maybe_add_http_pool(true, _destination) do
     [
       {Finch,
        name: Tinkex.HTTP.Pool,
        pools: %{
-         {normalized_base, :default} => [
-           protocol: :http2,
-           size: 10,
-           max_idle_time: 60_000
-         ],
-         {normalized_base, :training} => [
-           protocol: :http2,
-           size: 5,
-           count: 1,
-           max_idle_time: 60_000
-         ],
-         {normalized_base, :sampling} => [
-           protocol: :http2,
-           size: 100,
-           max_idle_time: 30_000
-         ],
-         {normalized_base, :session} => [
-           protocol: :http2,
-           size: 5,
-           max_idle_time: :infinity
-         ],
-         {normalized_base, :futures} => [
-           protocol: :http2,
-           size: 50,
-           max_idle_time: 60_000
-         ],
-         {normalized_base, :telemetry} => [
-           protocol: :http2,
-           size: 5,
-           max_idle_time: 60_000
-         ]
+         default: [protocols: [:http2, :http1]]
        }}
     ]
   end

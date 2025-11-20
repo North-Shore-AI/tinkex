@@ -148,7 +148,7 @@ defmodule Tinkex.Integration.MultiClientConcurrencyTest do
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"request_id":"opt-a"}))
 
-        "/api/v1/future/retrieve" ->
+        "/api/v1/retrieve_future" ->
           payload = Jason.decode!(body)
           request_id = payload["request_id"]
           call_idx = increment_call.(training_log, :future, request_id)
@@ -251,7 +251,7 @@ defmodule Tinkex.Integration.MultiClientConcurrencyTest do
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"request_id":"opt-b"}))
 
-        "/api/v1/future/retrieve" ->
+        "/api/v1/retrieve_future" ->
           payload = Jason.decode!(body)
           request_id = payload["request_id"]
           call_idx = increment_call.(training_log, :future, request_id)

@@ -68,7 +68,7 @@ defmodule Tinkex.Integration.TrainingLoopTest do
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, Jason.encode!(%{"request_id" => "save-#{payload["seq_id"]}"}))
 
-        "/api/v1/future/retrieve" ->
+        "/api/v1/retrieve_future" ->
           payload = Jason.decode!(body)
 
           response =

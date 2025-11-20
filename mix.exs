@@ -1,10 +1,14 @@
 defmodule Tinkex.MixProject do
   use Mix.Project
 
+  @version "0.1.0"
+
+  def version, do: @version
+
   def project do
     [
       app: :tinkex,
-      version: "0.1.0",
+      version: @version,
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       escript: [main_module: Tinkex.CLI],

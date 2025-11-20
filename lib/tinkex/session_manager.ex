@@ -136,9 +136,6 @@ defmodule Tinkex.SessionManager do
   end
 
   defp sdk_version do
-    case Application.spec(:tinkex, :vsn) do
-      nil -> "dev"
-      vsn -> to_string(vsn)
-    end
+    Tinkex.Version.current()
   end
 end

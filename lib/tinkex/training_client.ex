@@ -146,7 +146,12 @@ defmodule Tinkex.TrainingClient do
             try do
               polling_tasks =
                 Enum.map(futures, fn future ->
-                  task = state.future_module.poll(future, poll_opts(state, opts))
+                  task =
+                    state.future_module.poll(
+                      future,
+                      poll_opts_with_type(state, opts, "ForwardBackward")
+                    )
+
                   unlink_task(task)
                   task
                 end)
@@ -192,7 +197,12 @@ defmodule Tinkex.TrainingClient do
         Task.start(fn ->
           reply =
             try do
-              task = state.future_module.poll(future, poll_opts(state, opts))
+              task =
+                state.future_module.poll(
+                  future,
+                  poll_opts_with_type(state, opts, "OptimStep")
+                )
+
               unlink_task(task)
 
               case safe_await(state.future_module, task, await_timeout(opts)) do
@@ -459,7 +469,12 @@ defmodule Tinkex.TrainingClient do
   defp handle_save_weights_response(result, _state, _opts), do: {:ok, result}
 
   defp poll_save_weights_future(future, state, opts) do
-    task = state.future_module.poll(future, poll_opts(state, opts))
+    task =
+      state.future_module.poll(
+        future,
+        poll_opts_with_type(state, opts, "SaveWeightsForSampler")
+      )
+
     unlink_task(task)
     safe_await(state.future_module, task, await_timeout(opts))
   end
@@ -474,6 +489,11 @@ defmodule Tinkex.TrainingClient do
       :sleep_fun
     ])
     |> Keyword.put(:config, state.config)
+  end
+
+  defp poll_opts_with_type(state, opts, request_type) do
+    poll_opts(state, opts)
+    |> Keyword.put(:tinker_request_type, request_type)
   end
 
   defp safe_await(future_module, task, timeout) do

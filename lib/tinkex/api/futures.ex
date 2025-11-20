@@ -20,9 +20,11 @@ defmodule Tinkex.API.Futures do
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def retrieve(request, opts) do
     Tinkex.API.post(
-      "/api/v1/future/retrieve",
+      "/api/v1/retrieve_future",
       request,
-      Keyword.put(opts, :pool_type, :futures)
+      opts
+      |> Keyword.put(:pool_type, :futures)
+      |> Keyword.put_new(:raw_response?, true)
     )
   end
 end

@@ -33,7 +33,7 @@ defmodule Tinkex.Future.PollTest do
 
   describe "poll/2" do
     test "returns completed result", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, "POST", "/api/v1/future/retrieve", fn conn ->
+      Bypass.expect_once(bypass, "POST", "/api/v1/retrieve_future", fn conn ->
         resp(conn, 200, %{"status" => "completed", "result" => %{"value" => 42}})
       end)
 
@@ -59,7 +59,7 @@ defmodule Tinkex.Future.PollTest do
     end
 
     test "fails immediately on user-category errors", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, "POST", "/api/v1/future/retrieve", fn conn ->
+      Bypass.expect_once(bypass, "POST", "/api/v1/retrieve_future", fn conn ->
         resp(conn, 200, %{
           "status" => "failed",
           "error" => %{"message" => "bad input", "category" => "user"}

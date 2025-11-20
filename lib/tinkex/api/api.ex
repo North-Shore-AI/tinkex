@@ -28,8 +28,8 @@ defmodule Tinkex.API do
     config = Keyword.fetch!(opts, :config)
 
     url = build_url(config.base_url, path)
-    headers = build_headers(config.api_key, opts)
     timeout = Keyword.get(opts, :timeout, config.timeout)
+    headers = build_headers(:post, config.api_key, opts, timeout)
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     pool_type = Keyword.get(opts, :pool_type, :default)
 
@@ -60,8 +60,8 @@ defmodule Tinkex.API do
     config = Keyword.fetch!(opts, :config)
 
     url = build_url(config.base_url, path)
-    headers = build_headers(config.api_key, opts)
     timeout = Keyword.get(opts, :timeout, config.timeout)
+    headers = build_headers(:get, config.api_key, opts, timeout)
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     pool_type = Keyword.get(opts, :pool_type, :default)
 
@@ -124,81 +124,39 @@ defmodule Tinkex.API do
     end
   end
 
-  defp build_url(base_url, "/" <> _ = path), do: URI.merge(base_url, path) |> URI.to_string()
+  defp build_url(base_url, path) do
+    base = URI.parse(base_url)
+    base_path = base.path || "/"
 
-  defp build_url(base_url, path), do: URI.merge(base_url, "/" <> path) |> URI.to_string()
+    merged_path =
+      path
+      |> String.trim_leading("/")
+      |> then(fn trimmed -> Path.join(base_path, trimmed) end)
 
-  defp build_headers(api_key, opts) do
-    base_headers = [
+    %{base | path: merged_path} |> URI.to_string()
+  end
+
+  defp build_headers(method, api_key, opts, timeout_ms) do
+    [
+      {"accept", "application/json"},
       {"content-type", "application/json"},
+      {"user-agent", user_agent()},
+      {"connection", "keep-alive"},
+      {"accept-encoding", "gzip"},
       {"x-api-key", api_key}
     ]
-
-    base_headers ++ Keyword.get(opts, :headers, [])
+    |> Kernel.++(stainless_headers(timeout_ms))
+    |> Kernel.++(request_headers(opts))
+    |> Kernel.++(idempotency_headers(method, opts))
+    |> Kernel.++(sampling_headers(opts))
+    |> Kernel.++(maybe_raw_response_header(opts))
+    |> Kernel.++(Keyword.get(opts, :headers, []))
+    |> dedupe_headers()
   end
 
-  defp handle_response({:ok, %Finch.Response{status: status, body: body}})
-       when status in 200..299 do
-    case Jason.decode(body) do
-      {:ok, data} ->
-        {:ok, data}
-
-      {:error, reason} ->
-        {:error,
-         build_error(
-           "JSON decode error: #{inspect(reason)}",
-           :validation,
-           nil,
-           :user,
-           %{body: body}
-         )}
-    end
-  end
-
-  defp handle_response({:ok, %Finch.Response{status: 429, headers: headers, body: body}}) do
-    error_data = decode_error_body(body)
-    retry_after_ms = parse_retry_after(headers)
-
-    {:error,
-     build_error(
-       error_data["message"] || "Rate limited",
-       :api_status,
-       429,
-       :server,
-       error_data,
-       retry_after_ms
-     )}
-  end
-
-  defp handle_response({:ok, %Finch.Response{status: status, headers: headers, body: body}}) do
-    error_data = decode_error_body(body)
-
-    category =
-      case error_data["category"] do
-        cat when is_binary(cat) ->
-          RequestErrorCategory.parse(cat)
-
-        _ when status in 400..499 ->
-          :user
-
-        _ when status in 500..599 ->
-          :server
-
-        _ ->
-          :unknown
-      end
-
-    retry_after_ms = parse_retry_after(headers)
-
-    {:error,
-     build_error(
-       error_data["message"] || error_data["error"] || "HTTP #{status}",
-       :api_status,
-       status,
-       category,
-       error_data,
-       retry_after_ms
-     )}
+  defp handle_response({:ok, %Finch.Response{} = response}) do
+    response = maybe_decompress(response)
+    do_handle_response(response)
   end
 
   defp handle_response({:error, %Mint.TransportError{} = exception}) do
@@ -248,6 +206,70 @@ defmodule Tinkex.API do
     {:error, build_error(message, :api_connection, nil, nil, %{exception: exception})}
   end
 
+  defp do_handle_response(%Finch.Response{status: status, body: body})
+       when status in 200..299 do
+    case Jason.decode(body) do
+      {:ok, data} ->
+        {:ok, data}
+
+      {:error, reason} ->
+        {:error,
+         build_error(
+           "JSON decode error: #{inspect(reason)}",
+           :validation,
+           nil,
+           :user,
+           %{body: body}
+         )}
+    end
+  end
+
+  defp do_handle_response(%Finch.Response{status: 429, headers: headers, body: body}) do
+    error_data = decode_error_body(body)
+    retry_after_ms = parse_retry_after(headers)
+
+    {:error,
+     build_error(
+       error_data["message"] || "Rate limited",
+       :api_status,
+       429,
+       :server,
+       error_data,
+       retry_after_ms
+     )}
+  end
+
+  defp do_handle_response(%Finch.Response{status: status, headers: headers, body: body}) do
+    error_data = decode_error_body(body)
+
+    category =
+      case error_data["category"] do
+        cat when is_binary(cat) ->
+          RequestErrorCategory.parse(cat)
+
+        _ when status in 400..499 ->
+          :user
+
+        _ when status in 500..599 ->
+          :server
+
+        _ ->
+          :unknown
+      end
+
+    retry_after_ms = parse_retry_after(headers)
+
+    {:error,
+     build_error(
+       error_data["message"] || error_data["error"] || "HTTP #{status}",
+       :api_status,
+       status,
+       category,
+       error_data,
+       retry_after_ms
+     )}
+  end
+
   defp decode_error_body(body) do
     case Jason.decode(body) do
       {:ok, data} -> data
@@ -292,7 +314,10 @@ defmodule Tinkex.API do
   end
 
   defp perform_request(context, attempt) do
-    case Finch.request(context.request, context.pool, receive_timeout: context.timeout) do
+    request = put_retry_headers(context.request, attempt, context.timeout)
+    maybe_dump_request(request, attempt)
+
+    case Finch.request(request, context.pool, receive_timeout: context.timeout) do
       {:ok, %Finch.Response{} = response} = response_tuple ->
         handle_success(response_tuple, response, context, attempt)
 
@@ -396,6 +421,192 @@ defmodule Tinkex.API do
     |> parse_integer(:seconds, log: true)
   end
 
+  defp put_retry_headers(%Finch.Request{} = request, attempt, timeout_ms) do
+    headers =
+      request.headers
+      |> put_header("x-stainless-retry-count", Integer.to_string(attempt))
+      |> ensure_read_timeout(timeout_ms)
+
+    %{request | headers: headers}
+  end
+
+  defp ensure_read_timeout(headers, timeout_ms) do
+    case normalized_header(headers, "x-stainless-read-timeout") do
+      nil -> put_header(headers, "x-stainless-read-timeout", stainless_read_timeout(timeout_ms))
+      _ -> headers
+    end
+  end
+
+  defp maybe_dump_request(%Finch.Request{} = request, attempt) do
+    if dump_headers?() do
+      url = request_url(request)
+      headers = redact_headers(request.headers)
+
+      Logger.info(
+        "HTTP #{String.upcase(to_string(request.method))} #{url} attempt=#{attempt} headers=#{inspect(headers)}"
+      )
+    end
+  end
+
+  defp request_url(%Finch.Request{} = request) do
+    scheme = request.scheme |> to_string()
+    port = request.port
+    default_port? = (scheme == "https" and port == 443) or (scheme == "http" and port == 80)
+    port_segment = if default_port?, do: "", else: ":#{port}"
+    query_segment = if request.query in [nil, ""], do: "", else: "?#{request.query}"
+
+    "#{scheme}://#{request.host}#{port_segment}#{request.path}#{query_segment}"
+  end
+
+  defp redact_headers(headers) do
+    Enum.map(headers, fn
+      {name, value} ->
+        if String.downcase(name) == "x-api-key" do
+          {name, "[redacted]"}
+        else
+          {name, value}
+        end
+
+      other ->
+        other
+    end)
+  end
+
+  defp dump_headers? do
+    case System.get_env("TINKEX_DUMP_HEADERS") do
+      nil -> false
+      "0" -> false
+      "false" -> false
+      _ -> true
+    end
+  end
+
+  defp dedupe_headers(headers) do
+    headers
+    |> Enum.reduce(%{}, fn {k, v}, acc ->
+      Map.put(acc, String.downcase(k), {k, v})
+    end)
+    |> Map.values()
+  end
+
+  defp put_header(headers, name, value) do
+    name_downcase = String.downcase(name)
+
+    headers
+    |> Enum.reject(fn {k, _} -> String.downcase(k) == name_downcase end)
+    |> List.insert_at(-1, {name, value})
+  end
+
+  defp request_headers(opts) do
+    []
+    |> maybe_put("x-tinker-request-iteration", opts[:tinker_request_iteration])
+    |> maybe_put("x-tinker-request-type", opts[:tinker_request_type])
+    |> maybe_put_roundtrip(opts[:tinker_create_roundtrip_time])
+  end
+
+  defp maybe_put(headers, _name, nil), do: headers
+  defp maybe_put(headers, name, value), do: [{name, to_string(value)} | headers]
+
+  defp maybe_put_roundtrip(headers, nil), do: headers
+
+  defp maybe_put_roundtrip(headers, value) do
+    [{"x-tinker-create-promise-roundtrip-time", to_string(value)} | headers]
+  end
+
+  defp idempotency_headers(:get, _opts), do: []
+
+  defp idempotency_headers(_method, opts) do
+    key =
+      case opts[:idempotency_key] do
+        nil -> build_idempotency_key()
+        :omit -> nil
+        value -> to_string(value)
+      end
+
+    if key, do: [{"x-idempotency-key", key}], else: []
+  end
+
+  defp sampling_headers(opts) do
+    if Keyword.get(opts, :sampling_backpressure, false) do
+      [{"x-tinker-sampling-backpressure", "1"}]
+    else
+      []
+    end
+  end
+
+  defp maybe_raw_response_header(opts) do
+    if Keyword.get(opts, :raw_response?, false) do
+      [{"x-stainless-raw-response", "raw"}]
+    else
+      []
+    end
+  end
+
+  defp stainless_headers(timeout_ms) do
+    [
+      {"x-stainless-package-version", sdk_version()},
+      {"x-stainless-os", stainless_os()},
+      {"x-stainless-arch", stainless_arch()},
+      {"x-stainless-runtime", stainless_runtime()},
+      {"x-stainless-runtime-version", stainless_runtime_version()},
+      {"x-stainless-read-timeout", stainless_read_timeout(timeout_ms)}
+    ]
+  end
+
+  defp stainless_read_timeout(timeout_ms) when is_integer(timeout_ms) do
+    timeout_ms
+    |> Kernel./(1000)
+    |> Float.round(3)
+    |> :erlang.float_to_binary(decimals: 3)
+  end
+
+  defp stainless_os do
+    case :os.type() do
+      {:unix, :darwin} -> "MacOS"
+      {:unix, :linux} -> "Linux"
+      {:unix, :freebsd} -> "FreeBSD"
+      {:unix, :openbsd} -> "OpenBSD"
+      {:win32, _} -> "Windows"
+      _ -> "Unknown"
+    end
+  end
+
+  defp stainless_arch do
+    arch =
+      :erlang.system_info(:system_architecture)
+      |> to_string()
+      |> String.downcase()
+
+    cond do
+      String.contains?(arch, "aarch64") -> "arm64"
+      String.contains?(arch, "arm") -> "arm"
+      String.contains?(arch, "x86_64") or String.contains?(arch, "amd64") -> "x64"
+      String.contains?(arch, "i686") or String.contains?(arch, "i386") -> "x32"
+      true -> "unknown"
+    end
+  end
+
+  defp stainless_runtime, do: "BEAM"
+
+  defp stainless_runtime_version do
+    otp = :erlang.system_info(:otp_release) |> to_string()
+    "#{System.version()} (OTP #{otp})"
+  end
+
+  defp sdk_version do
+    Tinkex.Version.current()
+  end
+
+  defp user_agent do
+    Application.get_env(:tinkex, :user_agent, "AsyncTinkex/Elixir #{sdk_version()}")
+  end
+
+  defp build_idempotency_key do
+    16
+    |> :crypto.strong_rand_bytes()
+    |> Base.encode16(case: :lower)
+  end
+
   defp parse_integer(nil, _unit, _opts), do: nil
 
   defp parse_integer(value, unit, opts) do
@@ -419,6 +630,28 @@ defmodule Tinkex.API do
   defp convert_retry_after(value, :seconds), do: value * 1_000
 
   defp elapsed_since(start_time), do: System.monotonic_time(:millisecond) - start_time
+
+  defp maybe_decompress(%Finch.Response{} = response) do
+    case normalized_header(response.headers, "content-encoding") do
+      "gzip" ->
+        body =
+          try do
+            :zlib.gunzip(response.body)
+          rescue
+            _ ->
+              response.body
+          end
+
+        %{response | body: body, headers: strip_content_encoding(response.headers)}
+
+      _ ->
+        response
+    end
+  end
+
+  defp strip_content_encoding(headers) do
+    Enum.reject(headers, fn {name, _} -> String.downcase(name) == "content-encoding" end)
+  end
 
   defp retry_timeout_result(elapsed_ms, attempt) do
     if elapsed_ms >= @max_retry_duration_ms do

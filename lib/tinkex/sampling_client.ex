@@ -16,6 +16,7 @@ defmodule Tinkex.SamplingClient do
 
   alias Tinkex.API.{Sampling, Service}
   alias Tinkex.Error
+  alias Tinkex.Future
   alias Tinkex.RateLimiter
   alias Tinkex.SamplingRegistry
 
@@ -111,12 +112,16 @@ defmodule Tinkex.SamplingClient do
             topk_prompt_logprobs: Keyword.get(opts, :topk_prompt_logprobs, 0)
           }
 
-        api_opts = Keyword.put(opts, :config, entry.config)
+        api_opts =
+          opts
+          |> Keyword.put(:config, entry.config)
+          |> Keyword.put(:tinker_request_type, "Sample")
+          |> Keyword.put(:tinker_request_iteration, seq_id)
 
         case entry.sampling_api.sample_async(request, api_opts) do
           {:ok, resp} ->
             RateLimiter.clear_backoff(entry.rate_limiter)
-            {:ok, SampleResponse.from_json(resp)}
+            handle_sample_response(resp, entry, seq_id, opts)
 
           {:error, %Error{status: 429} = error} ->
             maybe_set_backoff(entry.rate_limiter, error)
@@ -171,4 +176,35 @@ defmodule Tinkex.SamplingClient do
   end
 
   defp maybe_set_backoff(_limiter, _error), do: :ok
+
+  defp handle_sample_response(%{"request_id" => _} = future, entry, seq_id, opts) do
+    poll_sample_future(future, entry, seq_id, opts)
+  end
+
+  defp handle_sample_response(%{request_id: _} = future, entry, seq_id, opts) do
+    poll_sample_future(future, entry, seq_id, opts)
+  end
+
+  defp handle_sample_response(resp, _entry, _seq_id, _opts) do
+    {:ok, SampleResponse.from_json(resp)}
+  end
+
+  defp poll_sample_future(future, entry, seq_id, opts) do
+    poll_task =
+      Future.poll(future,
+        config: entry.config,
+        timeout: Keyword.get(opts, :timeout, :infinity),
+        http_timeout: Keyword.get(opts, :http_timeout, entry.config.timeout),
+        telemetry_metadata: opts[:telemetry_metadata],
+        queue_state_observer: opts[:queue_state_observer],
+        sleep_fun: opts[:sleep_fun],
+        tinker_request_type: "Sample",
+        tinker_request_iteration: seq_id
+      )
+
+    case Future.await(poll_task, Keyword.get(opts, :await_timeout, :infinity)) do
+      {:ok, result} -> {:ok, SampleResponse.from_json(result)}
+      {:error, %Error{} = error} -> {:error, error}
+    end
+  end
 end

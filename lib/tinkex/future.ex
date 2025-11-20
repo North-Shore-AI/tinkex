@@ -59,10 +59,13 @@ defmodule Tinkex.Future do
               prev_queue_state: nil,
               config: nil,
               metadata: %{},
+              request_type: nil,
               observer: nil,
               sleep_fun: nil,
               http_timeout: nil,
               poll_timeout: :infinity,
+              create_roundtrip_time: nil,
+              raw_response?: true,
               start_time_ms: nil,
               last_failed_error: nil
 
@@ -72,10 +75,13 @@ defmodule Tinkex.Future do
             prev_queue_state: QueueState.t() | nil,
             config: Config.t(),
             metadata: map(),
+            request_type: String.t() | nil,
             observer: module() | nil,
             sleep_fun: Tinkex.Future.sleep_fun(),
             http_timeout: pos_integer(),
             poll_timeout: pos_integer() | :infinity,
+            create_roundtrip_time: number() | nil,
+            raw_response?: boolean(),
             start_time_ms: integer(),
             last_failed_error: Error.t() | nil
           }
@@ -106,10 +112,13 @@ defmodule Tinkex.Future do
       prev_queue_state: opts[:initial_queue_state],
       config: config,
       metadata: build_metadata(opts[:telemetry_metadata], request_id),
+      request_type: opts[:tinker_request_type],
       observer: opts[:queue_state_observer],
       sleep_fun: sleep_fun,
       http_timeout: Keyword.get(opts, :http_timeout, config.timeout),
       poll_timeout: Keyword.get(opts, :timeout, :infinity),
+      create_roundtrip_time: opts[:tinker_create_roundtrip_time],
+      raw_response?: Keyword.get(opts, :raw_response?, true),
       start_time_ms: System.monotonic_time(:millisecond)
     }
 
@@ -158,7 +167,11 @@ defmodule Tinkex.Future do
       :ok ->
         case Futures.retrieve(state.request_payload,
                config: state.config,
-               timeout: state.http_timeout
+               timeout: state.http_timeout,
+               tinker_request_iteration: iteration,
+               tinker_request_type: state.request_type,
+               tinker_create_roundtrip_time: state.create_roundtrip_time,
+               raw_response?: state.raw_response?
              ) do
           {:ok, response} ->
             response

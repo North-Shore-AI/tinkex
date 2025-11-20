@@ -32,6 +32,7 @@ defmodule Tinkex.API.Sampling do
       opts
       |> Keyword.put(:pool_type, :sampling)
       |> Keyword.put(:max_retries, 0)
+      |> Keyword.put_new(:sampling_backpressure, true)
 
     Tinkex.API.post("/api/v1/asample", request, opts)
   end

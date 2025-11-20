@@ -27,11 +27,23 @@ defmodule Tinkex.PoolKey do
   end
 
   @doc """
+  Convert a base URL into a Finch destination tuple `{scheme, host, port}`.
+  """
+  @spec destination(String.t()) :: {:http | :https, String.t(), pos_integer()}
+  def destination(url) when is_binary(url) do
+    uri = parse_base_url(url)
+    scheme = uri.scheme |> String.downcase() |> String.to_atom()
+    port = uri.port || default_port(scheme)
+    {scheme, String.downcase(uri.host), port}
+  end
+
+  @doc """
   Build the Finch pool key tuple for the given base URL and pool type.
   """
-  @spec build(String.t(), atom()) :: {String.t(), atom()}
+  @spec build(String.t(), atom()) :: {:http | :https, String.t(), pos_integer()}
   def build(base_url, pool_type) when is_atom(pool_type) do
-    {normalize_base_url(base_url), pool_type}
+    _ = pool_type
+    destination(base_url)
   end
 
   defp parse_base_url(url) do
@@ -52,4 +64,8 @@ defmodule Tinkex.PoolKey do
   defp normalize_port("https", nil), do: ""
   defp normalize_port(_scheme, nil), do: ""
   defp normalize_port(_scheme, value), do: ":#{value}"
+
+  defp default_port(:http), do: 80
+  defp default_port(:https), do: 443
+  defp default_port(_), do: 80
 end
