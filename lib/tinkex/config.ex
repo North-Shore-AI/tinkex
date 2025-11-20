@@ -104,18 +104,22 @@ defmodule Tinkex.Config do
   end
 
   defp maybe_warn_about_base_url(%__MODULE__{} = config) do
-    app_base = Application.get_env(:tinkex, :base_url, @default_base_url)
-
-    with {:ok, config_normalized} <- {:ok, Tinkex.PoolKey.normalize_base_url(config.base_url)},
-         {:ok, app_normalized} <- {:ok, Tinkex.PoolKey.normalize_base_url(app_base)},
-         true <- config_normalized != app_normalized do
-      Logger.warning("""
-      Config base_url (#{config_normalized}) differs from Application config (#{app_normalized}).
-      Requests will use Finch's default pool, not the tuned pools configured in Tinkex.Application.
-      For production multi-tenant scenarios, configure dedicated Finch pools per base URL.
-      """)
+    if Application.get_env(:tinkex, :suppress_base_url_warning, false) do
+      :ok
     else
-      _ -> :ok
+      app_base = Application.get_env(:tinkex, :base_url, @default_base_url)
+
+      with {:ok, config_normalized} <- {:ok, Tinkex.PoolKey.normalize_base_url(config.base_url)},
+           {:ok, app_normalized} <- {:ok, Tinkex.PoolKey.normalize_base_url(app_base)},
+           true <- config_normalized != app_normalized do
+        Logger.warning("""
+        Config base_url (#{config_normalized}) differs from Application config (#{app_normalized}).
+        Requests will use Finch's default pool, not the tuned pools configured in Tinkex.Application.
+        For production multi-tenant scenarios, configure dedicated Finch pools per base URL.
+        """)
+      else
+        _ -> :ok
+      end
     end
   end
 end

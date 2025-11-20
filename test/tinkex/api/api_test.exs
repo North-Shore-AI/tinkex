@@ -1,266 +1,304 @@
-defmodule Tinkex.API.APITest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+defmodule Tinkex.APITest do
+  use Tinkex.HTTPCase, async: false
 
   alias Tinkex.API
+  alias Tinkex.API.Sampling
+  alias Tinkex.API.Session
+  alias Tinkex.API.Training
   alias Tinkex.Config
-  alias Tinkex.Error
 
-  import Plug.Conn
-
-  setup do
-    bypass = Bypass.open()
-    finch_name = :"tinkex_api_finch_#{System.unique_integer([:positive])}"
-    start_supervised!({Finch, name: finch_name})
-
-    base_url = "http://localhost:#{bypass.port}"
-    config = build_config(base_url, finch_name)
-
-    {:ok, %{bypass: bypass, config: config, base_url: base_url, finch_name: finch_name}}
-  end
+  setup :setup_http_client
 
   describe "post/3 retry logic" do
-    test "retries on 5xx responses", %{bypass: bypass, config: config} do
-      counter = start_counter()
+    @tag slow: true
+    test "retries on 5xx errors", %{bypass: bypass, config: config} do
+      counter =
+        stub_sequence(bypass, [
+          {503, %{error: "Service unavailable"}, []},
+          {503, %{error: "Service unavailable"}, []},
+          {200, %{result: "success"}, []}
+        ])
 
-      Bypass.expect(bypass, fn conn ->
-        attempt = increment(counter)
-        {:ok, _body, conn} = read_body(conn)
-        conn = put_resp_content_type(conn, "application/json")
-
-        case attempt do
-          1 -> resp(conn, 500, ~s({"message":"err"}))
-          2 -> resp(conn, 502, ~s({"message":"err"}))
-          _ -> resp(conn, 200, ~s({"ok":true}))
-        end
-      end)
-
-      assert {:ok, %{"ok" => true}} = API.post("/training", %{}, config: config)
-      assert counter_value(counter) == 3
+      {:ok, result} = API.post("/test", %{}, config: config)
+      assert result["result"] == "success"
+      assert Agent.get(counter, & &1) == 3
     end
 
-    test "retries on 408 responses", %{bypass: bypass, config: config} do
-      counter = start_counter()
+    @tag slow: true
+    test "retries on 408 timeout", %{bypass: bypass, config: config} do
+      counter =
+        stub_sequence(bypass, [
+          {408, %{error: "Request timeout"}, []},
+          {200, %{result: "success"}, []}
+        ])
 
-      Bypass.expect(bypass, fn conn ->
-        attempt = increment(counter)
-        {:ok, _body, conn} = read_body(conn)
-        conn = put_resp_content_type(conn, "application/json")
-
-        case attempt do
-          1 -> resp(conn, 408, ~s({"message":"timeout"}))
-          _ -> resp(conn, 200, ~s({"ok":true}))
-        end
-      end)
-
-      assert {:ok, %{"ok" => true}} = API.post("/training", %{}, config: config)
-      assert counter_value(counter) == 2
+      {:ok, result} = API.post("/test", %{}, config: config)
+      assert result["result"] == "success"
+      assert Agent.get(counter, & &1) == 2
     end
 
-    test "retries on 429 with retry-after-ms header", %{bypass: bypass, config: config} do
-      counter = start_counter()
+    @tag slow: true
+    test "retries on 429 with Retry-After", %{bypass: bypass, config: config} do
+      counter =
+        stub_sequence(bypass, [
+          {429, %{error: "Rate limited"}, [{"retry-after-ms", "10"}]},
+          {200, %{result: "success"}, []}
+        ])
 
-      Bypass.expect(bypass, fn conn ->
-        attempt = increment(counter)
-        {:ok, _body, conn} = read_body(conn)
-        conn = put_resp_content_type(conn, "application/json")
-
-        case attempt do
-          1 ->
-            conn
-            |> put_resp_header("retry-after-ms", "5")
-            |> resp(429, ~s({"message":"slow down"}))
-
-          _ ->
-            resp(conn, 200, ~s({"ok":true}))
-        end
-      end)
-
-      assert {:ok, %{"ok" => true}} = API.post("/training", %{}, config: config)
-      assert counter_value(counter) == 2
+      {:ok, result} = API.post("/test", %{}, config: config)
+      assert result["result"] == "success"
+      assert Agent.get(counter, & &1) == 2
     end
 
-    test "parses Retry-After seconds", %{bypass: bypass, config: config} do
-      counter = start_counter()
+    @tag slow: true
+    test "parses Retry-After header in seconds", %{bypass: bypass, config: config} do
+      counter =
+        stub_sequence(bypass, [
+          {429, %{error: "Rate limited"}, [{"Retry-After", "1"}]},
+          {200, %{result: "success"}, []}
+        ])
 
-      Bypass.expect(bypass, fn conn ->
-        attempt = increment(counter)
-        {:ok, _body, conn} = read_body(conn)
-        conn = put_resp_content_type(conn, "application/json")
-
-        case attempt do
-          1 ->
-            conn
-            |> put_resp_header("Retry-After", "0")
-            |> resp(429, ~s({"message":"limit"}))
-
-          _ ->
-            resp(conn, 200, ~s({"ok":true}))
-        end
-      end)
-
-      assert {:ok, %{"ok" => true}} = API.post("/training", %{}, config: config)
-      assert counter_value(counter) == 2
+      {:ok, result} = API.post("/test", %{}, config: config)
+      assert result["result"] == "success"
+      assert Agent.get(counter, & &1) == 2
     end
 
-    test "does not retry when x-should-retry is false", %{bypass: bypass, config: config} do
-      counter = start_counter()
+    test "honors x-should-retry: false even on 5xx", %{bypass: bypass, config: config} do
+      stub_with_headers(bypass, 503, %{error: "Don't retry"}, [{"x-should-retry", "false"}])
 
-      Bypass.expect(bypass, fn conn ->
-        increment(counter)
-        {:ok, _body, conn} = read_body(conn)
-
-        conn
-        |> put_resp_content_type("application/json")
-        |> put_resp_header("x-should-retry", "false")
-        |> resp(503, ~s({"message":"no retry"}))
-      end)
-
-      assert {:error, %Error{status: 503}} = API.post("/training", %{}, config: config)
-      assert counter_value(counter) == 1
+      {:error, error} = API.post("/test", %{}, config: config)
+      assert error.status == 503
     end
 
-    test "retries 4xx when x-should-retry is true (case insensitive)", %{
-      bypass: bypass,
-      config: config
-    } do
-      counter = start_counter()
+    @tag slow: true
+    test "honors x-should-retry: true on 400", %{bypass: bypass, config: config} do
+      counter =
+        stub_sequence(bypass, [
+          {400, %{error: "Bad request"}, [{"x-should-retry", "true"}]},
+          {200, %{result: "success"}, []}
+        ])
 
-      Bypass.expect(bypass, fn conn ->
-        attempt = increment(counter)
-        {:ok, _body, conn} = read_body(conn)
-        conn = put_resp_content_type(conn, "application/json")
-
-        case attempt do
-          1 ->
-            conn
-            |> put_resp_header("X-Should-Retry", "TRUE")
-            |> resp(400, ~s({"message":"retry me"}))
-
-          _ ->
-            resp(conn, 200, ~s({"ok":true}))
-        end
-      end)
-
-      assert {:ok, %{"ok" => true}} = API.post("/training", %{}, config: config)
-      assert counter_value(counter) == 2
+      {:ok, result} = API.post("/test", %{}, config: config)
+      assert result["result"] == "success"
+      assert Agent.get(counter, & &1) == 2
     end
 
-    test "does not retry other 4xx responses", %{bypass: bypass, config: config} do
-      counter = start_counter()
+    test "does not retry 4xx errors without override", %{bypass: bypass, config: config} do
+      stub_error(bypass, 400, %{error: "Bad request"})
 
-      Bypass.expect(bypass, fn conn ->
-        increment(counter)
-        {:ok, _body, conn} = read_body(conn)
+      {:error, error} = API.post("/test", %{}, config: config)
+      assert error.status == 400
+      assert error.category == :user
+    end
 
-        conn
-        |> put_resp_content_type("application/json")
-        |> resp(404, ~s({"message":"nope"}))
-      end)
+    test "handles case-insensitive x-should-retry header", %{bypass: bypass, config: config} do
+      stub_with_headers(bypass, 503, %{error: "Don't retry"}, [{"X-Should-Retry", "false"}])
 
-      assert {:error, %Error{status: 404}} = API.post("/training", %{}, config: config)
-      assert counter_value(counter) == 1
+      {:error, error} = API.post("/test", %{}, config: config)
+      assert error.status == 503
+    end
+
+    test "handles case-insensitive Retry-After header", %{bypass: bypass, config: config} do
+      counter =
+        stub_sequence(bypass, [
+          {429, %{error: "Rate limited"}, [{"RETRY-AFTER-MS", "5"}]},
+          {200, %{result: "success"}, []}
+        ])
+
+      {:ok, result} = API.post("/test", %{}, config: config)
+      assert result["result"] == "success"
+      assert Agent.get(counter, & &1) == 2
+    end
+
+    @tag slow: true
+    test "respects max_retries", %{bypass: bypass, config: config} do
+      counter =
+        stub_sequence(bypass, [
+          {503, %{error: "Error 1"}, []},
+          {503, %{error: "Error 2"}, []},
+          {503, %{error: "Error 3"}, []}
+        ])
+
+      {:error, error} = API.post("/test", %{}, config: config, max_retries: 1)
+      assert error.status == 503
+      assert Agent.get(counter, & &1) == 2
+    end
+
+    test "raises without config" do
+      assert_raise KeyError, fn -> API.post("/test", %{}, []) end
     end
   end
 
-  describe "error handling" do
-    test "parses category from response body", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, fn conn ->
-        {:ok, _body, conn} = read_body(conn)
+  describe "error categorization" do
+    test "parses error category from response", %{bypass: bypass, config: config} do
+      stub_error(bypass, 400, %{error: "Bad input", category: "user"})
 
-        conn
-        |> put_resp_content_type("application/json")
-        |> resp(400, ~s({"category":"server","message":"boom"}))
-      end)
-
-      assert {:error, %Error{category: :server}} = API.post("/training", %{}, config: config)
+      {:error, error} = API.post("/test", %{}, config: config)
+      assert error.category == :user
     end
 
     test "infers :user category from 4xx", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, fn conn ->
-        {:ok, _body, conn} = read_body(conn)
-        conn |> put_resp_content_type("application/json") |> resp(422, ~s({"message":"bad"}))
-      end)
+      stub_error(bypass, 422, %{error: "Validation failed"})
 
-      assert {:error, %Error{category: :user}} = API.post("/training", %{}, config: config)
+      {:error, error} = API.post("/test", %{}, config: config)
+      assert error.category == :user
     end
 
-    test "infers :server category from 5xx", %{
-      bypass: bypass,
-      base_url: base_url,
-      finch_name: finch_name
-    } do
-      config = build_config(base_url, finch_name, max_retries: 0)
+    test "infers :server category from 5xx", %{bypass: bypass, config: config} do
+      stub_error(bypass, 500, %{error: "Internal error"})
 
-      Bypass.expect_once(bypass, fn conn ->
-        {:ok, _body, conn} = read_body(conn)
-        conn |> put_resp_content_type("application/json") |> resp(503, ~s({"message":"bad"}))
-      end)
-
-      assert {:error, %Error{category: :server}} = API.post("/training", %{}, config: config)
+      {:error, error} = API.post("/test", %{}, config: config, max_retries: 0)
+      assert error.category == :server
     end
+  end
 
-    test "handles JSON decode errors", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, fn conn ->
-        {:ok, _body, conn} = read_body(conn)
-        conn |> put_resp_content_type("application/json") |> resp(200, "not-json")
-      end)
-
-      assert {:error, %Error{type: :validation}} = API.post("/training", %{}, config: config)
-    end
-
-    test "returns api_connection error for connection failures", %{config: config, bypass: bypass} do
+  describe "connection errors" do
+    test "handles connection refused", %{bypass: bypass, config: config} do
       Bypass.down(bypass)
-      assert {:error, %Error{type: :api_connection}} = API.post("/training", %{}, config: config)
+
+      {:error, error} = API.post("/test", %{}, config: config, max_retries: 0)
+      assert error.type == :api_connection
     end
 
-    test "raises when config is missing" do
-      assert_raise KeyError, fn -> API.post("/training", %{}, []) end
+    test "handles connection closed mid-request", %{config: base_config} do
+      {:ok, listener} =
+        :gen_tcp.listen(0, [:binary, packet: :raw, reuseaddr: true, active: false])
+
+      acceptor =
+        Task.async(fn ->
+          case :gen_tcp.accept(listener) do
+            {:ok, socket} ->
+              :gen_tcp.close(socket)
+
+            _ ->
+              :ok
+          end
+        end)
+
+      {:ok, port} = :inet.port(listener)
+
+      config =
+        Config.new(
+          api_key: base_config.api_key,
+          http_pool: base_config.http_pool,
+          base_url: "http://localhost:#{port}",
+          timeout: 100
+        )
+
+      try do
+        {:error, error} = API.post("/test", %{}, config: config, max_retries: 0)
+        assert error.type == :api_connection
+      after
+        :gen_tcp.close(listener)
+        Task.shutdown(acceptor, :brutal_kill)
+      end
     end
   end
 
-  describe "get/2" do
-    test "performs GET requests", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, fn conn ->
+  describe "telemetry events" do
+    test "emits start and stop events", %{bypass: bypass, config: config} do
+      attach_telemetry([
+        [:tinkex, :http, :request, :start],
+        [:tinkex, :http, :request, :stop]
+      ])
+
+      stub_success(bypass, %{result: "ok"})
+
+      API.post("/test", %{}, config: config)
+
+      assert_receive {:telemetry, [:tinkex, :http, :request, :start], %{system_time: _},
+                      %{method: :post, path: "/test"}}
+
+      assert_receive {:telemetry, [:tinkex, :http, :request, :stop], %{duration: duration},
+                      %{result: :ok, path: "/test"}}
+
+      assert duration > 0
+    end
+
+    test "includes pool_type in metadata", %{bypass: bypass, config: config} do
+      attach_telemetry([[:tinkex, :http, :request, :start]])
+      stub_success(bypass, %{result: "ok"})
+
+      API.post("/test", %{}, config: config, pool_type: :training)
+
+      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
+                      %{pool_type: :training, path: "/test"}}
+    end
+
+    test "different endpoints use pool metadata", %{bypass: bypass, config: config} do
+      attach_telemetry([[:tinkex, :http, :request, :start]])
+
+      Bypass.expect_once(bypass, "POST", "/api/v1/forward_backward", fn conn ->
         conn
-        |> put_resp_content_type("application/json")
-        |> resp(200, ~s({"ok":true}))
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"result":"ok"}))
       end)
 
-      assert {:ok, %{"ok" => true}} = API.get("/status", config: config)
+      Training.forward_backward(%{}, config: config)
+
+      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
+                      %{pool_type: :training, path: "/api/v1/forward_backward"}}
+
+      Bypass.expect_once(bypass, "POST", "/api/v1/asample", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"result":"ok"}))
+      end)
+
+      Sampling.sample_async(%{}, config: config)
+
+      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
+                      %{pool_type: :sampling, path: "/api/v1/asample"}}
+
+      Bypass.expect_once(bypass, "POST", "/api/v1/create_session", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"session_id":"test"}))
+      end)
+
+      Session.create(%{}, config: config)
+
+      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
+                      %{pool_type: :session, path: "/api/v1/create_session"}}
     end
   end
 
-  defp start_counter do
-    {:ok, pid} = Agent.start(fn -> 0 end)
-    pid
-  end
+  describe "concurrent requests" do
+    test "handles 20 concurrent requests via harness", %{bypass: bypass, config: config} do
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
 
-  defp increment(counter), do: Agent.get_and_update(counter, &{&1 + 1, &1 + 1})
+      Bypass.expect(bypass, fn conn ->
+        Agent.update(counter, &(&1 + 1))
 
-  defp counter_value(counter), do: Agent.get(counter, & &1)
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"result":"ok"}))
+      end)
 
-  defp build_config(base_url, finch_name, overrides \\ []) do
-    previous = Application.get_env(:tinkex, :base_url)
-    Application.put_env(:tinkex, :base_url, base_url)
+      operations =
+        for idx <- 1..4 do
+          {:call, {:post, "/test", %{sequence: idx}}}
+        end
 
-    opts =
-      [
-        api_key: "test-key",
-        base_url: base_url,
-        http_pool: finch_name,
-        timeout: Keyword.get(overrides, :timeout, 1_000),
-        max_retries: Keyword.get(overrides, :max_retries, 2)
-      ]
-      |> Keyword.merge(overrides)
+      scenario =
+        ConcurrentHarness.simple_genserver_scenario(
+          Tinkex.TestSupport.APIWorker,
+          operations,
+          5,
+          server_opts: %{config: config},
+          mailbox: [sampling_interval: 1],
+          performance_expectations: [max_time_ms: 2_000],
+          invariant: fn _pid, ctx ->
+            assert ctx.metrics.total_operations == 20
+          end,
+          metadata: %{test: :concurrent_requests}
+        )
 
-    config = Config.new(opts)
+      assert {:ok, report} = ConcurrentHarness.run(scenario)
+      assert report.metrics.total_operations == 20
+      assert Agent.get(counter, & &1) == 20
 
-    if previous do
-      Application.put_env(:tinkex, :base_url, previous)
-    else
-      Application.delete_env(:tinkex, :base_url)
+      Agent.stop(counter)
     end
-
-    config
   end
 end

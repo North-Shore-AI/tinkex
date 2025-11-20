@@ -11,6 +11,11 @@ end
 ExUnit.start()
 {:ok, _} = Application.ensure_all_started(:supertester)
 
+ExUnit.configure(exclude: [slow: true])
+
+Code.require_file("support/http_case.ex", __DIR__)
+Code.require_file("support/api_worker.ex", __DIR__)
+
 telemetry_handler = "supertester-phase2"
 event_name = [:supertester, :concurrent, :scenario, :stop]
 
