@@ -43,9 +43,11 @@ test/tinkex/types/queue_state_test.exs        # new
    - **Extract** `Tinkex.Types.QueueState` module from existing `parse_queue_state/1` logic in `TryAgainResponse`.
      - Parser returns `:active | :paused_rate_limit | :paused_capacity | :unknown`.
      - **Breaking change:** Unknown strings now map to `:unknown` (previously mapped to `:active`). Add test that explicitly documents this change.
+     - After extracting `QueueState.parse/1`, remove or deprecate `TryAgainResponse.parse_queue_state/1` to avoid duplicated parsing logic.
    - **Extract** `Tinkex.Types.TryAgainResponse` from `future_responses.ex` into its own file.
      - Keep existing public API, but add `from_map/1` helper.
-     - `from_map/1` should return `%TryAgainResponse{}` directly (raise or log on malformed input). This keeps it consistent with `FutureRetrieveResponse.from_json/1` which returns only union structs.
+     - `from_map/1` should return `%TryAgainResponse{}` directly (raise or log on malformed input). Malformed means missing required fields like `queue_state` or `type`, or wrong value types. Add at least one bad-input test case.
+     - This keeps it consistent with `FutureRetrieveResponse.from_json/1` which returns only union structs.
      - Update to use new `QueueState.parse/1`.
    - **Update** `Tinkex.Types.FutureRetrieveResponse.from_json/1` to call `TryAgainResponse.from_map/1` for `"type" => "try_again"` variants and continue to return only union structs.
 

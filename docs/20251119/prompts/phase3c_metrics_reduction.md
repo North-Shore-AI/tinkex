@@ -58,7 +58,7 @@ test/tinkex/future/await_test.exs           # new
              ForwardBackwardOutput.t()
      ```
    - The combined `%ForwardBackwardOutput{}` should:
-     - Take `loss_fn_output_type` from the first chunk (optionally assert all chunks agree).
+     - Take `loss_fn_output_type` from the first chunk. If types disagree across chunks, log a warning and use the first chunk's value (do not raise in production).
      - Flatten `loss_fn_outputs` from all chunks.
      - Compute `metrics` via `Tinkex.MetricsReduction.reduce/1`.
    - TrainingClient in Phase 4 will depend on this exact function.
@@ -66,9 +66,9 @@ test/tinkex/future/await_test.exs           # new
 3. **Await Helpers**
    - `Tinkex.Future.await(task, timeout \\ :infinity)` wraps `Task.await/2`, converts exits/timeouts into `%Tinkex.Error{type: :api_timeout}`.
    - `Tinkex.Future.await_many(tasks, timeout \\ :infinity)`:
-     - Uses `Task.await_many/2`.
      - Returns a list of the underlying Task results (`{:ok, result}` or `{:error, %Tinkex.Error{}}`) in the same order as the input tasks.
      - Must not raise on Task exits/timeouts—convert to `{:error, %Tinkex.Error{type: :api_timeout}}`.
+     - **Implementation note:** `Task.await_many/2` raises on failure, so either wrap it in `try/rescue` or call `Task.await/2` per task with error handling.
    - Optionally expose `Tinkex.Future.combine(tasks, fun)` returning Task that waits + applies fun.
    - **Timeout separation:** `Future.await/2` treats the task as an opaque black box. It must not attempt to compute or enforce the poll timeout itself. `poll/2`'s `opts[:timeout]` governs how long the loop runs; `await/2` only governs how long the caller is willing to wait on the Task. These are separate concerns.
 

@@ -57,11 +57,11 @@ test/tinkex/future/poll_test.exs       # new Bypass-based suite
    - **Important:** `poll/2` must NOT duplicate HTTP-level retry logic. Treat each call to `retrieve/2` as a single attempt and only handle retrying on pending/TryAgain/polling-level errors. Let the HTTP layer manage connection retries and 5xx/408/429 behaviour.
 
 2. **FutureFailedResponse Handling**
-   - For `%FutureFailedResponse{}` responses:
+   - For `%FutureFailedResponse{}` responses (i.e., `"status": "failed"` in the JSON body, not HTTP status failures):
      - Parse `error["category"]` with `RequestErrorCategory.parse/1`.
      - If category is `:user`, do not retry—wrap in `%Tinkex.Error{type: :request_failed, data: %{category: :user, ...}}` and return `{:error, error}`.
      - If category is `:server` or `:unknown`, treat as retryable by the poll loop (backoff and retry).
-     - After timeout or max retries exhausted, return `{:error, %Tinkex.Error{type: :request_failed, data: %{category: category, ...}}}`.
+     - After the poll timeout is reached, return `{:error, %Tinkex.Error{type: :request_failed, data: %{category: category, ...}}}`.
 
 3. **TryAgainResponse & QueueState**
    - On `%TryAgainResponse{}`, extract queue state and emit telemetry on transitions.
