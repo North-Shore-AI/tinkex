@@ -84,5 +84,25 @@ defmodule Tinkex.Types.FutureRetrieveResponseTest do
       assert result.queue_state == :paused_rate_limit
       assert result.retry_after_ms == 10000
     end
+
+    test "maps unknown queue_state strings to :unknown" do
+      json = %{
+        "type" => "try_again",
+        "request_id" => "req-999",
+        "queue_state" => "unexpected_state",
+        "retry_after_ms" => nil
+      }
+
+      result = FutureRetrieveResponse.from_json(json)
+      assert result.queue_state == :unknown
+    end
+
+    test "delegates try_again parsing to TryAgainResponse.from_map/1" do
+      json = %{"type" => "try_again", "request_id" => "missing-queue-state"}
+
+      assert_raise ArgumentError, fn ->
+        FutureRetrieveResponse.from_json(json)
+      end
+    end
   end
 end
