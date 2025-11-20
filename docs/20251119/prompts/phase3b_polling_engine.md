@@ -20,6 +20,7 @@
 | `lib/tinkex/api/futures.ex` | Futures API | `retrieve/2` signature |
 | `lib/tinkex/types/queue_state.ex` | Output from Phase 3A | Parser |
 | `lib/tinkex/types/try_again_response.ex` | Output from Phase 3A | `from_map/1` |
+| `lib/tinkex/types/future_responses.ex` | FutureRetrieveResponse | `from_json/1` for type conversion |
 | `lib/tinkex/future.ex` | Skeleton from Phase 3A | Add loop logic here |
 | `test/tinkex/api/api_test.exs` | Finch/Bypass patterns | Use as template |
 
@@ -38,33 +39,52 @@ test/tinkex/future/poll_test.exs       # new Bypass-based suite
 ### 2.2 Features
 
 1. **Polling Loop**
-   - `Tinkex.Future.poll/2` returns `Task.t({:ok, result} | {:error, Tinkex.Error.t()})`.
+   - `Tinkex.Future.poll/2` returns `Task.t({:ok, map()} | {:error, Tinkex.Error.t()})`.
+   - **Spec:**
+     ```elixir
+     @spec poll(String.t() | %{request_id: String.t()}, keyword()) ::
+             Task.t({:ok, map()} | {:error, Tinkex.Error.t()})
+     ```
+   - The `result` on success is the decoded `result` map from the completed response (not the whole struct).
    - Loop calls `/api/v1/future/retrieve` via `Tinkex.API.Futures.retrieve/2` (note: arity 2, not 3).
      - Call as: `Tinkex.API.Futures.retrieve(%{request_id: request_id}, config: config, timeout: http_timeout)`
-   - Handles statuses: `"completed"`, `"failed"`, `"pending"`, `TryAgainResponse`.
+     - Use `Keyword.get(opts, :http_timeout, config.timeout)` as the per-request HTTP timeout.
+   - **After each successful `retrieve/2` call**, convert the JSON map into a typed response using `Tinkex.Types.FutureRetrieveResponse.from_json/1`, then pattern match on the resulting struct type:
+     - `%FutureCompletedResponse{}` → return `{:ok, response.result}`
+     - `%FutureFailedResponse{}` → check category and either retry or return error
+     - `%FuturePendingResponse{}` → backoff and retry
+     - `%TryAgainResponse{}` → handle queue state and backoff
    - **Important:** `poll/2` must NOT duplicate HTTP-level retry logic. Treat each call to `retrieve/2` as a single attempt and only handle retrying on pending/TryAgain/polling-level errors. Let the HTTP layer manage connection retries and 5xx/408/429 behaviour.
 
-2. **TryAgainResponse & QueueState**
-   - Parse JSON response into `%TryAgainResponse{}`.
-   - Emit telemetry on queue-state transitions (only when state actually changes).
-   - Apply backoff: paused states wait 1s (or `retry_after_ms` if present).
+2. **FutureFailedResponse Handling**
+   - For `%FutureFailedResponse{}` responses:
+     - Parse `error["category"]` with `RequestErrorCategory.parse/1`.
+     - If category is `:user`, do not retry—wrap in `%Tinkex.Error{type: :request_failed, data: %{category: :user, ...}}` and return `{:error, error}`.
+     - If category is `:server` or `:unknown`, treat as retryable by the poll loop (backoff and retry).
+     - After timeout or max retries exhausted, return `{:error, %Tinkex.Error{type: :request_failed, data: %{category: category, ...}}}`.
 
-3. **Backoff Strategy**
+3. **TryAgainResponse & QueueState**
+   - On `%TryAgainResponse{}`, extract queue state and emit telemetry on transitions.
+   - Apply backoff: paused states wait 1s (or `retry_after_ms` if present).
+   - Call observer if provided.
+
+4. **Backoff Strategy**
    - Use the same backoff constants as documented in `docs/20251119/port_research/03_async_model.md` to match Python's behaviour:
      - Start: 1000 ms
      - Cap: 30000 ms
      - Exponential: 1s, 2s, 4s, 8s, 16s, 30s, 30s, ...
-   - Timeout support: `opts[:timeout]` (ms). If elapsed exceeds, return `{:error, %Tinkex.Error{type: :api_timeout}}`.
-   - Default timeout: `:infinity` (no timeout unless explicitly set).
+   - **Poll timeout:** `opts[:timeout]` (ms) is the total polling loop timeout. If elapsed exceeds, return `{:error, %Tinkex.Error{type: :api_timeout}}`.
+   - Default poll timeout: `:infinity` (no timeout unless explicitly set).
+   - **HTTP timeout:** `Keyword.get(opts, :http_timeout, config.timeout)` for individual requests. These are separate concerns.
 
-4. **Observer Behaviour**
+5. **Observer Behaviour**
    - `Tinkex.QueueStateObserver` behaviour with `c:on_queue_state_change/1`.
    - `Tinkex.Future.poll/2` accepts optional `opts[:queue_state_observer]` implementing this behaviour.
    - When the queue state changes, the poll loop MUST:
      - Emit telemetry `[:tinkex, :queue, :state_change]`
      - Call `observer.on_queue_state_change(new_state)` if observer is present
 
-5. **Testable Sleep Injection**
+6. **Testable Sleep Injection**
    - Design the poll loop so that the sleeping function can be overridden via `opts[:sleep_fun]` (defaults to `&Process.sleep/1`).
    - This allows tests to pass a sleep function that records calls or uses very small delays (0–1 ms).
 
@@ -75,13 +95,16 @@ test/tinkex/future/poll_test.exs       # new Bypass-based suite
 Use Bypass to simulate `/api/v1/future/retrieve`.
 
 Cover:
-1. Completed result (single call).
+1. Completed result (single call) → returns `{:ok, result_map}`.
 2. Pending → completed (multiple calls, check backoff counts via sleep_fun counter).
-3. Failed with category `:user` → no retry.
-4. Failed with category `:server` → retries.
-5. TryAgainResponse with `queue_state: "paused_rate_limit"` (should sleep and log).
+3. Failed with category `:user` → no retry, returns `{:error, %Tinkex.Error{type: :request_failed}}`.
+4. Failed with category `:server` → retries with backoff, eventually returns error after timeout.
+5. TryAgainResponse with `queue_state: "paused_rate_limit"`:
+   - Should sleep (check via sleep_fun).
+   - Should emit telemetry event with `queue_state: :paused_rate_limit`.
+   - Should call observer if provided.
 6. Timeout reached → `{:error, %Tinkex.Error{type: :api_timeout}}`.
-7. Telemetry event fired (attach handler in test).
+7. Telemetry event fired on state transitions (attach handler in test).
 8. Observer callback invoked on state transitions.
 
 ---
@@ -90,15 +113,18 @@ Cover:
 
 - No `Process.sleep/1` in tests—use `opts[:sleep_fun]` with counters or `System.monotonic_time` assertions with small delays (0ms/5ms). Use Mox or Bypass to track call counts.
 - Telemetry: `[:tinkex, :queue, :state_change]` metadata must include `:queue_state`.
-- `poll/2` should accept `%{request_id: id}` maps (as returned by API) or plain IDs.
+- `poll/2` should accept `%{request_id: id}` maps (as returned by API) or plain string IDs.
 - Use `Keyword.fetch!(opts, :config)` for HTTP calls (no env lookups).
 - Do not wrap `retrieve/2` in additional retry logic—HTTP layer already handles transient transport errors.
+- Always use `FutureRetrieveResponse.from_json/1` to convert raw maps to typed structs.
 
 ---
 
 ## 5. Acceptance Criteria
 
 - [ ] `Tinkex.Future.poll/2` returns Task executing full loop with backoff (1s start, 30s cap), timeout, TryAgain handling.
+- [ ] Poll loop uses `FutureRetrieveResponse.from_json/1` to convert API responses to typed structs.
+- [ ] Failed responses with `:user` category are not retried; `:server`/`:unknown` are retried.
 - [ ] `Tinkex.QueueStateObserver` behaviour defined + docs guiding Training/Sampling clients.
 - [ ] Telemetry emitted for queue state transitions; tests assert on event metadata.
 - [ ] Observer callback invoked when present and state changes.
@@ -115,6 +141,9 @@ Cover:
 2. Define `Tinkex.QueueStateObserver` behaviour module.
 3. Implement future poll loop with:
    - Correct `retrieve/2` call (arity 2, with `config: config`)
+   - `FutureRetrieveResponse.from_json/1` for type conversion
+   - Pattern matching on struct types
+   - FutureFailedResponse category handling
    - Backoff constants from async_model docs
    - Sleep injection for tests
    - Observer invocation
