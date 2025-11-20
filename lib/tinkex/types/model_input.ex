@@ -98,12 +98,10 @@ defmodule Tinkex.Types.ModelInput do
     do: Tinkex.Types.ImageAssetPointerChunk.length(chunk)
 
   defp validate_opts(opts) do
-    cond do
-      is_list(opts) and Keyword.keyword?(opts) ->
-        :ok
-
-      true ->
-        {:error, Error.new(:validation, "options must be a keyword list, got: #{inspect(opts)}")}
+    if is_list(opts) and Keyword.keyword?(opts) do
+      :ok
+    else
+      {:error, Error.new(:validation, "options must be a keyword list, got: #{inspect(opts)}")}
     end
   end
 

@@ -20,27 +20,10 @@ defmodule Tinkex.PoolKey do
   """
   @spec normalize_base_url(String.t()) :: String.t()
   def normalize_base_url(url) when is_binary(url) do
-    case URI.parse(url) do
-      %URI{scheme: scheme, host: host} = uri
-      when is_binary(scheme) and is_binary(host) and host != "" ->
-        normalized_host = String.downcase(host)
-
-        port =
-          case {scheme, uri.port} do
-            {"http", 80} -> ""
-            {"http", nil} -> ""
-            {"https", 443} -> ""
-            {"https", nil} -> ""
-            {_, nil} -> ""
-            {_, value} -> ":#{value}"
-          end
-
-        "#{scheme}://#{normalized_host}#{port}"
-
-      _ ->
-        raise ArgumentError,
-              "invalid base_url for pool key: #{inspect(url)} (must have scheme and host, e.g., 'https://api.example.com')"
-    end
+    uri = parse_base_url(url)
+    normalized_host = String.downcase(uri.host)
+    port = normalize_port(uri.scheme, uri.port)
+    "#{uri.scheme}://#{normalized_host}#{port}"
   end
 
   @doc """
@@ -50,4 +33,23 @@ defmodule Tinkex.PoolKey do
   def build(base_url, pool_type) when is_atom(pool_type) do
     {normalize_base_url(base_url), pool_type}
   end
+
+  defp parse_base_url(url) do
+    case URI.parse(url) do
+      %URI{scheme: scheme, host: host} = uri
+      when is_binary(scheme) and is_binary(host) and host != "" ->
+        uri
+
+      _ ->
+        raise ArgumentError,
+              "invalid base_url for pool key: #{inspect(url)} (must have scheme and host, e.g., 'https://api.example.com')"
+    end
+  end
+
+  defp normalize_port("http", 80), do: ""
+  defp normalize_port("http", nil), do: ""
+  defp normalize_port("https", 443), do: ""
+  defp normalize_port("https", nil), do: ""
+  defp normalize_port(_scheme, nil), do: ""
+  defp normalize_port(_scheme, value), do: ":#{value}"
 end

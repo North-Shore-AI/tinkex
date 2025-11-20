@@ -33,42 +33,49 @@ defmodule Tinkex.MetricsReduction do
   def reduce([]), do: %{}
 
   def reduce([first | _] = results) do
-    metrics_with_weights =
-      Enum.map(results, fn %ForwardBackwardOutput{} = result ->
-        metrics = result.metrics || %{}
-        outputs = result.loss_fn_outputs || []
-        weight = length(outputs)
-        {metrics, weight}
-      end)
-
+    metrics_with_weights = build_metrics_with_weights(results)
     first_metrics = first.metrics || %{}
 
     first_metrics
     |> Map.keys()
-    |> Enum.reduce(%{}, fn key, acc ->
-      pairs =
-        Enum.reduce(metrics_with_weights, [], fn {metrics, weight}, pair_acc ->
-          case Map.fetch(metrics, key) do
-            {:ok, value} -> [{value, weight} | pair_acc]
-            :error -> pair_acc
-          end
-        end)
+    |> Enum.reduce(%{}, fn key, acc -> reduce_key(key, metrics_with_weights, acc) end)
+  end
 
-      case pairs do
-        [] ->
-          acc
+  defp build_metrics_with_weights(results) do
+    Enum.map(results, fn %ForwardBackwardOutput{} = result ->
+      metrics = result.metrics || %{}
+      outputs = result.loss_fn_outputs || []
+      weight = length(outputs)
+      {metrics, weight}
+    end)
+  end
 
-        _ ->
-          {values, weights} =
-            pairs
-            |> Enum.reverse()
-            |> Enum.unzip()
+  defp reduce_key(key, metrics_with_weights, acc) do
+    metrics_with_weights
+    |> collect_pairs(key)
+    |> merge_reduction(key, acc)
+  end
 
-          reducer_key = metric_suffix(key)
-          reduced = apply_reduction(key, reducer_key, values, weights)
-          Map.merge(acc, reduced)
+  defp collect_pairs(metrics_with_weights, key) do
+    Enum.reduce(metrics_with_weights, [], fn {metrics, weight}, pair_acc ->
+      case Map.fetch(metrics, key) do
+        {:ok, value} -> [{value, weight} | pair_acc]
+        :error -> pair_acc
       end
     end)
+  end
+
+  defp merge_reduction([], _key, acc), do: acc
+
+  defp merge_reduction(pairs, key, acc) do
+    {values, weights} =
+      pairs
+      |> Enum.reverse()
+      |> Enum.unzip()
+
+    reducer_key = metric_suffix(key)
+    reduced = apply_reduction(key, reducer_key, values, weights)
+    Map.merge(acc, reduced)
   end
 
   defp metric_suffix(key) when is_binary(key) do
