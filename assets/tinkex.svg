@@ -56,7 +56,7 @@
            filter="url(#innerShadow)"/>
 
   <!-- Inner hexagon layer -->
-  <polygon points="250,90 370,150 370,260 250,320 130,260 130,150"
+  <polygon points="250,85 370,145 370,255 250,315 130,255 130,145"
            fill="url(#innerGradient)"
            opacity="0.6"/>
 
