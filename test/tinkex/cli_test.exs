@@ -47,7 +47,8 @@ defmodule Tinkex.CLITest do
                    CLI.run(["version", "--json"])
         end)
 
-      assert String.trim(output) |> String.starts_with?("{\"version\"")
+      assert %{"version" => version} = Jason.decode!(output)
+      assert is_binary(version)
     end
 
     test "errors on unknown command" do

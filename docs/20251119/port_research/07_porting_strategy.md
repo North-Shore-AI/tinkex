@@ -125,6 +125,12 @@ end
 {:progress_bar, "~> 3.0"}
 ```
 
+## Continuous Verification (CLI + SDK)
+
+- Preferred aggregate: `make qa` (format check, credo, test, dialyzer, prod escript.build).
+- Individual commands: `mix format --check-formatted`, `mix credo`, `mix test`, `mix dialyzer`, `MIX_ENV=prod mix escript.build`.
+- After packaging, confirm `./tinkex version --json` reports the expected version and commit; the flag set is stable even when git metadata is absent.
+
 ## Project Structure
 
 ```

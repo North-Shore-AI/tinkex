@@ -185,8 +185,25 @@ mix deps.get
 # Run tests
 mix test
 
+# Run linting/formatting/type checks + escript build
+make qa
+
 # Generate documentation
 mix docs
+```
+
+## Quality & Verification
+
+Continuous verification commands (also referenced in `docs/20251119/port_research/07_porting_strategy.md`):
+
+```bash
+make qa
+# or individually:
+mix format --check-formatted
+mix credo
+mix test
+mix dialyzer
+MIX_ENV=prod mix escript.build
 ```
 
 ## Documentation
@@ -197,10 +214,10 @@ mix docs
 
 ## CLI
 
-Build the CLI escript and invoke the checkpoint workflow:
+Build the CLI escript (production settings) and invoke the checkpoint workflow:
 
 ```bash
-mix escript.build         # produces ./tinkex
+MIX_ENV=prod mix escript.build   # produces ./tinkex
 
 ./tinkex checkpoint \
   --base-model Qwen/Qwen2.5-7B \
@@ -224,6 +241,28 @@ Generate text with a sampling client:
 ```
 
 Pass `--prompt-file` to load a prompt from disk (plain text or a JSON array of token IDs), `--json` to print the full sample response payload, and `--output <path>` to write the generation output to a file instead of stdout.
+
+Check build metadata:
+
+```bash
+./tinkex version           # prints version (+ git short SHA when available)
+./tinkex version --json    # structured payload {"version": "...", "commit": "..."}
+```
+
+Packaging options:
+
+- `MIX_ENV=prod mix escript.build` (default) emits `./tinkex`
+- `mix escript.install ./tinkex` installs it into `~/.mix/escripts` for PATH usage
+- `MIX_ENV=prod mix release && _build/prod/rel/tinkex/bin/tinkex version` for an OTP release binary (optional)
+
+## Examples
+
+Run any of the sample scripts with `mix run examples/<name>.exs` (requires `TINKER_API_KEY`):
+
+- `training_loop.exs` – minimal forward/backward + optim + save flow
+- `sampling_basic.exs` – create a sampling client and decode completions
+- `cli_run_text.exs` – call `tinkex run` programmatically with a text prompt
+- `cli_run_prompt_file.exs` – use a prompt file and JSON output with `tinkex run`
 
 ## Contributing
 
