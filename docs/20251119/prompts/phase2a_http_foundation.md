@@ -171,7 +171,7 @@ Centralized URL normalization - single source of truth. **Critical**: Validates 
 
 **Note on URL Strictness:**
 - Bare hosts (e.g., `"example.com"`) are rejected - must include scheme
-- `http://` base URLs are not recommended since pools are configured for HTTP/2
+- Pools are configured for HTTP/2. Using `http://` base URLs is not recommended and may result in suboptimal behavior; the SDK is intended for HTTPS endpoints.
 
 ```elixir
 defmodule Tinkex.PoolKey do
@@ -419,6 +419,9 @@ defmodule Tinkex.Config do
   Called automatically by new/1. You typically don't need to call this directly,
   but it's useful if you construct a Config struct manually.
 
+  Note: `validate!/1` only validates presence and types. Invalid base URLs will
+  fail when used in `PoolKey.normalize_base_url/1` (e.g., in `Tinkex.Application`).
+
   ## Raises
 
       * `ArgumentError` - if required fields are missing or invalid
@@ -564,7 +567,7 @@ defp deps do
     {:telemetry, "~> 1.2"},
     # Test dependencies
     {:bypass, "~> 2.1", only: :test},
-    {:supertester, "~> 0.2", only: :test}
+    {:supertester, "~> 0.3.0", only: :test}  # For future OTP-level tests; Phase 2 uses ExUnit + Bypass only
   ]
 end
 ```
@@ -773,7 +776,7 @@ Phase 2A is **complete** when ALL of the following are true:
 - [ ] `Tinkex.Config` - Multi-tenancy struct with @enforce_keys and validate! in new/1
 - [ ] `Tinkex.Application` - Finch pools with tuple keys for all pool types
 - [ ] `mix.exs` - Application module wired up with `mod:` option
-- [ ] `mix.exs` - Dependencies include `{:supertester, "~> 0.2", only: :test}`
+- [ ] `mix.exs` - Dependencies include `{:supertester, "~> 0.3.0", only: :test}`
 
 ### 7.2 Testing Checklist
 

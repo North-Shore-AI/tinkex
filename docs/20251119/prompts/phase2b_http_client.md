@@ -85,6 +85,8 @@ lib/tinkex/
 
 Define a behaviour for easier testing and potential future implementations.
 
+**Note**: In Phase 2 we rely on Bypass + `Tinkex.API` for HTTP integration tests. The HTTPClient behaviour exists to support future unit-level tests and host-library mocking; it doesn't need dedicated tests in this phase.
+
 ```elixir
 defmodule Tinkex.HTTPClient do
   @moduledoc """
@@ -630,175 +632,33 @@ test/tinkex/
 
 ### 4.2 API Tests
 
-**Important**: All tests use request counters to verify retry behavior, NOT timing assertions. Tests should be deterministic without `Process.sleep` dependencies.
+**Important**: All tests use request counters to verify retry behavior, NOT timing assertions. Tests should be deterministic without `Process.sleep` or `:timer.sleep` dependencies.
 
-Note: See Phase 2C for complete test examples with test helpers. Here are the critical tests for the API module:
+Tests are defined in `test/tinkex/api/api_test.exs` as specified in Phase 2C. The concrete test module and helpers are specified in Phase 2C; implement them there.
 
-```elixir
-defmodule Tinkex.APITest do
-  # NOT async: true - Bypass works better with sequential tests
-  use ExUnit.Case
+**Critical test cases to implement:**
 
-  setup do
-    bypass = Bypass.open()
-    config = Tinkex.Config.new(
-      api_key: "test-key",
-      base_url: "http://localhost:#{bypass.port}"
-    )
-    {:ok, bypass: bypass, config: config}
-  end
+**Retry logic tests:**
+- Retries on 5xx errors (verify with counter that 3 attempts made after 2 failures)
+- Retries on 408 timeout (verify with counter)
+- Retries on 429 with Retry-After header (verify counter shows 2 attempts)
+- Parses Retry-After in seconds (not just milliseconds)
+- Honors x-should-retry: false even on 5xx (single attempt via Bypass.expect_once)
+- Honors x-should-retry: true on 400 (verify retry happens despite 4xx status)
+- Does not retry 4xx errors without x-should-retry header
+- Handles case-insensitive headers (X-Should-Retry, RETRY-AFTER-MS)
+- Respects max_retries limit (verify counter matches expected attempts)
+- Raises KeyError without config
 
-  describe "post/3 retry logic" do
-    test "retries on 5xx errors", %{bypass: bypass, config: config} do
-      {:ok, counter} = Agent.start_link(fn -> 0 end)
+**Error categorization tests:**
+- Parses error category from response body
+- Infers :user category from 4xx status
+- Infers :server category from 5xx status
 
-      Bypass.expect(bypass, fn conn ->
-        count = Agent.get_and_update(counter, &{&1, &1 + 1})
+**Connection error tests:**
+- Handles connection refused (Bypass.down)
 
-        if count < 2 do
-          Plug.Conn.resp(conn, 503, ~s({"error": "Service unavailable"}))
-        else
-          Plug.Conn.resp(conn, 200, ~s({"result": "success"}))
-        end
-      end)
-
-      {:ok, result} = Tinkex.API.post("/test", %{}, config: config)
-      assert result["result"] == "success"
-      assert Agent.get(counter, & &1) == 3
-    end
-
-    test "retries on 429 with Retry-After", %{bypass: bypass, config: config} do
-      {:ok, counter} = Agent.start_link(fn -> 0 end)
-
-      Bypass.expect(bypass, fn conn ->
-        count = Agent.get_and_update(counter, &{&1, &1 + 1})
-
-        if count < 1 do
-          conn
-          |> Plug.Conn.put_resp_header("retry-after-ms", "100")
-          |> Plug.Conn.resp(429, ~s({"error": "Rate limited"}))
-        else
-          Plug.Conn.resp(conn, 200, ~s({"result": "success"}))
-        end
-      end)
-
-      {:ok, result} = Tinkex.API.post("/test", %{}, config: config)
-      assert result["result"] == "success"
-      assert Agent.get(counter, & &1) == 2  # Verifies retry happened
-    end
-
-    test "honors x-should-retry: false even on 5xx", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, fn conn ->
-        conn
-        |> Plug.Conn.put_resp_header("x-should-retry", "false")
-        |> Plug.Conn.resp(503, ~s({"error": "Don't retry"}))
-      end)
-
-      {:error, error} = Tinkex.API.post("/test", %{}, config: config)
-      assert error.status == 503
-    end
-
-    test "x-should-retry: true overrides normal 4xx no-retry", %{bypass: bypass, config: config} do
-      {:ok, counter} = Agent.start_link(fn -> 0 end)
-
-      Bypass.expect(bypass, fn conn ->
-        count = Agent.get_and_update(counter, &{&1, &1 + 1})
-
-        if count < 1 do
-          conn
-          |> Plug.Conn.put_resp_header("x-should-retry", "true")
-          |> Plug.Conn.resp(400, ~s({"error": "Bad request but retry"}))
-        else
-          Plug.Conn.resp(conn, 200, ~s({"result": "success"}))
-        end
-      end)
-
-      # Despite being 400, header says retry
-      {:ok, result} = Tinkex.API.post("/test", %{}, config: config)
-      assert result["result"] == "success"
-      assert Agent.get(counter, & &1) == 2
-    end
-
-    test "does not retry 4xx errors without x-should-retry", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, fn conn ->
-        Plug.Conn.resp(conn, 400, ~s({"error": "Bad request"}))
-      end)
-
-      {:error, error} = Tinkex.API.post("/test", %{}, config: config)
-      assert error.status == 400
-      assert error.category == :user
-    end
-
-    test "handles case-insensitive headers", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, fn conn ->
-        conn
-        |> Plug.Conn.put_resp_header("X-Should-Retry", "false")
-        |> Plug.Conn.resp(503, ~s({"error": "Don't retry"}))
-      end)
-
-      {:error, error} = Tinkex.API.post("/test", %{}, config: config)
-      assert error.status == 503
-    end
-
-    test "respects max_retries limit", %{bypass: bypass, config: config} do
-      {:ok, counter} = Agent.start_link(fn -> 0 end)
-
-      Bypass.expect(bypass, fn conn ->
-        Agent.get_and_update(counter, &{&1, &1 + 1})
-        Plug.Conn.resp(conn, 503, ~s({"error": "Service unavailable"}))
-      end)
-
-      {:error, error} = Tinkex.API.post("/test", %{}, config: config, max_retries: 1)
-      assert error.status == 503
-      # Initial request + 1 retry = 2 attempts
-      assert Agent.get(counter, & &1) == 2
-    end
-
-    test "raises without config" do
-      assert_raise KeyError, fn ->
-        Tinkex.API.post("/test", %{}, [])
-      end
-    end
-  end
-
-  describe "error categorization" do
-    test "parses error category from response", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, fn conn ->
-        Plug.Conn.resp(conn, 400, ~s({"error": "Bad input", "category": "user"}))
-      end)
-
-      {:error, error} = Tinkex.API.post("/test", %{}, config: config)
-      assert error.category == :user
-    end
-
-    test "infers category from status code", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, fn conn ->
-        Plug.Conn.resp(conn, 500, ~s({"error": "Internal error"}))
-      end)
-
-      {:error, error} = Tinkex.API.post("/test", %{},
-        config: config,
-        max_retries: 0
-      )
-      assert error.category == :server
-    end
-  end
-
-  describe "error handling" do
-    test "handles non-Exception error terms", %{bypass: bypass, config: config} do
-      # Close the bypass to force a connection error
-      Bypass.down(bypass)
-
-      {:error, error} = Tinkex.API.post("/test", %{},
-        config: config,
-        max_retries: 0
-      )
-
-      assert error.type == :api_connection
-    end
-  end
-end
-```
+**Note**: The concrete 408 test is defined in Phase 2C's API test module.
 
 ---
 
@@ -815,7 +675,7 @@ Phase 2B is **complete** when ALL of the following are true:
 - [ ] Full jitter (0-1.0x) for exponential backoff
 - [ ] Total timeout to prevent unbounded waits
 - [ ] Telemetry events emitted (reflect final outcome, not per-attempt)
-- [ ] Structured logging for debugging
+- [ ] Debug logging for retry attempts
 - [ ] Generic error clause handles non-Exception terms
 - [ ] `Tinkex.HTTPClient` behaviour (optional)
 
@@ -892,7 +752,7 @@ Phase 2B implements the core HTTP client:
 1. **Correct Retry Logic** - Fixed clause ordering, proper x-should-retry semantics
 2. **Error Handling** - Handles all error types including non-Exception terms
 3. **Telemetry** - Events for observability (final outcome after retries)
-4. **Logging** - Structured logging for debugging
+4. **Logging** - Debug logging for retry attempts
 5. **Mockability** - HTTPClient behaviour for testing
 
 The critical fix is in `with_retries` - all HTTP responses go through the `should_retry?` helper function, avoiding the clause ordering bug that made 429/5xx branches unreachable.

@@ -795,7 +795,10 @@ defmodule Tinkex.APITest do
 
   describe "concurrent requests" do
     test "handles 20 concurrent requests", %{bypass: bypass, config: config} do
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
       Bypass.expect(bypass, fn conn ->
+        Agent.update(counter, &(&1 + 1))
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(200, ~s({"result": "ok"}))
@@ -809,6 +812,11 @@ defmodule Tinkex.APITest do
 
       results = Task.await_many(tasks, 10_000)
       assert Enum.all?(results, &match?({:ok, _}, &1))
+
+      # Verify all 20 requests were actually made
+      assert Agent.get(counter, & &1) == 20
+
+      Agent.stop(counter)
     end
   end
 end
@@ -830,7 +838,7 @@ defmodule Tinkex.API.TrainingTest do
       Bypass.expect_once(bypass, "POST", "/api/v1/forward_backward", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, ~s({"loss": 0.5}))
+        |> Plug.Conn.resp(200, ~s({"loss_fn_output_type": "cross_entropy", "metrics": {"loss": 0.5}}))
       end)
 
       {:ok, result} = Tinkex.API.Training.forward_backward(
@@ -838,19 +846,18 @@ defmodule Tinkex.API.TrainingTest do
         config: config
       )
 
-      assert result["loss"] == 0.5
+      assert result["metrics"]["loss"] == 0.5
     end
 
     test "uses training pool", %{bypass: bypass, config: config} do
-      # This test verifies pool_type is set correctly
-      # In a real test, you might inspect telemetry events
+      attach_telemetry([[:tinkex, :http, :request, :start]])
+      stub_success(bypass, %{loss_fn_output_type: "cross_entropy", metrics: %{loss: 0.5}})
 
-      stub_success(bypass, %{loss: 0.5})
+      request = %{forward_backward_input: %{data: [], loss_fn: "cross_entropy"}, model_id: "model-123"}
+      {:ok, _} = Tinkex.API.Training.forward_backward(request, config: config)
 
-      {:ok, _} = Tinkex.API.Training.forward_backward(
-        %{model_id: "test"},
-        config: config
-      )
+      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _, metadata}
+      assert metadata.pool_type == :training
     end
   end
 
@@ -883,8 +890,11 @@ defmodule Tinkex.API.TelemetryTest do
   setup :setup_http_client
 
   describe "send/2" do
-    test "returns :ok immediately", %{bypass: bypass, config: config} do
-      Bypass.expect(bypass, fn conn ->
+    test "fires and forgets asynchronously", %{bypass: bypass, config: config} do
+      test_pid = self()
+
+      Bypass.expect_once(bypass, "POST", "/api/v1/telemetry", fn conn ->
+        send(test_pid, :telemetry_received)
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(200, ~s({"status": "ok"}))
@@ -893,8 +903,8 @@ defmodule Tinkex.API.TelemetryTest do
       result = Tinkex.API.Telemetry.send(%{event: "test"}, config: config)
       assert result == :ok
 
-      # Give the async task time to complete
-      :timer.sleep(50)
+      # Wait for async task to complete
+      assert_receive :telemetry_received, 1000
     end
   end
 
@@ -939,7 +949,7 @@ Phase 2C is **complete** when ALL of the following are true:
 - [ ] Telemetry event tests pass
 - [ ] Each endpoint module has at least endpoint verification tests
 - [ ] All Bypass-based tests are NOT async: true
-- [ ] No Process.sleep in Bypass handlers
+- [ ] No Process.sleep or :timer.sleep in tests (use observable mechanisms)
 - [ ] No timing assertions (elapsed >= X)
 - [ ] All tests pass: `mix test`
 
@@ -969,7 +979,7 @@ Phase 2C is **complete** when ALL of the following are true:
 6. **Don't use `then/1`** - Use explicit pipelines instead
 7. **Don't use `error.message` in Logger** - Use `inspect(error)` for proper formatting
 8. **Don't forget on_exit cleanup for Agents** - stub_sequence must clean up
-9. **Don't use Process.sleep in tests** - Use counters to verify retry behavior
+9. **Don't use Process.sleep or :timer.sleep in tests** - All timing must use observable mechanisms (messages, counters, Bypass.expect_once)
 10. **Don't use timing assertions** - Verify behavior via state, not elapsed time
 
 ---
