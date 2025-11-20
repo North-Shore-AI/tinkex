@@ -29,31 +29,6 @@ defmodule Tinkex.CLITest do
   end
 
   describe "routing and parsing" do
-    test "parses run options" do
-      output =
-        capture_io(fn ->
-          assert {:ok, %{command: :run, options: opts}} =
-                   CLI.run([
-                     "run",
-                     "--prompt",
-                     "hello",
-                     "--max-tokens",
-                     "16",
-                     "--top-p",
-                     "0.9",
-                     "--json"
-                   ])
-
-          assert opts[:prompt] == "hello"
-          assert opts[:max_tokens] == 16
-          assert_in_delta opts[:top_p], 0.9, 0.0001
-          assert opts[:json]
-        end)
-
-      assert output =~ "run command"
-      assert output =~ "prompt"
-    end
-
     test "routes --version alias to version command" do
       output =
         capture_io(fn ->

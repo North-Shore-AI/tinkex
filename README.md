@@ -209,7 +209,21 @@ mix escript.build         # produces ./tinkex
   --api-key "$TINKER_API_KEY"
 ```
 
-The command starts a ServiceClient, creates a LoRA training client, saves weights for sampling, and writes a metadata JSON to `--output` (including `model_id`, `weights_path` and timestamp). The raw weights are stored by the service; the CLI only writes metadata locally. See `./tinkex checkpoint --help` for the full option list. The `run` command remains scaffolded for the next phase.
+The command starts a ServiceClient, creates a LoRA training client, saves weights for sampling, and writes a metadata JSON to `--output` (including `model_id`, `weights_path` and timestamp). The raw weights are stored by the service; the CLI only writes metadata locally. See `./tinkex checkpoint --help` for the full option list.
+
+Generate text with a sampling client:
+
+```bash
+./tinkex run \
+  --base-model Qwen/Qwen2.5-7B \
+  --prompt "Hello there" \
+  --max-tokens 64 \
+  --temperature 0.7 \
+  --num-samples 2 \
+  --api-key "$TINKER_API_KEY"
+```
+
+Pass `--prompt-file` to load a prompt from disk (plain text or a JSON array of token IDs), `--json` to print the full sample response payload, and `--output <path>` to write the generation output to a file instead of stdout.
 
 ## Contributing
 
