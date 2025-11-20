@@ -581,6 +581,8 @@ defmodule Tinkex.CLI do
     sample_opts =
       []
       |> Keyword.put(:num_samples, num_samples)
+      |> Keyword.put(:prompt_logprobs, false)
+      |> Keyword.put(:topk_prompt_logprobs, 0)
       |> maybe_put(:timeout, await_timeout)
 
     IO.puts("Starting sampling...")

@@ -9,7 +9,7 @@ defmodule Tinkex.Examples.CLIRunPromptFile do
       System.get_env("TINKER_API_KEY") ||
         raise "Set TINKER_API_KEY to run this example"
 
-    base_model = System.get_env("TINKER_BASE_MODEL", "Qwen/Qwen2.5-7B")
+    base_model = System.get_env("TINKER_BASE_MODEL", "meta-llama/Llama-3.1-8B")
     base_url = System.get_env("TINKER_BASE_URL")
 
     prompt_content =
