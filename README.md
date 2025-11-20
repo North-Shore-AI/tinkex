@@ -195,19 +195,21 @@ mix docs
 - [Porting Guide](docs/20251118/port_research/) - Technical deep dive on the Python to Elixir port
 - [Python SDK Documentation](https://tinker-docs.thinkingmachines.ai/)
 
-## CLI (scaffold)
+## CLI
 
-Build the CLI escript and run the scaffolded commands:
+Build the CLI escript and invoke the checkpoint workflow:
 
 ```bash
 mix escript.build         # produces ./tinkex
-./tinkex --help           # global help + command list
-./tinkex checkpoint --help
-./tinkex run --help
-./tinkex --version        # alias for `tinkex version`
+
+./tinkex checkpoint \
+  --base-model Qwen/Qwen2.5-7B \
+  --rank 32 \
+  --output ./checkpoint.json \
+  --api-key "$TINKER_API_KEY"
 ```
 
-The CLI is scaffolded for upcoming phases; command bodies will be filled in next.
+The command starts a ServiceClient, creates a LoRA training client, saves weights for sampling, and writes a metadata JSON to `--output` (including `model_id`, `weights_path` and timestamp). The raw weights are stored by the service; the CLI only writes metadata locally. See `./tinkex checkpoint --help` for the full option list. The `run` command remains scaffolded for the next phase.
 
 ## Contributing
 

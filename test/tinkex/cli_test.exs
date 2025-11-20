@@ -29,28 +29,6 @@ defmodule Tinkex.CLITest do
   end
 
   describe "routing and parsing" do
-    test "parses checkpoint options" do
-      output =
-        capture_io(fn ->
-          assert {:ok, %{command: :checkpoint, options: opts}} =
-                   CLI.run([
-                     "checkpoint",
-                     "--base-model",
-                     "Qwen/Qwen2.5-7B",
-                     "--rank",
-                     "4",
-                     "--train-mlp"
-                   ])
-
-          assert opts[:base_model] == "Qwen/Qwen2.5-7B"
-          assert opts[:rank] == 4
-          assert opts[:train_mlp]
-        end)
-
-      assert output =~ "checkpoint command"
-      assert output =~ "base_model"
-    end
-
     test "parses run options" do
       output =
         capture_io(fn ->

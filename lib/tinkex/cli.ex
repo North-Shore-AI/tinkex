@@ -3,9 +3,12 @@ defmodule Tinkex.CLI do
   Command-line interface entrypoint for the Tinkex escript.
 
   `main/1` is a thin wrapper over `run/1` so the CLI can be tested without halting
-  the VM. Each command currently logs a placeholder message while routing and
-  option parsing are validated.
+  the VM. The checkpoint command drives the Service/Training client flow to save
+  weights; the run command remains scaffolded for the next phase.
   """
+
+  alias Tinkex.Error
+  alias Tinkex.Types.LoraConfig
 
   @doc """
   Entry point invoked by the escript executable.
@@ -41,8 +44,7 @@ defmodule Tinkex.CLI do
   end
 
   defp dispatch(:checkpoint, options) do
-    IO.puts("checkpoint command (scaffold). Parsed options: #{format_options(options)}")
-    {:ok, %{command: :checkpoint, options: options}}
+    run_checkpoint(options)
   end
 
   defp dispatch(:run, options) do
@@ -63,6 +65,299 @@ defmodule Tinkex.CLI do
     end
 
     {:ok, %{command: :version, version: version, options: options}}
+  end
+
+  @doc false
+  @spec run_checkpoint(map(), map()) :: {:ok, map()} | {:error, term()}
+  def run_checkpoint(options, overrides \\ %{}) when is_map(options) and is_map(overrides) do
+    deps = checkpoint_deps(overrides)
+
+    with {:ok, output_path} <- fetch_output_path(options),
+         {:ok, base_model} <- fetch_base_model(options),
+         :ok <- ensure_started(deps),
+         {:ok, config} <- build_config(options, deps),
+         {:ok, service} <- start_service_client(config, deps),
+         {:ok, training} <- create_training_client(service, base_model, options, deps),
+         {:ok, response} <- save_weights(training, options, deps, config, base_model),
+         {:ok, metadata} <- persist_metadata(output_path, base_model, response, deps) do
+      IO.puts("Checkpoint saved to #{output_path}")
+      {:ok, %{command: :checkpoint, metadata: metadata}}
+    else
+      {:error, reason} ->
+        log_checkpoint_error(reason)
+        {:error, reason}
+    end
+  end
+
+  defp checkpoint_deps(overrides) do
+    env_overrides = Application.get_env(:tinkex, :cli_checkpoint_deps, %{}) || %{}
+
+    %{
+      app_module: Application,
+      config_module: Tinkex.Config,
+      service_client_module: Tinkex.ServiceClient,
+      training_client_module: Tinkex.TrainingClient,
+      sampling_client_module: Tinkex.SamplingClient,
+      json_module: Jason,
+      file_module: File,
+      now_fun: &DateTime.utc_now/0
+    }
+    |> Map.merge(env_overrides)
+    |> Map.merge(overrides)
+  end
+
+  defp fetch_output_path(%{output: output}) when is_binary(output) and byte_size(output) > 0,
+    do: {:ok, output}
+
+  defp fetch_output_path(_opts),
+    do:
+      {:error,
+       Error.new(:validation, "--output is required for checkpoint command", category: :user)}
+
+  defp fetch_base_model(options) do
+    case Map.get(options, :base_model) || Map.get(options, :model_path) do
+      nil ->
+        {:error,
+         Error.new(:validation, "Missing --base-model (or --model-path)", category: :user)}
+
+      base when is_binary(base) ->
+        {:ok, base}
+
+      other ->
+        {:error, Error.new(:validation, "Invalid base model: #{inspect(other)}", category: :user)}
+    end
+  end
+
+  defp ensure_started(%{app_module: app_module}) do
+    case app_module.ensure_all_started(:tinkex) do
+      {:ok, _} ->
+        :ok
+
+      {:error, {:already_started, _app}} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, Error.new(:request_failed, "Failed to start Tinkex", data: reason)}
+    end
+  rescue
+    e -> {:error, e}
+  end
+
+  defp build_config(options, %{config_module: config_module}) do
+    config_opts =
+      options
+      |> Map.take([:api_key, :base_url, :timeout])
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> Keyword.new()
+
+    {:ok, config_module.new(config_opts)}
+  rescue
+    e in ArgumentError ->
+      {:error, Error.new(:validation, Exception.message(e), category: :user)}
+  end
+
+  defp start_service_client(config, deps) do
+    opts =
+      [
+        config: config,
+        training_client_module: deps.training_client_module,
+        sampling_client_module: Map.get(deps, :sampling_client_module)
+      ]
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+
+    case deps.service_client_module.start_link(opts) do
+      {:ok, pid} ->
+        {:ok, pid}
+
+      {:error, {:already_started, pid}} ->
+        {:ok, pid}
+
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      {:error, reason} ->
+        {:error, Error.new(:request_failed, "Failed to start service client", data: reason)}
+
+      other ->
+        {:error, Error.new(:request_failed, "Unexpected service client response", data: other)}
+    end
+  end
+
+  defp create_training_client(service, base_model, options, deps) do
+    lora_config = build_lora_config(options)
+
+    training_opts =
+      [base_model: base_model, lora_config: lora_config]
+      |> maybe_put(:model_path, Map.get(options, :model_path))
+
+    case deps.service_client_module.create_lora_training_client(service, training_opts) do
+      {:ok, training} ->
+        {:ok, training}
+
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      {:error, reason} ->
+        {:error, Error.new(:request_failed, "Failed to create training client", data: reason)}
+
+      other ->
+        {:error, Error.new(:request_failed, "Unexpected training client response", data: other)}
+    end
+  end
+
+  defp build_lora_config(options) do
+    %LoraConfig{
+      rank: Map.get(options, :rank, 32),
+      seed: Map.get(options, :seed),
+      train_mlp: boolean_default(Map.get(options, :train_mlp), true),
+      train_attn: boolean_default(Map.get(options, :train_attn), true),
+      train_unembed: boolean_default(Map.get(options, :train_unembed), true)
+    }
+  end
+
+  defp boolean_default(nil, default), do: default
+  defp boolean_default(value, _default) when is_boolean(value), do: value
+  defp boolean_default(_value, default), do: default
+
+  defp save_weights(training, options, deps, config, _base_model) do
+    save_opts = build_save_options(options, config)
+
+    case deps.training_client_module.save_weights_for_sampler(training, save_opts) do
+      {:ok, %Task{} = task} ->
+        await_checkpoint_task(task, save_opts)
+
+      {:ok, response} ->
+        {:ok, normalize_response(response)}
+
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      {:error, reason} ->
+        {:error, Error.new(:request_failed, "save_weights_for_sampler failed", data: reason)}
+
+      other ->
+        {:error,
+         Error.new(:request_failed, "Unexpected save_weights_for_sampler response", data: other)}
+    end
+  end
+
+  defp build_save_options(options, config) do
+    timeout = Map.get(options, :timeout, config.timeout)
+
+    options
+    |> Map.take([:timeout])
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> Keyword.new()
+    |> Keyword.put_new(:timeout, timeout)
+    |> Keyword.put_new(:await_timeout, timeout)
+  end
+
+  defp await_checkpoint_task(%Task{} = task, save_opts) do
+    timeout = Keyword.get(save_opts, :await_timeout, :infinity)
+
+    try do
+      case Task.await(task, timeout) do
+        {:ok, response} ->
+          {:ok, normalize_response(response)}
+
+        {:error, %Error{} = error} ->
+          {:error, error}
+
+        {:error, reason} ->
+          {:error, Error.new(:request_failed, "Checkpoint failed: #{inspect(reason)}")}
+
+        other ->
+          {:ok, normalize_response(other)}
+      end
+    catch
+      :exit, {:timeout, _} ->
+        {:error,
+         Error.new(:api_timeout, "Timed out while awaiting checkpoint save",
+           data: %{timeout: timeout}
+         )}
+
+      :exit, reason ->
+        {:error, Error.new(:request_failed, "Checkpoint task exited: #{inspect(reason)}")}
+    end
+  end
+
+  defp normalize_response(%_{} = struct), do: Map.from_struct(struct)
+  defp normalize_response(%{} = map), do: map
+  defp normalize_response(other), do: %{"result" => other}
+
+  defp persist_metadata(output_path, base_model, response, deps) do
+    file_module = deps.file_module
+    json_module = deps.json_module
+
+    timestamp =
+      deps.now_fun.()
+      |> DateTime.truncate(:second)
+      |> DateTime.to_iso8601()
+
+    data = normalize_response(response)
+
+    metadata = %{
+      "base_model" => base_model,
+      "model_id" => extract_model_id(data) || base_model,
+      "weights_path" => extract_weights_path(data),
+      "saved_at" => timestamp,
+      "response" => data
+    }
+
+    with :ok <- ensure_output_dir(file_module, output_path),
+         :ok <- file_module.write(output_path, json_module.encode!(metadata) <> "\n") do
+      {:ok, metadata}
+    else
+      {:error, reason} ->
+        {:error,
+         Error.new(:request_failed, "Failed to write checkpoint metadata",
+           data: %{reason: reason}
+         )}
+
+      other ->
+        {:error,
+         Error.new(:request_failed, "Failed to write checkpoint metadata", data: %{reason: other})}
+    end
+  end
+
+  defp ensure_output_dir(file_module, output_path) do
+    dir = Path.dirname(output_path)
+
+    case dir do
+      "." -> :ok
+      "" -> :ok
+      _ -> file_module.mkdir_p(dir)
+    end
+  end
+
+  defp extract_model_id(%{"model_id" => model_id}) when is_binary(model_id), do: model_id
+  defp extract_model_id(%{model_id: model_id}) when is_binary(model_id), do: model_id
+  defp extract_model_id(_), do: nil
+
+  defp extract_weights_path(%{"path" => path}) when is_binary(path), do: path
+  defp extract_weights_path(%{path: path}) when is_binary(path), do: path
+  defp extract_weights_path(_), do: nil
+
+  defp maybe_put(keyword, _key, nil), do: keyword
+  defp maybe_put(keyword, key, value), do: Keyword.put(keyword, key, value)
+
+  defp log_checkpoint_error(%Error{} = error) do
+    prefix =
+      if Error.user_error?(error) do
+        "Checkpoint failed. Please check your inputs: "
+      else
+        "Checkpoint failed due to server or transient error: "
+      end
+
+    IO.puts(:stderr, prefix <> Error.format(error))
+  end
+
+  defp log_checkpoint_error(%ArgumentError{} = error) do
+    IO.puts(:stderr, "Checkpoint failed: #{Exception.message(error)}")
+  end
+
+  defp log_checkpoint_error(reason) do
+    IO.puts(:stderr, "Checkpoint failed: #{inspect(reason)}")
   end
 
   defp parse([]), do: {:help, global_help()}
