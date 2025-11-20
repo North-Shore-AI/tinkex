@@ -34,9 +34,9 @@ test/tinkex/tokenizer/nif_safety_test.exs  # new test verifying ETS sharing
    - Implement the NIF-safety flow inline (no hunting for other docs):
      - Create a temporary ETS named table (e.g., `:tinkex_tokenizers_nif_safety`) with `:named_table` + `:public`; do **not** use `:tinkex_tokenizers`.
      - Load a tokenizer (use a tiny/local fixture if possible; otherwise tag the test `:network` when it requires downloads).
-     - Insert the tokenizer handle into ETS, spawn a separate Task/process, read the handle there, run a simple encode, and assert it returns without crashing the VM.
+     - Insert the tokenizer handle into ETS, spawn a separate Task/process, read the handle there, run a simple encode, and assert it returns a list of integers **without** crashing the VM. (If the NIF cannot be used from another process, it will crash and fail the test.)
      - Clean up the ETS table in `on_exit`.
-   - If test passes, document result (safe to cache handles). If it fails, document the failure in the summary and scaffold the GenServer fallback (`Tinkex.TokenizerServer`) while skipping direct ETS caching until Phase 5B.
+   - If test passes, document result (safe to cache handles). If it fails, document the failure in the summary and scaffold the GenServer fallback (`Tinkex.TokenizerServer` in `lib/tinkex/tokenizer_server.ex`, not yet wired into Application) while skipping direct ETS caching until Phase 5B.
 2. **Tokenizer Module Skeleton**
    - Define module with `@moduledoc` describing responsibilities.
    - Stub functions: `get_tokenizer_id/2`, `encode/3`, `decode/3` (if needed), but leave implementations for 5B/5C.

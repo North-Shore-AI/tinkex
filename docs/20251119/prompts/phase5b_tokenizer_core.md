@@ -35,7 +35,7 @@ test/tinkex/tokenizer/encode_test.exs  # new tests for caching + ID resolution
 1. **Tokenizer ID Resolution**
    - `get_tokenizer_id(model_name, training_client \\ nil, opts \\ [])`:
      - If `training_client` provided, call an explicit info hook to fetch `model_data.tokenizer_id`.
-       - Default: `info_fun = opts[:info_fun] || &TrainingClient.get_info/1` (define the function if missing).
+       - Default: `info_fun = opts[:info_fun] || &TrainingClient.get_info/1` (define the function if missing). Alias `Tinkex.TrainingClient` or fully-qualify the module when using this default.
        - Expected return shape: `{:ok, %{model_data: %{tokenizer_id: String.t()}}}`; handle `{:error, _}` cleanly.
        - Tests can inject `info_fun` to avoid coupling to a specific TrainingClient API.
      - Apply Llama-3 hack: if `model_name` contains "Llama-3", return `"baseten/Meta-Llama-3-tokenizer"`.
@@ -43,14 +43,14 @@ test/tinkex/tokenizer/encode_test.exs  # new tests for caching + ID resolution
 2. **Caching Strategy**
    - Use ETS table created in Phase 4A (`:tinkex_tokenizers`).
    - Key by resolved tokenizer ID (string). Value: tokenizer struct or process reference depending on Phase 5A result.
-   - Do not assume the temp table from 5A exists; ensure `:tinkex_tokenizers` is present (start the app or create the table in tests with the same options).
+   - Do not assume the temp table from 5A exists; ensure `:tinkex_tokenizers` is present (start the app or create the table in tests with the same options: `:named_table`, `:public`, `read_concurrency: true`).
    - Functions:
      - `get_or_load_tokenizer(tokenizer_id)`.
-     - `encode(text, model_name, opts \\ [])` returning `{:ok, [integer()]}` or `{:error, Tinkex.Error.t()}` (be consistent; optionally add `encode!/3` to raise).
+     - `encode(text, model_name, opts \\ [])` returning `{:ok, [integer()]}` or `{:error, Tinkex.Error.t()}` (be consistent; optionally add `encode!/3` to raise). For load failures or unknown IDs, prefer `{:error, %Tinkex.Error{type: :validation, message: "..."}}` to match other validation errors.
      - `decode(ids, model_name, opts \\ [])` mirroring the same return contract (or a stub if not needed yet).
 3. **Thread Safety**
    - If NIF safe: store tokenizer struct directly in ETS.
-   - If fallback needed: use `Tinkex.TokenizerServer` per ID, supervised under a `DynamicSupervisor` (e.g., `Tinkex.TokenizerSupervisor` started from `Tinkex.Application` or under `Tinkex.ClientSupervisor`). Provide a minimal API such as `TokenizerServer.start_child(id, tokenizer)` and `TokenizerServer.encode(server, text, opts)` that wraps `GenServer.call(server, {:encode, text, opts})`; ETS caches the pid/reference instead of the raw NIF handle.
+   - If fallback needed: use `Tinkex.TokenizerServer` per ID, supervised under a `DynamicSupervisor` (`Tinkex.TokenizerSupervisor` started from `Tinkex.Application`). Provide a minimal API such as `TokenizerServer.start_child(id, tokenizer)` and `TokenizerServer.encode(server, text, opts)` that wraps `GenServer.call(server, {:encode, text, opts})`; ETS caches the pid/reference instead of the raw NIF handle.
 
 ---
 
