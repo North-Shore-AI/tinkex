@@ -34,12 +34,12 @@
      - `create_lora_training_client/2`
      - `forward_backward/4` with chunked data.
      - `optim_step/2`
-     - `save_weights_for_sampler/2` (if implemented; stub response otherwise).
+     - `save_weights_for_sampler/2` (if implemented; stub response otherwise — e.g., Bypass returns minimal JSON and client yields `{:ok, map}` or the call is a no-op that still flows).
      - Ensure tasks return `{:ok, result}` and metrics combine correctly.
 2. **Example Script (optional but encouraged)**
    - Under `examples/` or `docs/guides/`, create a script showing how to run the training loop against staging endpoints.
 3. **Performance Hooks**
-   - Add timer / logging snippet (just instrumentation for now) to measure total time (mocked if using Bypass).
+   - Add timer / logging snippet (just instrumentation for now) to measure total time (mocked if using Bypass); keep this informational only—no assertions on timing in tests.
 
 ---
 
@@ -51,8 +51,9 @@
   - `forward_backward` responses (multiple chunks).
   - `optim_step` response.
   - `save_weights` response.
+- In `training_loop_test.exs`, start the application (`Application.ensure_all_started(:tinkex)`) so Finch, ETS tables, SessionManager, and supervisors are running before invoking ServiceClient.
 - Ensure entire flow runs via real module interactions (ServiceClient → TrainingClient). No direct GenServer calls.
-- Assert queue states, metrics reduction, etc., by checking the final returned structs.
+- Assert metrics reduction via the final `ForwardBackwardOutput`; queue-state behaviour is already covered by earlier future-polling tests and telemetry.
 
 ---
 

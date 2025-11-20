@@ -30,10 +30,10 @@
    - Bypass responses:
      - Sampling session creation.
      - `/asample` success returning sequences/logprobs.
-   - Concurrency test: spawn multiple sampling tasks (simulate 20-50 requests) using ETS state; ensure RateLimiter prevents race.
+   - Concurrency test: spawn multiple sampling tasks (simulate 20-50 requests) using ETS state; once a 429 with `retry_after_ms` is received, ensure subsequent calls respect the backoff before hitting Bypass again (and ETS state stays consistent).
 2. **Error Recovery Tests**
    - 429 response triggers RateLimiter backoff (ensure backoff applied).
-   - 5xx response uses HTTP retry logic.
+   - 5xx response surfaces as `{:error, %Tinkex.Error{type: :api_status}}` with sampling’s `max_retries: 0` (no automatic HTTP retries, per earlier phases) unless you intentionally change the sampling design to enable retries.
    - User error (400) surfaces immediately with `{:error, %Tinkex.Error{}}`.
 3. **Documentation**
    - Add section in README or guide describing sampling workflow usage and concurrency considerations.
@@ -45,13 +45,14 @@
 - Use Bypass to control responses; track `Plug.Conn.assigns[:call_count]` to assert concurrency.
 - For RateLimiter, simulate 429 with `retry_after_ms` header; ensure subsequent call waits.
 - Multi-client concurrency (two ServiceClients with different configs) to verify isolation.
+- In `sampling_workflow_test.exs`, ensure the application is started (`Application.ensure_all_started(:tinkex)`) so Finch, ETS tables, and the SamplingRegistry are running before invoking ServiceClient/SamplingClient.
 
 ---
 
 ## 4. Constraints & Guidance
 
 - SamplingClient API returns Tasks; ensure integration tests use `Task.await_many`.
-- Logging/telemetry: confirm queue state events (if any) are emitted (can attach simple telemetry handler in test).
+- Logging/telemetry: optionally attach a handler for `[:tinkex, :http, :request, :start/stop]` events for sampling; queue-state telemetry belongs to future polling, not this path.
 - Keep tests deterministic; rely on counters instead of long sleeps.
 
 ---

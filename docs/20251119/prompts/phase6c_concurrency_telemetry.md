@@ -33,10 +33,10 @@
    - Ensure no cross-talk (RateLimiter keyed per `{base_url, api_key}`).
 2. **Error Recovery Coverage**
    - 429 backoff (shared limiter) validated.
-   - 5xx retry behavior (HTTP layer) triggered.
+   - 5xx retry behavior (HTTP layer) triggered for training/future polling (uses `with_retries/5`); sampling continues to use `max_retries: 0` and should not auto-retry 5xx unless you explicitly change the sampling design.
    - User error surfaces promptly without retries.
 3. **Telemetry Dashboard**
-   - Provide script/README snippet showing how to attach telemetry handler or export metrics to console (even if simulated).
+   - Provide script/README snippet showing how to attach a telemetry handler or log/export metrics to console (even if simulated); keep expectations to a lightweight logger, not a full dashboard.
    - Optional: add `Tinkex.Telemetry.attach_logger/0` helper.
 
 ---
@@ -46,13 +46,14 @@
 - Use Bypass to simulate both base URLs (or multiple endpoints).
 - For concurrency, use `Task.async_stream` or `Supertester` harness if available.
 - Record telemetry events using `:telemetry.attach/4`; assert counts/durations.
+- Ensure the application is started in the test setup (`Application.ensure_all_started(:tinkex)`) so Finch, ETS tables, registries, and supervisors are running before invoking clients.
 
 ---
 
 ## 4. Constraints & Guidance
 
 - Tests must remain deterministic; use counters or short sleeps.
-- Provide config isolation test (two configs, ensure ETS entries separate).
+- Provide config isolation test (two configs, ensure ETS entries separate) by asserting distinct entries in ETS (e.g., RateLimiter atomics keyed by `{normalized_base_url, api_key}` and separate `:tinkex_sampling_clients` config entries per client).
 - Document performance baseline approach (even if mocked; note how to measure vs Python).
 
 ---
