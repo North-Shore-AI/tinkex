@@ -35,6 +35,17 @@ defmodule Tinkex.TrainingClient do
   end
 
   @doc """
+  Fetch model metadata for the training client.
+
+  Used by tokenizer resolution to obtain `model_data.tokenizer_id`. Returns an
+  error until the info endpoint is wired.
+  """
+  @spec get_info(t()) :: {:ok, map()} | {:error, Error.t()}
+  def get_info(client) do
+    GenServer.call(client, :get_info)
+  end
+
+  @doc """
   Run a forward-backward pass over the provided data.
 
   Returns a `Task.t()` that yields `{:ok, %ForwardBackwardOutput{}}` or
@@ -189,6 +200,11 @@ defmodule Tinkex.TrainingClient do
 
         {:noreply, %{state | request_id_counter: new_counter}}
     end
+  end
+
+  @impl true
+  def handle_call(:get_info, _from, state) do
+    {:reply, {:error, Error.new(:validation, "get_info not implemented")}, state}
   end
 
   @impl true
