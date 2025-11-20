@@ -1,6 +1,6 @@
 # Phase 7B: CLI Checkpoint Command - Agent Prompt
 
-> **Target:** Implement the `tinkex checkpoint` CLI command, which saves model weights (and optionally downloads checkpoints) by invoking the SDK’s Service/Training clients.  
+> **Target:** Implement the `tinkex checkpoint` CLI command, which saves model weights by invoking the SDK’s Service/Training clients.  
 > **Timebox:** Week 7 - Day 2  
 > **Location:** `S:\tinkex`  
 > **Prerequisites:** Phase 7A (CLI scaffold) complete; Service/Training clients working (Phases 4-6).  
@@ -35,8 +35,8 @@
      1. Parse CLI options → build `Tinkex.Config`.
      2. Start `Tinkex.ServiceClient`.
      3. Create TrainingClient (with base_model/lora options).
-     4. Run `save_weights_for_sampler/2` or equivalent.
-     5. Write checkpoint metadata/output to specified path.
+     4. Run `save_weights_for_sampler/2` or equivalent and await any returned `Task.t` via `Tinkex.Future.await/2` or `Task.await/2`.
+     5. Write checkpoint metadata/output to specified path (metadata vs downloads should be explicit; no implicit download step beyond the TrainingClient call).
    - Support flags: `--base-model`, `--model-path`, `--output`, `--rank`, `--seed`, `--train-mlp`, `--train-attn`, `--train-unembed`, `--api-key`, `--base-url`, `--timeout`.
 2. **Progress/Logging**
    - Print progress messages (starting session, training client, saving weights).
@@ -50,7 +50,8 @@
 ## 3. Constraints & Guidance
 
 - CLI must exit with status 0 on success, non-zero on failure.
-- Avoid global env lookups; use CLI options + defaults from `Tinkex.Config`.
+- CLI should pass options into `Tinkex.Config.new/1` and let that module apply defaults (including env-based values); do not call `Application.get_env/2` directly from the CLI.
+- Await TrainingClient operations before exiting; do not leave tasks running in the background.
 - For tests, avoid hitting network (mock clients).
 - Document command usage in README (CLI section).
 

@@ -26,7 +26,7 @@
 
 1. **ExDoc Configuration**
    - Configure `mix.exs` with `docs: [...]` (extras for guides, README).
-   - Ensure every public module has `@moduledoc` and functions have `@doc`.
+   - Ensure public-facing modules and functions that make up the user API have `@moduledoc`/`@doc`; mark internal helpers `@doc false` as appropriate.
 2. **Guides**
    - `docs/guides/getting_started.md`: installation, config, running CLI.
    - `docs/guides/api_reference.md`: overview of modules (ServiceClient, TrainingClient, SamplingClient, Tokenizer).
@@ -35,9 +35,9 @@
    - Include CLI usage summary, QA commands (`mix test`, `mix dialyzer`, `mix credo`, `mix format --check-formatted`).
    - Link to guides and ExDoc site.
 4. **Behavioral Parity Note**
-   - Document how to compare Elixir vs Python results (test template snippet).
+   - Document how to compare Elixir vs Python results (test template snippet) using the same base model, prompt, and sampling params; emphasize checking for similar outputs/logprobs rather than bit-identical text.
 5. **Automated Checks**
-   - Add `mix docs` to CI or Makefile instructions.
+   - Add `mix docs` to CI or Makefile instructions, noting it may require dev-only deps and should not run in production environments.
 
 ---
 

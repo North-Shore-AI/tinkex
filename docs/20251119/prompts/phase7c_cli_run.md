@@ -35,16 +35,16 @@
      1. Parse options (model info, prompt text/file, sampling params, output format).
      2. Create ServiceClient + SamplingClient (optionally from saved checkpoint).
      3. Use `ModelInput.from_text/2` to encode prompt (or accept token file).
-     4. Call `SamplingClient.sample/4`, await result, print sequences/logprobs.
+     4. Call `SamplingClient.sample/4`, await the returned task with `Tinkex.Future.await/2` or `Task.await/2`, and print sequences/logprobs.
      5. Support output to stdout or file (JSON).
 2. **Options**
-   - `--base-model` or `--model-path`
-   - `--prompt` (string) or `--prompt-file`
-   - Sampling params: `--max-tokens`, `--temperature`, `--top-k`, `--top-p`, `--num-samples`
-   - `--api-key`, `--base-url`, `--timeout`, `--http-pool`
+      - `--base-model` or `--model-path`
+      - `--prompt` (string) or `--prompt-file` (if both provided, either prefer `--prompt` with a warning or treat as an error—pick a consistent policy)
+      - Sampling params: `--max-tokens`, `--temperature`, `--top-k`, `--top-p`, `--num-samples`
+      - `--api-key`, `--base-url`, `--timeout`, `--http-pool`
 3. **Error Handling**
    - Distinguish user errors (400) vs server errors (retry/backoff message).
-   - Show helpful message if tokenizer not available.
+   - Treat tokenizer failures (e.g., `ModelInput.from_text/2` returning an error) as user errors and print a clear message like “Failed to load tokenizer <id>: ...”.
 4. **Tests**
    - `test/tinkex/cli_run_test.exs` mocking ServiceClient/SamplingClient.
    - Validate option parsing, prompts from file, output formatting.
@@ -53,9 +53,9 @@
 
 ## 3. Constraints
 
-- Keep CLI responsive: show waiting/progress text while awaiting Task.
+- Keep CLI responsive: print succinct progress like “Starting sampling...” then await the task (`Tinkex.Future.await/2` or `Task.await/2`) and print a completion line; avoid spinners/long loops that complicate tests.
 - Reuse existing config threading; no global env lookups except as defaults.
-- Document command usage in README (CLl section).
+- Document command usage in README (CLI section).
 - Avoid actual network calls in tests; use Mox/stubs.
 
 ---
