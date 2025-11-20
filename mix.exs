@@ -81,11 +81,17 @@ defmodule Tinkex.MixProject do
       extras: [
         "README.md",
         "LICENSE",
+        "docs/guides/getting_started.md",
+        "docs/guides/api_reference.md",
+        "docs/guides/troubleshooting.md",
         "docs/guides/training_loop.md",
         "docs/guides/tokenization.md"
       ],
       groups_for_extras: [
         Guides: [
+          "docs/guides/getting_started.md",
+          "docs/guides/api_reference.md",
+          "docs/guides/troubleshooting.md",
           "docs/guides/training_loop.md",
           "docs/guides/tokenization.md"
         ]
