@@ -19,7 +19,7 @@
 | `lib/tinkex/api/api.ex` | HTTP client (will need `Service`, `Models` modules if missing) | Ensure we can call endpoints |
 | `lib/tinkex/config.ex` | Config struct for multi-tenancy | start_link flows |
 
-If API submodules (`Service`, `Models`, etc.) don’t exist yet, create minimal stubs in `lib/tinkex/api/service.ex` etc. or call `Tinkex.API.post/4` directly for session/model creation.
+The repo already includes `Tinkex.API.Session`, `Tinkex.API.Service`, `Tinkex.API.Training`, `Tinkex.API.Sampling`, and `Tinkex.API.Weights`; reuse them. Only add new helpers (e.g., `Models`) if an endpoint truly lacks a wrapper.
 
 ---
 
@@ -39,10 +39,11 @@ test/tinkex/service_client_test.exs
 ### 2.2 Deliverables
 
 1. **SessionManager**
-   - Maintains active sessions (session_id, heartbeat interval, config).
+   - Maintains active sessions (session_id, heartbeat interval, config), supporting multiple concurrent sessions (potentially with different configs).
    - Public API: `start_session(config)` -> `{:ok, session_id}`; `stop_session(session_id)`.
-   - Sends heartbeat via `Tinkex.API.post("/api/v1/session/heartbeat", ...)` on interval (e.g., 10s).
-   - Handles expired sessions (if heartbeat fails with user error, remove entry).
+   - Use the existing API submodule: create sessions via `Tinkex.API.Session.create/2` (or `create_typed/2` if present), and send heartbeats via `Tinkex.API.Session.heartbeat/2` (path `"/api/v1/heartbeat"`) on interval (e.g., 10s).
+   - Handles heartbeat failures using `Tinkex.Error` categories: on user errors (4xx excluding 408/429, or category `:user`), treat the session as expired and remove it; on transient/server/unknown errors, keep the session, log, and retry on the next interval.
+   - SessionManager should be supervised under `Tinkex.Application` (add it to the children if Phase 4A did not already do so).
 2. **ServiceClient**
    - `start_link(opts)` accepts `config: Tinkex.Config.t()` (or builds one).
    - On init: request SessionManager to start session, store session_id, start heartbeat reference.
@@ -59,7 +60,8 @@ test/tinkex/service_client_test.exs
 
 1. `SessionManager` tests:
    - Start session (mock HTTP with Bypass), heartbeat triggered (use `Process.sleep` with short interval or send :heartbeat message).
-   - Failure case: heartbeat returns 401/4xx -> session removed.
+   - Failure case: heartbeat returns 401/4xx user error -> session removed; server/transient errors remain and are retried on next tick.
+   - Ensure `Tinkex.API.Session.heartbeat/2` is used (path `"/api/v1/heartbeat"`), not a hardcoded alternate path.
 2. `ServiceClient` tests:
    - start_link with config uses SessionManager (mock endpoints).
    - `create_lora_training_client/2` spawns child via `DynamicSupervisor`, returns pid.
@@ -74,7 +76,7 @@ Use Bypass or Mox to simulate API responses.
 
 - No direct `Application.get_env` inside call paths; pass config explicitly.
 - Heartbeat interval configurable? Accept `opts[:heartbeat_interval_ms]` (default 10_000).
-- `SessionManager` should be supervised (already started in Phase 4A). Use ETS or map state for sessions.
+- `SessionManager` must be supervised under `Tinkex.Application` (if not already wired in Phase 4A, add it here). Use ETS or map state for sessions.
 - `ServiceClient` must trap exits? Optional, but handle `terminate/2` to stop session.
 - Use `DynamicSupervisor.start_child/2` with `Tinkex.ClientSupervisor` for child clients.
 - Document `@doc` for `ServiceClient` APIs (how to await tasks later).

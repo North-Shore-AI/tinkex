@@ -22,6 +22,8 @@
 | `lib/tinkex/rate_limiter.ex` | Shared backoff for SamplingClient | Use per `{base_url, api_key}` |
 | `lib/tinkex/sampling_registry.ex` | ETS registration & cleanup | SamplingClient init must register |
 
+The repo already contains `Tinkex.API.Training` and `Tinkex.API.Sampling`; reuse those modules and align their arity/return shapes as noted below rather than adding alternate API entry points.
+
 ---
 
 ## 2. Implementation Scope
@@ -31,8 +33,8 @@
 ```
 lib/tinkex/training_client.ex
 lib/tinkex/sampling_client.ex
-lib/tinkex/api/training.ex            # if not yet created (wrapper around HTTP endpoints)
-lib/tinkex/api/sampling.ex            # as needed
+lib/tinkex/api/training.ex            # align return shape (future/request_id) with client expectations
+lib/tinkex/api/sampling.ex            # ensure sample_async/2 wiring + opts/config
 test/tinkex/training_client_test.exs
 test/tinkex/sampling_client_test.exs
 ```
@@ -42,17 +44,18 @@ test/tinkex/sampling_client_test.exs
 - GenServer storing:
   - `model_id`, `session_id`, `config`, `request_id_counter`, `http_pool`.
   - Possibly `model_seq_id`, `sampling_session_id` references.
-- `forward_backward/4`:
+- Public API `forward_backward/4` returns a `Task.t({:ok, ForwardBackwardOutput.t()} | {:error, Tinkex.Error.t()})`.
+- `forward_backward/4` implementation:
   - Chunk data (128 examples max, 500k “numbers” per chunk).
-  - **Synchronous sends**: inside `handle_call`, iterate chunks sequentially; each call to `Tinkex.API.Training.forward_backward/3` returns `%{request_id: ...}`.
+  - **Synchronous sends**: inside `handle_call`, iterate chunks sequentially; each call should use a future-returning Training API (`Tinkex.API.Training.forward_backward/2` updated to return `%{request_id: ...}`) or a new `forward_backward_future/2` helper. If a synchronous helper remains, implement it by awaiting the future.
   - After sending all chunks, spawn `Task.start` that:
     - Wraps body in `try/rescue`.
-    - Uses `Tinkex.Future.poll/2` for each request.
-    - Combines results via `combine_forward_backward_results/1`.
+    - Starts polling each request via `Tinkex.Future.poll/2`, then uses `Tinkex.Future.await_many/2` and `Tinkex.Future.Combiner.combine_forward_backward_results/1` to produce the final output.
     - On success/failure, calls `GenServer.reply/2`, rescuing `ArgumentError` (caller may die).
-- `optim_step/2` similar (single request).
-- `save_weights_for_sampler/2` (if part of scope) can return future or immediate result.
+- `optim_step/2` similar (single request), with API returning a future/request_id and the client awaiting/polling it.
+- `save_weights_for_sampler/2` (if part of scope) can return future or immediate result; document which.
 - Document blocking trade-off (GenServer busy during send phase).
+- Update `Tinkex.API.Training` (and its tests) to match the future-returning shape (`%{request_id: ...}`) or expose a clearly named synchronous helper that awaits the future so call sites choose explicitly.
 
 ### 2.3 SamplingClient Requirements
 
@@ -60,11 +63,11 @@ test/tinkex/sampling_client_test.exs
 - On `init/1`:
   - Create sampling session via API.
   - `Tinkex.SamplingRegistry.register(self(), config_entry)` where entry includes `sampling_session_id`, `http_pool`, `request_id_counter` atomics, `rate_limiter`, and stored `Tinkex.Config`.
-- Public API `sample(pid, prompt, opts)` returns `Task.t()`:
+- Public API `sample(client_pid, prompt, sampling_params, opts \\ []) :: Task.t({:ok, SampleResponse.t()} | {:error, Tinkex.Error.t()})`:
   - Immediately reads config from ETS (`{:config, pid}`), without GenServer call.
   - Waits on `Tinkex.RateLimiter` (shared per `{base_url, api_key}`).
   - Increments request counter atomically.
-  - Calls `Tinkex.API.Sampling.asample/3` with opts merged + `config: entry.config`.
+  - Calls `Tinkex.API.Sampling.sample_async/2` with opts merged + `config: entry.config`.
   - On 429 error, call `Tinkex.RateLimiter.set_backoff/2` using `error.retry_after_ms`.
   - No automatic retry (document expectation).
 - GenServer `terminate/2` should rely on registry to cleanup.
@@ -77,7 +80,7 @@ test/tinkex/sampling_client_test.exs
    - Use Bypass to simulate chunked forward_backward (multiple chunks).
    - Ensure synchronous send order: e.g., record call sequence.
    - Verify polling task replies even on exception (simulate Bypass closing connection mid-stream).
-   - Optim step success.
+   - Optim step success (and uses the future-returning Training API shape).
 2. **SamplingClient**
    - ETS registration (via SamplingRegistry) ensures config stored.
    - `sample/4` fetches config, uses RateLimiter; verify backoff triggered when 429 returned.
