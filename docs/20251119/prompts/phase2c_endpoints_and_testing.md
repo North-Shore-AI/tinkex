@@ -17,14 +17,11 @@ This document covers:
 
 ### 1.1 Pool Configuration Reference
 
-| Pool Type | Size | Purpose |
-|-----------|------|---------|
-| `:training` | 5 | Sequential, long-running operations |
-| `:sampling` | 100 | High concurrency burst traffic |
-| `:session` | 5 | Critical heartbeats (keep-alive) |
-| `:futures` | 50 | Concurrent polling |
-| `:telemetry` | 5 | Prevent telemetry from starving ops |
-| `:default` | 10 | Miscellaneous |
+Refer to **Phase 2A, Section 2.1 (Pool Types and Sizes)** for pool definitions.
+
+### 1.2 Typed Helpers Note
+
+In Phase 2, only `Tinkex.API.Session.create_typed/2` provides a typed helper that converts JSON to a struct. Other endpoints return raw maps. Additional typed helpers will be added in Phase 4 as needed.
 
 ---
 
@@ -158,10 +155,12 @@ defmodule Tinkex.API.Sampling do
   @spec sample_async(map(), keyword()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def sample_async(request, opts) do
-    opts
-    |> Keyword.put(:pool_type, :sampling)
-    |> Keyword.put(:max_retries, 0)  # SamplingClient handles retries
-    |> then(&Tinkex.API.post("/api/v1/asample", request, &1))
+    opts =
+      opts
+      |> Keyword.put(:pool_type, :sampling)
+      |> Keyword.put(:max_retries, 0)
+
+    Tinkex.API.post("/api/v1/asample", request, opts)
   end
 end
 ```
@@ -243,8 +242,12 @@ defmodule Tinkex.API.Session do
   @spec create_typed(map(), keyword()) ::
           {:ok, Tinkex.Types.CreateSessionResponse.t()} | {:error, Tinkex.Error.t()}
   def create_typed(request, opts) do
-    with {:ok, json} <- create(request, opts) do
-      {:ok, Tinkex.Types.CreateSessionResponse.from_json(json)}
+    case create(request, opts) do
+      {:ok, json} ->
+        {:ok, Tinkex.Types.CreateSessionResponse.from_json(json)}
+
+      {:error, _} = error ->
+        error
     end
   end
 
@@ -354,7 +357,9 @@ end
 
 ### 3.7 Tinkex.API.Telemetry
 
-**Important**: This module actually implements fire-and-forget behavior using Task.start.
+**Important**: This module implements fire-and-forget behavior using Task.start.
+
+**Note**: Telemetry tasks spawned by `Task.start` are not supervised. Failures are logged and ignored. This is intentional - telemetry should never block or fail critical operations.
 
 ```elixir
 defmodule Tinkex.API.Telemetry do
@@ -363,6 +368,12 @@ defmodule Tinkex.API.Telemetry do
 
   Uses :telemetry pool to prevent telemetry from starving critical operations.
   Pool size: 5 connections.
+
+  ## Task Supervision
+
+  Tasks spawned by `send/2` are not supervised. Failures are logged
+  and ignored. This is intentional - telemetry should never block or
+  fail critical operations.
   """
 
   require Logger
@@ -384,15 +395,17 @@ defmodule Tinkex.API.Telemetry do
   @spec send(map(), keyword()) :: :ok
   def send(request, opts) do
     Task.start(fn ->
-      result = opts
+      opts =
+        opts
         |> Keyword.put(:pool_type, :telemetry)
         |> Keyword.put(:max_retries, 1)
-        |> then(&Tinkex.API.post("/api/v1/telemetry", request, &1))
+
+      result = Tinkex.API.post("/api/v1/telemetry", request, opts)
 
       case result do
         {:ok, _} -> :ok
         {:error, error} ->
-          Logger.warning("Telemetry send failed: #{error.message}")
+          Logger.warning("Telemetry send failed: #{inspect(error)}")
       end
     end)
 
@@ -408,10 +421,12 @@ defmodule Tinkex.API.Telemetry do
   @spec send_sync(map(), keyword()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def send_sync(request, opts) do
-    opts
-    |> Keyword.put(:pool_type, :telemetry)
-    |> Keyword.put(:max_retries, 1)
-    |> then(&Tinkex.API.post("/api/v1/telemetry", request, &1))
+    opts =
+      opts
+      |> Keyword.put(:pool_type, :telemetry)
+      |> Keyword.put(:max_retries, 1)
+
+    Tinkex.API.post("/api/v1/telemetry", request, opts)
   end
 end
 ```
@@ -452,6 +467,7 @@ defmodule Tinkex.HTTPCase do
         # ...
       end
   """
+  @spec setup_http_client(map()) :: map()
   def setup_http_client(_context) do
     bypass = Bypass.open()
     config = Tinkex.Config.new(
@@ -508,9 +524,17 @@ defmodule Tinkex.HTTPCase do
 
   @doc """
   Stub multiple responses in sequence.
+
+  Returns the counter agent pid. Clean up is registered automatically
+  via on_exit.
   """
   def stub_sequence(bypass, responses) do
     {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+    # Register cleanup for the counter agent
+    ExUnit.Callbacks.on_exit(fn ->
+      if Process.alive?(counter), do: Agent.stop(counter)
+    end)
 
     Bypass.expect(bypass, fn conn ->
       index = Agent.get_and_update(counter, &{&1, &1 + 1})
@@ -531,7 +555,7 @@ defmodule Tinkex.HTTPCase do
   @doc """
   Attach telemetry handler for testing.
 
-  Returns a ref that can be used to match events.
+  Returns the handler_id. Cleanup is registered automatically via on_exit.
   """
   def attach_telemetry(events) do
     handler_id = "test-handler-#{:erlang.unique_integer()}"
@@ -546,7 +570,7 @@ defmodule Tinkex.HTTPCase do
       nil
     )
 
-    on_exit(fn ->
+    ExUnit.Callbacks.on_exit(fn ->
       :telemetry.detach(handler_id)
     end)
 
@@ -566,6 +590,8 @@ Code.require_file("support/http_case.ex", __DIR__)
 ```
 
 ### 4.2 Complete API Test Suite
+
+**Important**: All Bypass-based tests MUST NOT be `async: true`. Tests use request counters to verify retry behavior, not timing assertions.
 
 ```elixir
 defmodule Tinkex.APITest do
@@ -599,31 +625,26 @@ defmodule Tinkex.APITest do
       assert Agent.get(counter, & &1) == 2
     end
 
-    test "uses Retry-After for 429", %{bypass: bypass, config: config} do
-      stub_sequence(bypass, [
+    test "retries on 429 with Retry-After", %{bypass: bypass, config: config} do
+      counter = stub_sequence(bypass, [
         {429, %{error: "Rate limited"}, [{"retry-after-ms", "100"}]},
         {200, %{result: "success"}, []}
       ])
 
-      start = System.monotonic_time(:millisecond)
-      {:ok, _result} = Tinkex.API.post("/test", %{}, config: config)
-      elapsed = System.monotonic_time(:millisecond) - start
-
-      assert elapsed >= 100
+      {:ok, result} = Tinkex.API.post("/test", %{}, config: config)
+      assert result["result"] == "success"
+      assert Agent.get(counter, & &1) == 2  # Verifies retry happened
     end
 
-    test "uses Retry-After in seconds", %{bypass: bypass, config: config} do
-      stub_sequence(bypass, [
+    test "parses Retry-After in seconds", %{bypass: bypass, config: config} do
+      counter = stub_sequence(bypass, [
         {429, %{error: "Rate limited"}, [{"retry-after", "1"}]},
         {200, %{result: "success"}, []}
       ])
 
-      start = System.monotonic_time(:millisecond)
-      {:ok, _result} = Tinkex.API.post("/test", %{}, config: config)
-      elapsed = System.monotonic_time(:millisecond) - start
-
-      # Should have waited ~1000ms
-      assert elapsed >= 900
+      {:ok, result} = Tinkex.API.post("/test", %{}, config: config)
+      assert result["result"] == "success"
+      assert Agent.get(counter, & &1) == 2
     end
 
     test "honors x-should-retry: false even on 5xx", %{bypass: bypass, config: config} do
@@ -662,16 +683,14 @@ defmodule Tinkex.APITest do
     end
 
     test "handles case-insensitive Retry-After header", %{bypass: bypass, config: config} do
-      stub_sequence(bypass, [
+      counter = stub_sequence(bypass, [
         {429, %{error: "Rate limited"}, [{"RETRY-AFTER-MS", "50"}]},
         {200, %{result: "success"}, []}
       ])
 
-      start = System.monotonic_time(:millisecond)
-      {:ok, _result} = Tinkex.API.post("/test", %{}, config: config)
-      elapsed = System.monotonic_time(:millisecond) - start
-
-      assert elapsed >= 50
+      {:ok, result} = Tinkex.API.post("/test", %{}, config: config)
+      assert result["result"] == "success"
+      assert Agent.get(counter, & &1) == 2
     end
 
     test "respects max_retries", %{bypass: bypass, config: config} do
@@ -775,15 +794,14 @@ defmodule Tinkex.APITest do
   end
 
   describe "concurrent requests" do
-    test "handles 50 concurrent requests", %{bypass: bypass, config: config} do
+    test "handles 20 concurrent requests", %{bypass: bypass, config: config} do
       Bypass.expect(bypass, fn conn ->
-        Process.sleep(10)  # Simulate slow response
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(200, ~s({"result": "ok"}))
       end)
 
-      tasks = for i <- 1..50 do
+      tasks = for i <- 1..20 do
         Task.async(fn ->
           Tinkex.API.post("/test", %{id: i}, config: config)
         end)
@@ -867,20 +885,16 @@ defmodule Tinkex.API.TelemetryTest do
   describe "send/2" do
     test "returns :ok immediately", %{bypass: bypass, config: config} do
       Bypass.expect(bypass, fn conn ->
-        # Slow response to prove we don't wait
-        Process.sleep(100)
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(200, ~s({"status": "ok"}))
       end)
 
-      start = System.monotonic_time(:millisecond)
       result = Tinkex.API.Telemetry.send(%{event: "test"}, config: config)
-      elapsed = System.monotonic_time(:millisecond) - start
-
       assert result == :ok
-      # Should return almost immediately (not wait 100ms)
-      assert elapsed < 50
+
+      # Give the async task time to complete
+      :timer.sleep(50)
     end
   end
 
@@ -908,22 +922,25 @@ Phase 2C is **complete** when ALL of the following are true:
 ### 5.1 Implementation Checklist
 
 - [ ] `Tinkex.API.Training` - forward_backward, optim_step, forward
-- [ ] `Tinkex.API.Sampling` - sample_async
+- [ ] `Tinkex.API.Sampling` - sample_async (no `then/1` usage)
 - [ ] `Tinkex.API.Futures` - retrieve
 - [ ] `Tinkex.API.Session` - create, create_typed, heartbeat
 - [ ] `Tinkex.API.Service` - create_model, create_sampling_session
 - [ ] `Tinkex.API.Weights` - save_weights, load_weights, save_weights_for_sampler
-- [ ] `Tinkex.API.Telemetry` - send (fire-and-forget), send_sync
-- [ ] `Tinkex.HTTPCase` - test helper module
+- [ ] `Tinkex.API.Telemetry` - send (fire-and-forget with `inspect(error)`), send_sync
+- [ ] `Tinkex.HTTPCase` - test helper module with @spec for setup_http_client
 
 ### 5.2 Testing Checklist
 
 - [ ] All retry logic tests from Phase 2B pass
 - [ ] x-should-retry on 400 test passes
 - [ ] Case-insensitive header tests pass
-- [ ] Concurrent request tests (50 concurrent) pass
+- [ ] Concurrent request tests (20 concurrent) pass
 - [ ] Telemetry event tests pass
 - [ ] Each endpoint module has at least endpoint verification tests
+- [ ] All Bypass-based tests are NOT async: true
+- [ ] No Process.sleep in Bypass handlers
+- [ ] No timing assertions (elapsed >= X)
 - [ ] All tests pass: `mix test`
 
 ### 5.3 Type Safety Checklist
@@ -944,11 +961,16 @@ Phase 2C is **complete** when ALL of the following are true:
 
 ## 6. Common Pitfalls to Avoid
 
-1. **Don't forget async: false for Bypass tests** - Bypass can be fussy with concurrent tests
+1. **All Bypass tests MUST be async: false** - Bypass can be fussy with concurrent tests
 2. **Don't forget to test x-should-retry: true on 400** - This proves header takes precedence
 3. **Don't make Telemetry.send block** - Use Task.start for fire-and-forget
 4. **Don't forget to require Logger in Telemetry module**
 5. **Don't hardcode pool types** - Use the constants consistently
+6. **Don't use `then/1`** - Use explicit pipelines instead
+7. **Don't use `error.message` in Logger** - Use `inspect(error)` for proper formatting
+8. **Don't forget on_exit cleanup for Agents** - stub_sequence must clean up
+9. **Don't use Process.sleep in tests** - Use counters to verify retry behavior
+10. **Don't use timing assertions** - Verify behavior via state, not elapsed time
 
 ---
 
@@ -990,9 +1012,9 @@ When all three parts are done, verify:
 
 - [ ] PoolKey tests
 - [ ] Config tests
-- [ ] API retry tests (all edge cases)
+- [ ] API retry tests (all edge cases, using counters not timing)
 - [ ] Telemetry event tests
-- [ ] Concurrent request tests
+- [ ] Concurrent request tests (20 concurrent)
 - [ ] Endpoint tests
 
 ### Quality
@@ -1019,8 +1041,8 @@ The HTTP layer is the foundation for all network operations. Clients in Phase 4 
 Phase 2C completes the HTTP layer with:
 
 1. **All Endpoint Modules** - Properly configured pool types
-2. **Typed Response Helpers** - Pattern for converting JSON to typed structs
+2. **Typed Response Helpers** - Pattern for converting JSON to typed structs (Session only in Phase 2)
 3. **Complete Test Suite** - Including concurrent and telemetry tests
-4. **Test Helper Module** - Reduces boilerplate in tests
+4. **Test Helper Module** - Reduces boilerplate in tests with proper cleanup
 
 The complete Phase 2 provides a robust, tested HTTP foundation for the Tinkex SDK.

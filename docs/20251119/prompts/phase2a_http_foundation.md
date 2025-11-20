@@ -78,7 +78,61 @@ ls lib/tinkex/types/request_error_category.ex
 
 ---
 
-## 2. Required Reading
+## 2. HTTP Specification (Shared Reference)
+
+This section defines the HTTP behavior that all Phase 2 documents reference. Subsequent phases (2B, 2C) should reference this section rather than duplicating it.
+
+### 2.1 Pool Types and Sizes
+
+| Pool Type | Size | Purpose |
+|-----------|------|---------|
+| `:training` | 5 | Sequential, long-running operations |
+| `:sampling` | 100 | High concurrency burst traffic |
+| `:session` | 5 | Critical heartbeats (keep-alive) |
+| `:futures` | 50 | Concurrent polling |
+| `:telemetry` | 5 | Prevent telemetry from starving ops |
+| `:default` | 10 | Miscellaneous |
+
+### 2.2 Retry Semantics
+
+The HTTP layer retries on:
+- 5xx server errors (exponential backoff)
+- 408 timeout (exponential backoff)
+- 429 rate limit (use server-provided Retry-After)
+- Connection errors (exponential backoff)
+- When `x-should-retry: "true"` header is present
+
+The HTTP layer does NOT retry on:
+- 4xx client errors (except 408, 429)
+- When `x-should-retry: "false"` header is present
+
+**Critical**: The `x-should-retry` header takes precedence over status-based logic.
+
+### 2.3 Header Handling
+
+All header parsing is case-insensitive per RFC 7230:
+- `x-should-retry`, `X-Should-Retry`, `X-SHOULD-RETRY` are equivalent
+- `retry-after`, `Retry-After`, `RETRY-AFTER` are equivalent
+- `retry-after-ms`, `Retry-After-Ms` are equivalent
+
+### 2.4 Backoff Schedule (Approximate)
+
+With `@initial_retry_delay = 500ms` and full jitter:
+- Attempt 0 (first retry): 0-500ms
+- Attempt 1: 0-1000ms
+- Attempt 2: 0-2000ms
+- Attempt 3: 0-4000ms
+- Maximum capped at 8000ms
+
+### 2.5 Invariants
+
+1. **Pool keys MUST be generated via `Tinkex.PoolKey.build/2`** - Never construct tuple keys manually
+2. **Config MUST be threaded via `opts[:config]`** - No Application.get_env at call time
+3. **`RequestErrorCategory.parse/1` MUST return an atom** - Never `{:error, _}`
+
+---
+
+## 3. Required Reading
 
 | File | Purpose | Key Sections |
 |------|---------|--------------|
@@ -87,9 +141,9 @@ ls lib/tinkex/types/request_error_category.ex
 
 ---
 
-## 3. Implementation Plan
+## 4. Implementation Plan
 
-### 3.1 Implementation Order (Phase 2A Only)
+### 4.1 Implementation Order (Phase 2A Only)
 
 ```
 1. Tinkex.PoolKey          # URL normalization (no deps)
@@ -98,7 +152,7 @@ ls lib/tinkex/types/request_error_category.ex
 4. Update mix.exs          # Wire up application
 ```
 
-### 3.2 File Structure
+### 4.2 File Structure
 
 ```
 lib/tinkex/
@@ -109,11 +163,15 @@ lib/tinkex/
 
 ---
 
-## 4. Detailed Module Specifications
+## 5. Detailed Module Specifications
 
-### 4.1 Tinkex.PoolKey
+### 5.1 Tinkex.PoolKey
 
 Centralized URL normalization - single source of truth. **Critical**: Validates URLs and normalizes hosts for consistent pool keys.
+
+**Note on URL Strictness:**
+- Bare hosts (e.g., `"example.com"`) are rejected - must include scheme
+- `http://` base URLs are not recommended since pools are configured for HTTP/2
 
 ```elixir
 defmodule Tinkex.PoolKey do
@@ -198,9 +256,11 @@ defmodule Tinkex.PoolKey do
 end
 ```
 
-### 4.2 Tinkex.Config
+### 5.2 Tinkex.Config
 
 Multi-tenancy configuration struct with validation.
+
+**Note**: The `user_metadata` field is not used in Phase 2. It's reserved for future client-level metadata support.
 
 ```elixir
 defmodule Tinkex.Config do
@@ -230,11 +290,40 @@ defmodule Tinkex.Config do
 
   ## Multi-Instance Note
 
-  If you need multiple SDK instances with different configs, pass explicit
+  If you need multiple SDK instances with different configs, you MUST pass distinct
   `:http_pool` names to avoid conflicts:
 
       config1 = Config.new(api_key: key1, http_pool: :tinkex_pool_tenant_a)
       config2 = Config.new(api_key: key2, http_pool: :tinkex_pool_tenant_b)
+
+  ## Multi-Tenant Pool Setup Example
+
+  In your host application's supervision tree:
+
+      defmodule MyApp.Application do
+        use Application
+
+        def start(_type, _args) do
+          children = [
+            # Tenant A pools
+            {Finch,
+             name: :tinkex_pool_tenant_a,
+             pools: %{
+               {"https://api-tenant-a.example.com", :default} => [protocol: :http2, size: 10],
+               {"https://api-tenant-a.example.com", :sampling} => [protocol: :http2, size: 100]
+             }},
+            # Tenant B pools
+            {Finch,
+             name: :tinkex_pool_tenant_b,
+             pools: %{
+               {"https://api-tenant-b.example.com", :default} => [protocol: :http2, size: 10],
+               {"https://api-tenant-b.example.com", :sampling} => [protocol: :http2, size: 100]
+             }}
+          ]
+
+          Supervisor.start_link(children, strategy: :one_for_one)
+        end
+      end
   """
 
   @enforce_keys [:base_url, :api_key]
@@ -362,7 +451,7 @@ defmodule Tinkex.Config do
 end
 ```
 
-### 4.3 Tinkex.Application
+### 5.3 Tinkex.Application
 
 Finch pool configuration with proper pool keys.
 
@@ -384,14 +473,7 @@ defmodule Tinkex.Application do
 
   ## Pool Types and Sizes
 
-  | Pool Type | Size | Purpose |
-  |-----------|------|---------|
-  | `:training` | 5 | Sequential, long-running operations |
-  | `:sampling` | 100 | High concurrency burst traffic |
-  | `:session` | 5 | Critical heartbeats (keep-alive) |
-  | `:futures` | 50 | Concurrent polling |
-  | `:telemetry` | 5 | Prevent telemetry from starving ops |
-  | `:default` | 10 | Miscellaneous |
+  See Section 2.1 (HTTP Specification) for pool type definitions.
 
   ## Future Enhancements
 
@@ -463,7 +545,7 @@ defmodule Tinkex.Application do
 end
 ```
 
-### 4.4 Update mix.exs
+### 5.4 Update mix.exs
 
 **Critical**: Wire up the Application module so Finch pools actually start.
 
@@ -474,13 +556,24 @@ def application do
     extra_applications: [:logger]
   ]
 end
+
+defp deps do
+  [
+    {:finch, "~> 0.18"},
+    {:jason, "~> 1.4"},
+    {:telemetry, "~> 1.2"},
+    # Test dependencies
+    {:bypass, "~> 2.1", only: :test},
+    {:supertester, "~> 0.2", only: :test}
+  ]
+end
 ```
 
 ---
 
-## 5. Test-Driven Development
+## 6. Test-Driven Development
 
-### 5.1 Test Structure
+### 6.1 Test Structure
 
 ```
 test/tinkex/
@@ -488,7 +581,7 @@ test/tinkex/
 └── config_test.exs
 ```
 
-### 5.2 PoolKey Tests
+### 6.2 PoolKey Tests
 
 ```elixir
 defmodule Tinkex.PoolKeyTest do
@@ -524,7 +617,7 @@ defmodule Tinkex.PoolKeyTest do
                "https://example.com:8080"
     end
 
-    test "raises on invalid URL without scheme" do
+    test "raises on bare host without scheme" do
       assert_raise ArgumentError, ~r/invalid base_url/, fn ->
         PoolKey.normalize_base_url("example.com")
       end
@@ -567,7 +660,7 @@ defmodule Tinkex.PoolKeyTest do
 end
 ```
 
-### 5.3 Config Tests
+### 6.3 Config Tests
 
 ```elixir
 defmodule Tinkex.ConfigTest do
@@ -670,18 +763,19 @@ end
 
 ---
 
-## 6. Quality Gates for Phase 2A
+## 7. Quality Gates for Phase 2A
 
 Phase 2A is **complete** when ALL of the following are true:
 
-### 6.1 Implementation Checklist
+### 7.1 Implementation Checklist
 
 - [ ] `Tinkex.PoolKey` - URL normalization with validation and host downcasing
 - [ ] `Tinkex.Config` - Multi-tenancy struct with @enforce_keys and validate! in new/1
 - [ ] `Tinkex.Application` - Finch pools with tuple keys for all pool types
 - [ ] `mix.exs` - Application module wired up with `mod:` option
+- [ ] `mix.exs` - Dependencies include `{:supertester, "~> 0.2", only: :test}`
 
-### 6.2 Testing Checklist
+### 7.2 Testing Checklist
 
 - [ ] PoolKey normalization tests (standard ports, non-standard ports, case-insensitivity)
 - [ ] PoolKey validation tests (invalid URLs raise ArgumentError)
@@ -689,7 +783,7 @@ Phase 2A is **complete** when ALL of the following are true:
 - [ ] Config error cases (missing api_key, invalid values)
 - [ ] All tests pass: `mix test test/tinkex/pool_key_test.exs test/tinkex/config_test.exs`
 
-### 6.3 Type Safety Checklist
+### 7.3 Type Safety Checklist
 
 - [ ] All modules have `@spec` for public functions
 - [ ] `@enforce_keys` on Config struct
@@ -697,17 +791,18 @@ Phase 2A is **complete** when ALL of the following are true:
 
 ---
 
-## 7. Common Pitfalls to Avoid
+## 8. Common Pitfalls to Avoid
 
 1. **Don't forget to wire up Application in mix.exs** - Without `mod:`, your pools won't start
 2. **Don't allow invalid URLs to generate pool keys** - Fail loud with ArgumentError
 3. **Don't forget to downcase hosts** - HTTP hosts are case-insensitive per RFC 7230
 4. **Don't call Application.get_env outside of Config.new/1** - Wrap in anonymous functions for runtime evaluation
 5. **Don't skip validation in Config.new/1** - Always call validate! at construction time
+6. **Don't construct pool key tuples manually** - Always use `Tinkex.PoolKey.build/2`
 
 ---
 
-## 8. Execution Commands
+## 9. Execution Commands
 
 ```bash
 # Run Phase 2A tests
@@ -722,7 +817,7 @@ mix compile --warnings-as-errors && mix test test/tinkex/pool_key_test.exs test/
 
 ---
 
-## 9. Dependencies and Next Steps
+## 10. Dependencies and Next Steps
 
 ### Dependencies
 
@@ -748,5 +843,6 @@ Phase 2A establishes the HTTP foundation:
 1. **URL Normalization** - Centralized pool key generation with validation
 2. **Multi-tenant Configuration** - Config struct with runtime env lookup
 3. **Finch Pools** - Properly configured pools for different operation types
+4. **Shared HTTP Specification** - Reference section for all Phase 2 documents
 
 This foundation enables the HTTP client (Phase 2B) and endpoint modules (Phase 2C).

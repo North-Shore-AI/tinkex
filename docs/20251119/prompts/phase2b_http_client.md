@@ -22,18 +22,40 @@ This document covers the core `Tinkex.API` module that handles all HTTP communic
 
 ### 1.2 Retry Logic Requirements
 
-The HTTP layer must retry on:
-- 5xx server errors (exponential backoff)
-- 408 timeout (exponential backoff)
-- 429 rate limit (use server-provided Retry-After)
-- Connection errors (exponential backoff)
-- When `x-should-retry: "true"` header is present
-
-The HTTP layer must NOT retry on:
-- 4xx client errors (except 408, 429)
-- When `x-should-retry: "false"` header is present
+Refer to **Phase 2A, Section 2.2 (Retry Semantics)** for the complete retry specification.
 
 **Important**: The x-should-retry header takes precedence over status-based logic. If server says `x-should-retry: "false"` on a 503, we don't retry. If server says `x-should-retry: "true"` on a 400, we do retry.
+
+### 1.3 max_retry_duration_ms Semantics
+
+The `@max_retry_duration_ms` constant (default 30,000ms) bounds the **retry decision window**, not total wall-clock time.
+
+- The check happens before each retry attempt
+- If elapsed time exceeds this value, no more retries are attempted
+- Total request time may exceed this by up to `receive_timeout` (for the final in-flight request)
+- Example: At 29,900ms elapsed, a retry is allowed. If that request takes 120,000ms (receive_timeout), total time = ~150s
+
+### 1.4 Backoff Schedule
+
+Refer to **Phase 2A, Section 2.4 (Backoff Schedule)** for the approximate timing.
+
+**Note on 429 Retry-After**: When a 429 response includes `Retry-After`, the SDK will `Process.sleep` for that duration. This blocks the calling process. See Section 1.5 for implications.
+
+### 1.5 GenServer Usage Caveat
+
+**Warning**: Calling `Tinkex.API` functions from a GenServer will block that GenServer during retries. If non-blocking behavior is needed, wrap calls in `Task.async/await`:
+
+```elixir
+def handle_call({:fetch_data, params}, _from, state) do
+  task = Task.async(fn ->
+    Tinkex.API.post("/data", params, config: state.config)
+  end)
+
+  # Either await with timeout or handle via handle_info
+  result = Task.await(task, 60_000)
+  {:reply, result, state}
+end
+```
 
 ---
 
@@ -101,6 +123,8 @@ defmodule Tinkex.API do
 
   ## Retry Semantics
 
+  See Phase 2A, Section 2.2 for complete specification.
+
   The x-should-retry header takes precedence over all status-based logic:
 
   1. `x-should-retry: "false"` -> Never retry, even for 5xx
@@ -109,6 +133,15 @@ defmodule Tinkex.API do
      - 429: Use Retry-After header
      - 408, 5xx: Exponential backoff
      - Other 4xx: No retry
+
+  ## Telemetry Events
+
+  Events reflect the **final outcome after all retries**, not per-attempt metrics:
+  - `[:tinkex, :http, :request, :start]` - Request initiated
+  - `[:tinkex, :http, :request, :stop]` - Request completed (success or failure)
+  - `[:tinkex, :http, :request, :exception]` - Unexpected exception raised
+
+  For per-attempt observability, enable debug logging.
   """
 
   @behaviour Tinkex.HTTPClient
@@ -123,7 +156,8 @@ defmodule Tinkex.API do
   # Aligned with typical API timeout windows
   @max_retry_delay 8_000
 
-  # Maximum total time for all retries (prevents unbounded waits)
+  # Maximum total time for retry decisions (prevents unbounded waits)
+  # Note: Actual wall-clock may exceed this by receive_timeout
   @max_retry_duration_ms 30_000
 
   # Telemetry event names
@@ -330,6 +364,7 @@ defmodule Tinkex.API do
     error_data = decode_error_body(body)
 
     # Parse error category from response, fall back to status-based inference
+    # Note: RequestErrorCategory.parse/1 MUST return an atom, never {:error, _}
     category = case error_data["category"] do
       cat when is_binary(cat) ->
         Tinkex.Types.RequestErrorCategory.parse(cat)
@@ -595,6 +630,8 @@ test/tinkex/
 
 ### 4.2 API Tests
 
+**Important**: All tests use request counters to verify retry behavior, NOT timing assertions. Tests should be deterministic without `Process.sleep` dependencies.
+
 Note: See Phase 2C for complete test examples with test helpers. Here are the critical tests for the API module:
 
 ```elixir
@@ -630,7 +667,7 @@ defmodule Tinkex.APITest do
       assert Agent.get(counter, & &1) == 3
     end
 
-    test "uses Retry-After for 429", %{bypass: bypass, config: config} do
+    test "retries on 429 with Retry-After", %{bypass: bypass, config: config} do
       {:ok, counter} = Agent.start_link(fn -> 0 end)
 
       Bypass.expect(bypass, fn conn ->
@@ -645,12 +682,9 @@ defmodule Tinkex.APITest do
         end
       end)
 
-      start = System.monotonic_time(:millisecond)
-      {:ok, _result} = Tinkex.API.post("/test", %{}, config: config)
-      elapsed = System.monotonic_time(:millisecond) - start
-
-      # Should have waited ~100ms
-      assert elapsed >= 100
+      {:ok, result} = Tinkex.API.post("/test", %{}, config: config)
+      assert result["result"] == "success"
+      assert Agent.get(counter, & &1) == 2  # Verifies retry happened
     end
 
     test "honors x-should-retry: false even on 5xx", %{bypass: bypass, config: config} do
@@ -704,6 +738,20 @@ defmodule Tinkex.APITest do
 
       {:error, error} = Tinkex.API.post("/test", %{}, config: config)
       assert error.status == 503
+    end
+
+    test "respects max_retries limit", %{bypass: bypass, config: config} do
+      {:ok, counter} = Agent.start_link(fn -> 0 end)
+
+      Bypass.expect(bypass, fn conn ->
+        Agent.get_and_update(counter, &{&1, &1 + 1})
+        Plug.Conn.resp(conn, 503, ~s({"error": "Service unavailable"}))
+      end)
+
+      {:error, error} = Tinkex.API.post("/test", %{}, config: config, max_retries: 1)
+      assert error.status == 503
+      # Initial request + 1 retry = 2 attempts
+      assert Agent.get(counter, & &1) == 2
     end
 
     test "raises without config" do
@@ -766,14 +814,14 @@ Phase 2B is **complete** when ALL of the following are true:
 - [ ] Case-insensitive header parsing
 - [ ] Full jitter (0-1.0x) for exponential backoff
 - [ ] Total timeout to prevent unbounded waits
-- [ ] Telemetry events emitted
+- [ ] Telemetry events emitted (reflect final outcome, not per-attempt)
 - [ ] Structured logging for debugging
 - [ ] Generic error clause handles non-Exception terms
 - [ ] `Tinkex.HTTPClient` behaviour (optional)
 
 ### 5.2 Testing Checklist
 
-- [ ] Retry logic tests (5xx, 408, 429, connection errors)
+- [ ] Retry logic tests (5xx, 408, 429, connection errors) - use counters, not timing
 - [ ] x-should-retry header tests (both true and false)
 - [ ] x-should-retry on 400 test (must retry)
 - [ ] Retry-After parsing tests (retry-after-ms, numeric seconds)
@@ -800,6 +848,8 @@ Phase 2B is **complete** when ALL of the following are true:
 6. **Don't forget total timeout** - Prevents unbounded waits
 7. **Don't assume exception is always an Exception struct** - Handle :timeout, :closed, etc.
 8. **Don't put 429/5xx branches after general {:ok, %Finch.Response{}}** - They become unreachable
+9. **Don't use Process.sleep in tests** - Use request counters for deterministic tests
+10. **Don't use timing assertions in tests** - Verify behavior via state, not elapsed time
 
 ---
 
@@ -841,7 +891,7 @@ Phase 2B implements the core HTTP client:
 
 1. **Correct Retry Logic** - Fixed clause ordering, proper x-should-retry semantics
 2. **Error Handling** - Handles all error types including non-Exception terms
-3. **Telemetry** - Events for observability
+3. **Telemetry** - Events for observability (final outcome after retries)
 4. **Logging** - Structured logging for debugging
 5. **Mockability** - HTTPClient behaviour for testing
 
