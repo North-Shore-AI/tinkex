@@ -113,6 +113,32 @@ params = %Tinkex.Types.SamplingParams{max_tokens: 64, temperature: 0.7}
 - Sampling uses `max_retries: 0` at the HTTP layer: server/user errors (e.g., 5xx, 400) surface immediately so callers can decide how to retry.
 - Multi-tenant safety: different API keys or base URLs use separate rate limiters and stay isolated even when one tenant is backing off.
 
+## Telemetry Quickstart
+
+Tinkex emits telemetry for every HTTP request plus queue state changes during future polling. Attach a console logger while debugging a run:
+
+```elixir
+handler = Tinkex.Telemetry.attach_logger(level: :info)
+
+# ... perform training and sampling operations ...
+
+:ok = Tinkex.Telemetry.detach(handler)
+```
+
+You can also attach your own handler to ship metrics to StatsD/OTLP:
+
+```elixir
+:telemetry.attach(
+  "tinkex-metrics",
+  [[:tinkex, :http, :request, :stop]],
+  fn _event, measurements, metadata, _ ->
+    duration_ms = System.convert_time_unit(measurements.duration, :native, :millisecond)
+    IO.puts("HTTP #{metadata.path} took #{duration_ms}ms (retries=#{metadata.retry_count})")
+  end,
+  nil
+)
+```
+
 ## HTTP Connection Pools
 
 Tinkex uses Finch for HTTP/2 with dedicated pools per operation type (training, sampling, telemetry, etc.). The application supervisor boots these pools automatically when `config :tinkex, :enable_http_pools, true` (the default in `config/config.exs`). For most apps you should keep this enabled so requests reuse the tuned pools. If you need to run in a lightweight environment (e.g., unit tests or host applications that manage their own pools), you can temporarily disable them with:
