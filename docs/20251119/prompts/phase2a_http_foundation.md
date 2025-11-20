@@ -93,7 +93,17 @@ This section defines the HTTP behavior that all Phase 2 documents reference. Sub
 | `:telemetry` | 5 | Prevent telemetry from starving ops |
 | `:default` | 10 | Miscellaneous |
 
-### 2.2 Retry Semantics
+### 2.2 Pool Exhaustion Behavior
+
+When all connections in a pool are busy (e.g., all 5 `:training` connections are in use), Finch/Mint will queue the request. The request waits until a connection becomes available or the `receive_timeout` is reached.
+
+- **Queueing**: Request #6 to the `:training` pool will wait in queue
+- **Timeout**: If no connection frees within `receive_timeout`, the request fails with a timeout error
+- **HTTP/2 Multiplexing**: HTTP/2 allows multiple concurrent streams per connection, so pool exhaustion is less common than with HTTP/1.1
+
+**Monitoring Recommendation**: In production, monitor queue depth and connection utilization via telemetry events to tune pool sizes appropriately.
+
+### 2.3 Retry Semantics
 
 The HTTP layer retries on:
 - 5xx server errors (exponential backoff)
@@ -108,14 +118,14 @@ The HTTP layer does NOT retry on:
 
 **Critical**: The `x-should-retry` header takes precedence over status-based logic.
 
-### 2.3 Header Handling
+### 2.4 Header Handling
 
 All header parsing is case-insensitive per RFC 7230:
 - `x-should-retry`, `X-Should-Retry`, `X-SHOULD-RETRY` are equivalent
 - `retry-after`, `Retry-After`, `RETRY-AFTER` are equivalent
 - `retry-after-ms`, `Retry-After-Ms` are equivalent
 
-### 2.4 Backoff Schedule (Approximate)
+### 2.5 Backoff Schedule (Approximate)
 
 With `@initial_retry_delay = 500ms` and full jitter:
 - Attempt 0 (first retry): 0-500ms
@@ -124,7 +134,7 @@ With `@initial_retry_delay = 500ms` and full jitter:
 - Attempt 3: 0-4000ms
 - Maximum capped at 8000ms
 
-### 2.5 Invariants
+### 2.6 Invariants
 
 1. **Pool keys MUST be generated via `Tinkex.PoolKey.build/2`** - Never construct tuple keys manually
 2. **Config MUST be threaded via `opts[:config]`** - No Application.get_env at call time
@@ -352,8 +362,12 @@ defmodule Tinkex.Config do
   @doc """
   Create a new config with defaults from Application env.
 
-  Environment lookups are wrapped in anonymous functions to ensure runtime
-  evaluation, not compile-time evaluation.
+  ## Why Anonymous Functions for Environment Lookups
+
+  Environment lookups are wrapped in anonymous functions to ensure **runtime**
+  evaluation, not compile-time evaluation. Without this, `Application.get_env`
+  calls would be evaluated during compilation, which breaks CI/CD builds where
+  environment variables aren't set during `mix compile`.
 
   ## Examples
 
@@ -367,7 +381,7 @@ defmodule Tinkex.Config do
 
   ## Raises
 
-      * `ArgumentError` - if api_key is missing
+      * `ArgumentError` - if api_key is missing or base_url is invalid
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
@@ -409,6 +423,10 @@ defmodule Tinkex.Config do
       user_metadata: opts[:user_metadata]
     }
 
+    # Validate URL immediately - don't let invalid URLs slip through to runtime
+    # This catches malformed URLs at config creation, not at first request
+    _ = Tinkex.PoolKey.normalize_base_url(config.base_url)
+
     # Validate during construction - don't let invalid configs slip through
     validate!(config)
   end
@@ -419,8 +437,9 @@ defmodule Tinkex.Config do
   Called automatically by new/1. You typically don't need to call this directly,
   but it's useful if you construct a Config struct manually.
 
-  Note: `validate!/1` only validates presence and types. Invalid base URLs will
-  fail when used in `PoolKey.normalize_base_url/1` (e.g., in `Tinkex.Application`).
+  Note: When called via `new/1`, URL validation has already occurred. When called
+  directly on a manually constructed struct, consider calling
+  `Tinkex.PoolKey.normalize_base_url/1` first to validate the URL format.
 
   ## Raises
 
@@ -447,6 +466,22 @@ defmodule Tinkex.Config do
 
     unless is_integer(config.max_retries) and config.max_retries >= 0 do
       raise ArgumentError, "max_retries must be a non-negative integer, got: #{inspect(config.max_retries)}"
+    end
+
+    # Warn if using a different base_url than the Application config
+    # Requests will use Finch's default pool config, not the tuned pools
+    app_base = Application.get_env(:tinkex, :base_url, "https://tinker.thinkingmachines.dev/services/tinker-prod")
+
+    with {:ok, config_normalized} <- {:ok, Tinkex.PoolKey.normalize_base_url(config.base_url)},
+         {:ok, app_normalized} <- {:ok, Tinkex.PoolKey.normalize_base_url(app_base)} do
+      if config_normalized != app_normalized do
+        require Logger
+        Logger.warning("""
+        Config base_url (#{config_normalized}) differs from Application config (#{app_normalized}).
+        Requests will use Finch's default pool, not tuned pools.
+        For production multi-tenant scenarios, configure additional pools in your supervision tree.
+        """)
+      end
     end
 
     config
@@ -836,6 +871,113 @@ Phase 2B (HTTP Client) requires Phase 2A to be complete:
 ### Required Before Phase 2C
 
 Phase 2C (Endpoints and Testing) requires both Phase 2A and 2B to be complete.
+
+---
+
+## 11. Production Deployment Considerations
+
+This section covers cross-cutting concerns for production deployments. These apply across all Phase 2 components.
+
+### 11.1 Pool Monitoring
+
+Monitor Finch pool health via telemetry. Key metrics:
+
+```elixir
+# Attach to Finch telemetry events
+:telemetry.attach_many("finch-metrics", [
+  [:finch, :request, :start],
+  [:finch, :request, :stop],
+  [:finch, :request, :exception],
+  [:finch, :queue, :start],
+  [:finch, :queue, :stop]
+], &handle_finch_event/4, %{})
+
+# Alert on queue time exceeding threshold
+defp handle_finch_event([:finch, :queue, :stop], measurements, metadata, _config) do
+  if measurements.duration > 5_000_000_000 do  # 5 seconds in native units
+    Logger.warning("Finch queue time exceeded: #{System.convert_time_unit(measurements.duration, :native, :millisecond)}ms")
+  end
+end
+```
+
+### 11.2 Pool Size Tuning
+
+Default pool sizes are starting points. Tune based on:
+
+- **:training (5)**: Increase if you see queue delays during sequential training operations
+- **:sampling (100)**: Increase for higher burst throughput; monitor HTTP/2 stream limits
+- **:session (5)**: Usually sufficient; increase only if running many concurrent sessions
+
+### 11.3 Idempotency Considerations
+
+**Warning**: The HTTP layer retries all 5xx errors by default, including non-idempotent operations (POST). If your API endpoints are not idempotent:
+
+1. Set `max_retries: 0` for non-idempotent operations
+2. Use idempotency keys where supported by the API
+3. Check Phase 4 clients for operation-specific retry policies
+
+### 11.4 Request Cancellation
+
+When a calling process crashes, HTTP requests are **not** automatically cancelled:
+
+- **In-flight requests**: Complete and discard results
+- **Pending retries**: Won't be attempted if caller is dead
+
+For resource-sensitive applications, consider:
+- Wrapping API calls in linked Tasks
+- Using `Task.shutdown/2` with timeout
+- Implementing explicit cancellation tokens
+
+### 11.5 API Key Rotation
+
+To rotate API keys without downtime:
+
+```elixir
+# Create new config with new key
+new_config = Tinkex.Config.new(api_key: new_key)
+
+# Gradually shift traffic to new config
+# Old requests use old_config, new requests use new_config
+# Once all old requests complete, discard old_config
+```
+
+### 11.6 Circuit Breaker Pattern
+
+For production resilience, consider wrapping Tinkex calls with a circuit breaker:
+
+```elixir
+# Example with Fuse library
+defmodule MyApp.TinkerClient do
+  @fuse_name :tinkex_fuse
+  @fuse_options [
+    strategy: {:standard, 10, 10_000},  # 10 failures in 10s
+    refresh: 15_000                      # Reset after 15s
+  ]
+
+  def call(fun) do
+    case :fuse.ask(@fuse_name, :sync) do
+      :ok ->
+        case fun.() do
+          {:error, %Tinkex.Error{type: :api_connection}} = error ->
+            :fuse.melt(@fuse_name)
+            error
+          result ->
+            result
+        end
+      :blown ->
+        {:error, :circuit_open}
+    end
+  end
+end
+```
+
+### 11.7 Future Enhancements
+
+Consider adding for production deployments:
+
+- **Lifecycle diagrams**: Visual documentation of request flow through retry logic
+- **Connection draining**: Graceful shutdown with in-flight request completion
+- **Distributed tracing**: OpenTelemetry integration for cross-service observability
 
 ---
 

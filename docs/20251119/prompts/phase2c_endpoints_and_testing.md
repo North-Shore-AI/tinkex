@@ -140,7 +140,10 @@ defmodule Tinkex.API.Sampling do
   Async sample request.
 
   Uses :sampling pool (high concurrency).
-  Sets max_retries: 0 - SamplingClient handles retries via RateLimiter.
+  Sets max_retries: 0 - Phase 4's SamplingClient will implement client-side
+  rate limiting and retry logic via RateLimiter. The HTTP layer doesn't retry
+  so that the higher-level client can make intelligent retry decisions based
+  on rate limit state.
 
   Note: Named `sample_async` for consistency with Elixir naming conventions
   (adjective_noun or verb_object patterns). The API endpoint remains /api/v1/asample.
@@ -395,17 +398,22 @@ defmodule Tinkex.API.Telemetry do
   @spec send(map(), keyword()) :: :ok
   def send(request, opts) do
     Task.start(fn ->
-      opts =
-        opts
-        |> Keyword.put(:pool_type, :telemetry)
-        |> Keyword.put(:max_retries, 1)
+      try do
+        opts =
+          opts
+          |> Keyword.put(:pool_type, :telemetry)
+          |> Keyword.put(:max_retries, 1)
 
-      result = Tinkex.API.post("/api/v1/telemetry", request, opts)
+        result = Tinkex.API.post("/api/v1/telemetry", request, opts)
 
-      case result do
-        {:ok, _} -> :ok
-        {:error, error} ->
-          Logger.warning("Telemetry send failed: #{inspect(error)}")
+        case result do
+          {:ok, _} -> :ok
+          {:error, error} ->
+            Logger.warning("Telemetry send failed: #{inspect(error)}")
+        end
+      rescue
+        e ->
+          Logger.error("Telemetry task crashed: #{Exception.format(:error, e, __STACKTRACE__)}")
       end
     end)
 
@@ -529,11 +537,16 @@ defmodule Tinkex.HTTPCase do
   via on_exit.
   """
   def stub_sequence(bypass, responses) do
-    {:ok, counter} = Agent.start_link(fn -> 0 end)
+    # Use unique name to avoid conflicts in concurrent tests
+    {:ok, counter} = Agent.start_link(fn -> 0 end, name: :"counter_#{:erlang.unique_integer([:positive])}")
 
-    # Register cleanup for the counter agent
+    # Register cleanup for the counter agent with proper error handling
     ExUnit.Callbacks.on_exit(fn ->
-      if Process.alive?(counter), do: Agent.stop(counter)
+      try do
+        Agent.stop(counter, :normal, 100)
+      catch
+        :exit, _ -> :ok  # Agent already stopped or crashed
+      end
     end)
 
     Bypass.expect(bypass, fn conn ->
@@ -756,6 +769,21 @@ defmodule Tinkex.APITest do
 
       assert error.type == :api_connection
     end
+
+    test "handles connection closed mid-request", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, fn conn ->
+        # Close connection before sending response
+        Bypass.down(bypass)
+        conn
+      end)
+
+      {:error, error} = Tinkex.API.post("/test", %{},
+        config: config,
+        max_retries: 0
+      )
+
+      assert error.type == :api_connection
+    end
   end
 
   describe "telemetry events" do
@@ -790,6 +818,40 @@ defmodule Tinkex.APITest do
 
       assert_receive {:telemetry, [:tinkex, :http, :request, :start], _, metadata}
       assert metadata.pool_type == :training
+    end
+
+    test "different endpoints use different pool_type metadata", %{bypass: bypass, config: config} do
+      attach_telemetry([[:tinkex, :http, :request, :start]])
+
+      # Training endpoint
+      Bypass.expect_once(bypass, "POST", "/api/v1/forward_backward", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"result": "ok"}))
+      end)
+
+      Tinkex.API.Training.forward_backward(%{}, config: config)
+      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _, %{pool_type: :training}}
+
+      # Sampling endpoint
+      Bypass.expect_once(bypass, "POST", "/api/v1/asample", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"result": "ok"}))
+      end)
+
+      Tinkex.API.Sampling.sample_async(%{}, config: config)
+      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _, %{pool_type: :sampling}}
+
+      # Session endpoint
+      Bypass.expect_once(bypass, "POST", "/api/v1/create_session", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"session_id": "test"}))
+      end)
+
+      Tinkex.API.Session.create(%{}, config: config)
+      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _, %{pool_type: :session}}
     end
   end
 

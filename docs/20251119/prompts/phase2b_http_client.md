@@ -43,17 +43,41 @@ Refer to **Phase 2A, Section 2.4 (Backoff Schedule)** for the approximate timing
 
 ### 1.5 GenServer Usage Caveat
 
-**Warning**: Calling `Tinkex.API` functions from a GenServer will block that GenServer during retries. If non-blocking behavior is needed, wrap calls in `Task.async/await`:
+**Warning**: Calling `Tinkex.API` functions from a GenServer will block that GenServer during retries. `Task.await/2` also blocks. For truly non-blocking behavior, use `Task.async` with `handle_info`:
 
 ```elixir
-def handle_call({:fetch_data, params}, _from, state) do
+def handle_call({:fetch_data, params}, from, state) do
+  # Spawn task - don't await here
   task = Task.async(fn ->
     Tinkex.API.post("/data", params, config: state.config)
   end)
 
-  # Either await with timeout or handle via handle_info
-  result = Task.await(task, 60_000)
-  {:reply, result, state}
+  # Store the caller and task ref, return immediately
+  {:noreply, Map.put(state, :pending, {from, task.ref})}
+end
+
+# Handle the task result when it completes
+def handle_info({ref, result}, state) do
+  case Map.pop(state, :pending) do
+    {{from, ^ref}, new_state} ->
+      # Demonitor and flush to avoid :DOWN message
+      Process.demonitor(ref, [:flush])
+      GenServer.reply(from, result)
+      {:noreply, new_state}
+    _ ->
+      {:noreply, state}
+  end
+end
+
+# Handle task crashes
+def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
+  case Map.pop(state, :pending) do
+    {{from, ^ref}, new_state} ->
+      GenServer.reply(from, {:error, reason})
+      {:noreply, new_state}
+    _ ->
+      {:noreply, state}
+  end
 end
 ```
 
@@ -336,11 +360,13 @@ defmodule Tinkex.API do
         {:ok, data}
 
       {:error, reason} ->
+        # JSON decode failures are non-retryable user errors
+        # (server sent invalid JSON response)
         {:error, build_error(
           "JSON decode error: #{inspect(reason)}",
           :validation,
           nil,
-          nil,
+          :user,
           %{body: body}
         )}
     end
@@ -371,7 +397,12 @@ defmodule Tinkex.API do
       cat when is_binary(cat) ->
         Tinkex.Types.RequestErrorCategory.parse(cat)
       _ ->
-        if status >= 400 and status < 500, do: :user, else: :server
+        cond do
+          status >= 400 and status < 500 -> :user
+          status >= 500 and status < 600 -> :server
+          status >= 300 and status < 400 -> :unknown  # Redirects (shouldn't reach here normally)
+          true -> :unknown
+        end
     end
 
     # Check for retry-after on any response
@@ -413,12 +444,17 @@ defmodule Tinkex.API do
   end
 
   # Generic error handling - safely handle both Exception structs and other terms
-  # Some libraries return {:error, :timeout} or {:error, :closed}
+  # Some libraries return {:error, :timeout} or {:error, :closed} or tuples
   defp handle_response({:error, exception}) do
-    message = case exception do
-      %_{} -> Exception.message(exception)
-      atom when is_atom(atom) -> Atom.to_string(atom)
-      other -> inspect(other)
+    message = cond do
+      is_struct(exception) and function_exported?(exception.__struct__, :message, 1) ->
+        Exception.message(exception)
+      is_atom(exception) ->
+        Atom.to_string(exception)
+      is_binary(exception) ->
+        exception
+      true ->
+        inspect(exception)
     end
 
     Logger.warning("Request error: #{message}")
@@ -603,8 +639,14 @@ defmodule Tinkex.API do
           value ->
             case Integer.parse(value) do
               {seconds, _} -> seconds * 1000
-              # HTTP Date format not supported in v1.0, use default
-              :error -> 1000
+              # HTTP-date format (RFC 7231) not supported in v1.0
+              # Example: "Wed, 21 Oct 2015 07:28:00 GMT"
+              # For production, consider implementing with:
+              #   {:ok, future_time} = parse_http_date(value)
+              #   max(0, future_time - System.system_time(:second)) * 1000
+              :error ->
+                Logger.warning("Unsupported Retry-After format: #{value}. Using default 1s.")
+                1000
             end
         end
 
