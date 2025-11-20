@@ -167,6 +167,10 @@ defmodule Tinkex.API do
   - `[:tinkex, :http, :request, :stop]` - Request completed (success or failure)
   - `[:tinkex, :http, :request, :exception]` - Unexpected exception raised
 
+  The `:stop` event includes `retry_count` in metadata, allowing monitoring of
+  request flakiness (e.g., "% of requests requiring retry") without full per-attempt
+  logging.
+
   For per-attempt observability, enable debug logging.
   """
 
@@ -232,7 +236,7 @@ defmodule Tinkex.API do
 
     request = Finch.build(:post, url, headers, Jason.encode!(body))
 
-    execute_with_telemetry(
+    {result, _retry_count} = execute_with_telemetry(
       fn ->
         with_retries(
           fn ->
@@ -246,7 +250,8 @@ defmodule Tinkex.API do
       end,
       metadata
     )
-    |> handle_response()
+
+    handle_response(result)
   end
 
   @doc """
@@ -273,7 +278,7 @@ defmodule Tinkex.API do
 
     request = Finch.build(:get, url, headers)
 
-    execute_with_telemetry(
+    {result, _retry_count} = execute_with_telemetry(
       fn ->
         with_retries(
           fn ->
@@ -287,7 +292,8 @@ defmodule Tinkex.API do
       end,
       metadata
     )
-    |> handle_response()
+
+    handle_response(result)
   end
 
   # Telemetry wrapper
@@ -297,7 +303,7 @@ defmodule Tinkex.API do
     :telemetry.execute(@telemetry_start, %{system_time: System.system_time()}, metadata)
 
     try do
-      result = fun.()
+      {result, retry_count} = fun.()
       duration = System.monotonic_time() - start_time
 
       result_type = case result do
@@ -309,7 +315,9 @@ defmodule Tinkex.API do
       :telemetry.execute(
         @telemetry_stop,
         %{duration: duration},
-        Map.put(metadata, :result, result_type)
+        metadata
+        |> Map.put(:result, result_type)
+        |> Map.put(:retry_count, retry_count)
       )
 
       result
@@ -494,6 +502,9 @@ defmodule Tinkex.API do
 
   # Main retry entry point
   #
+  # Returns {result, retry_count} where retry_count is the number of retries
+  # (0 if succeeded on first attempt).
+  #
   # Note on Process.sleep: This blocks the calling process. If calling from a
   # GenServer, the GenServer will be blocked during retries. For non-blocking
   # retries, consider wrapping calls in Task.async/await.
@@ -510,11 +521,12 @@ defmodule Tinkex.API do
     if elapsed >= @max_retry_duration_ms do
       Logger.warning("Retry timeout exceeded after #{elapsed}ms")
 
-      {:error, %Tinkex.Error{
+      error = {:error, %Tinkex.Error{
         message: "Retry timeout exceeded (#{@max_retry_duration_ms}ms)",
         type: :api_connection,
         data: %{elapsed_ms: elapsed, attempts: attempt}
       }}
+      {error, attempt}
     else
       case fun.() do
         # All HTTP responses go through should_retry? helper
@@ -527,7 +539,7 @@ defmodule Tinkex.API do
               do_retry(fun, max_retries, attempt + 1, start_time)
 
             :no_retry ->
-              response
+              {response, attempt}
           end
 
         # Connection/transport errors - always retry if under limit
@@ -538,7 +550,7 @@ defmodule Tinkex.API do
             Process.sleep(delay)
             do_retry(fun, max_retries, attempt + 1, start_time)
           else
-            error
+            {error, attempt}
           end
 
         {:error, %Mint.HTTPError{reason: reason}} = error ->
@@ -548,7 +560,7 @@ defmodule Tinkex.API do
             Process.sleep(delay)
             do_retry(fun, max_retries, attempt + 1, start_time)
           else
-            error
+            {error, attempt}
           end
 
         # Timeout errors - retry if under limit
@@ -559,12 +571,12 @@ defmodule Tinkex.API do
             Process.sleep(delay)
             do_retry(fun, max_retries, attempt + 1, start_time)
           else
-            error
+            {error, attempt}
           end
 
         # All other responses - no retry
         other ->
-          other
+          {other, attempt}
       end
     end
   end

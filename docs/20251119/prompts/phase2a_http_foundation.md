@@ -204,6 +204,11 @@ defmodule Tinkex.PoolKey do
   Removes non-standard ports (80 for http, 443 for https) and
   downcases the host for case-insensitive matching per RFC 7230.
 
+  **Important:** The normalized URL is for **connection pooling only**. It strips
+  the path component (e.g., `/v1`) because Finch pools connections per host, not
+  per path. The actual HTTP request URL must preserve the full path from the
+  Config's `base_url`. See `Tinkex.API.build_url/2` for request URL construction.
+
   ## Examples
 
       iex> Tinkex.PoolKey.normalize_base_url("https://example.com:443")
@@ -214,6 +219,10 @@ defmodule Tinkex.PoolKey do
 
       iex> Tinkex.PoolKey.normalize_base_url("https://example.com")
       "https://example.com"
+
+      # Path is stripped for pool key (pooling is per-host)
+      iex> Tinkex.PoolKey.normalize_base_url("https://api.example.com/v1")
+      "https://api.example.com"
 
   ## Raises
 
@@ -362,12 +371,14 @@ defmodule Tinkex.Config do
   @doc """
   Create a new config with defaults from Application env.
 
-  ## Why Anonymous Functions for Environment Lookups
+  ## max_retries Semantics
 
-  Environment lookups are wrapped in anonymous functions to ensure **runtime**
-  evaluation, not compile-time evaluation. Without this, `Application.get_env`
-  calls would be evaluated during compilation, which breaks CI/CD builds where
-  environment variables aren't set during `mix compile`.
+  The `max_retries` value specifies the number of **additional** retry attempts
+  after the initial request fails. With `max_retries: 2` (the default):
+  - Initial request (attempt 0)
+  - First retry (attempt 1)
+  - Second retry (attempt 2)
+  - **Total: 3 attempts**
 
   ## Examples
 
@@ -385,41 +396,30 @@ defmodule Tinkex.Config do
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
-    # Wrap env lookups in anonymous functions to ensure runtime evaluation
-    # This prevents compile-time evaluation which would break CI/CD builds
-    # where env vars aren't set during compilation
-    get_api_key = fn ->
-      opts[:api_key] ||
-        Application.get_env(:tinkex, :api_key) ||
-        System.get_env("TINKER_API_KEY")
-    end
+    # Standard Elixir idiom - Application.get_env in function body
+    # is always evaluated at runtime, not compile time
+    api_key = opts[:api_key] ||
+      Application.get_env(:tinkex, :api_key) ||
+      System.get_env("TINKER_API_KEY")
 
-    get_base_url = fn ->
-      opts[:base_url] ||
-        Application.get_env(:tinkex, :base_url, @default_base_url)
-    end
+    base_url = opts[:base_url] ||
+      Application.get_env(:tinkex, :base_url, @default_base_url)
 
-    get_http_pool = fn ->
-      opts[:http_pool] ||
-        Application.get_env(:tinkex, :http_pool, Tinkex.HTTP.Pool)
-    end
+    http_pool = opts[:http_pool] ||
+      Application.get_env(:tinkex, :http_pool, Tinkex.HTTP.Pool)
 
-    get_timeout = fn ->
-      opts[:timeout] ||
-        Application.get_env(:tinkex, :timeout, @default_timeout)
-    end
+    timeout = opts[:timeout] ||
+      Application.get_env(:tinkex, :timeout, @default_timeout)
 
-    get_max_retries = fn ->
-      opts[:max_retries] ||
-        Application.get_env(:tinkex, :max_retries, @default_max_retries)
-    end
+    max_retries = opts[:max_retries] ||
+      Application.get_env(:tinkex, :max_retries, @default_max_retries)
 
     config = %__MODULE__{
-      base_url: get_base_url.(),
-      api_key: get_api_key.(),
-      http_pool: get_http_pool.(),
-      timeout: get_timeout.(),
-      max_retries: get_max_retries.(),
+      base_url: base_url,
+      api_key: api_key,
+      http_pool: http_pool,
+      timeout: timeout,
+      max_retries: max_retries,
       user_metadata: opts[:user_metadata]
     }
 
