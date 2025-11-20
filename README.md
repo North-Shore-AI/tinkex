@@ -193,13 +193,13 @@ mix test
 # Run linting/formatting/type checks + escript build
 make qa
 
-# Generate documentation
+# Generate documentation (dev-only; requires :ex_doc)
 mix docs
 ```
 
 ## Quality & Verification
 
-Continuous verification commands (also referenced in `docs/20251119/port_research/07_porting_strategy.md`):
+Continuous verification commands (also referenced in `docs/20251119/port_research/07_porting_strategy.md`). Run `mix docs` in CI or locally to ensure guides/ExDoc compile; it relies on dev-only deps and is not needed in production deployments.
 
 ```bash
 make qa
@@ -209,6 +209,7 @@ mix credo
 mix test
 mix dialyzer
 MIX_ENV=prod mix escript.build
+mix docs
 ```
 
 ## Documentation
