@@ -35,7 +35,7 @@
      - `forward_backward/4` with chunked data.
      - `optim_step/2`
      - `save_weights_for_sampler/2` (if implemented; stub response otherwise — e.g., Bypass returns minimal JSON and client yields `{:ok, map}` or the call is a no-op that still flows).
-     - Ensure tasks return `{:ok, result}` and metrics combine correctly.
+     - Ensure tasks return `{:ok, result}` and metrics combine correctly. In the integration test, call `forward_backward/4` and `optim_step/2` and then use `Tinkex.Future.await/2` or `Task.await/2` on the returned Tasks to assert the `{:ok, result}` shape.
 2. **Example Script (optional but encouraged)**
    - Under `examples/` or `docs/guides/`, create a script showing how to run the training loop against staging endpoints.
 3. **Performance Hooks**
@@ -51,6 +51,7 @@
   - `forward_backward` responses (multiple chunks).
   - `optim_step` response.
   - `save_weights` response.
+- Heartbeats are driven via `Process.send_after`; stub the first heartbeat call or shorten the interval so tests do not rely on real-time timers.
 - In `training_loop_test.exs`, start the application (`Application.ensure_all_started(:tinkex)`) so Finch, ETS tables, SessionManager, and supervisors are running before invoking ServiceClient.
 - Ensure entire flow runs via real module interactions (ServiceClient → TrainingClient). No direct GenServer calls.
 - Assert metrics reduction via the final `ForwardBackwardOutput`; queue-state behaviour is already covered by earlier future-polling tests and telemetry.
