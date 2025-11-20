@@ -602,10 +602,51 @@ defp deps do
     {:telemetry, "~> 1.2"},
     # Test dependencies
     {:bypass, "~> 2.1", only: :test},
-    {:supertester, "~> 0.3.0", only: :test}  # For future OTP-level tests; Phase 2 uses ExUnit + Bypass only
+    {:supertester, "~> 0.3.1", only: :test}  # Isolation + concurrent harness for every Phase 2 test
   ]
 end
 ```
+
+### 5.5 Supertester Harness for Tests
+
+Supertester v0.3.1 is now a **required** part of the Phase 2 workflow. It gives us deterministic
+async orchestration, telemetry hooks, and chaos tooling so the HTTP layer can be hardened without
+`Process.sleep/1`.
+
+1. **test/test_helper.exs**
+
+   ```elixir
+   require Logger
+
+   ExUnit.start()
+   Application.ensure_all_started(:supertester)
+
+   # Optional: mirror ConcurrentHarness telemetry into the existing logger
+   :telemetry.attach(
+     "supertester-phase2",
+     [:supertester, :concurrent, :scenario, :stop],
+     fn _event, %{duration_ms: duration}, metadata, _ ->
+       Logger.info("[supertester] #{metadata.scenario_id} finished in #{duration}ms (#{metadata[:status] || :ok})")
+     end,
+     nil
+   )
+   ```
+
+2. **Test modules**: replace `use ExUnit.Case` with Supertester’s adapter so every test runs with
+   isolation-aware setup/teardown.
+
+   ```elixir
+   defmodule Tinkex.PoolKeyTest do
+     use Supertester.ExUnitFoundation, isolation: :full_isolation
+     import Supertester.Assertions
+     # ...
+   end
+   ```
+
+3. **Concurrent cases**: when you need more than ExUnit assertions (e.g., multi-process retries),
+   call into `Supertester.ConcurrentHarness` or `Supertester.OTPHelpers` directly from the test body.
+   Phase 2A only needs isolation, but getting the harness wired now keeps the prompts consistent
+   with 2B/2C.
 
 ---
 
@@ -623,7 +664,7 @@ test/tinkex/
 
 ```elixir
 defmodule Tinkex.PoolKeyTest do
-  use ExUnit.Case, async: true
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
 
   alias Tinkex.PoolKey
 
@@ -702,7 +743,7 @@ end
 
 ```elixir
 defmodule Tinkex.ConfigTest do
-  use ExUnit.Case
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
 
   alias Tinkex.Config
 
@@ -811,7 +852,7 @@ Phase 2A is **complete** when ALL of the following are true:
 - [ ] `Tinkex.Config` - Multi-tenancy struct with @enforce_keys and validate! in new/1
 - [ ] `Tinkex.Application` - Finch pools with tuple keys for all pool types
 - [ ] `mix.exs` - Application module wired up with `mod:` option
-- [ ] `mix.exs` - Dependencies include `{:supertester, "~> 0.3.0", only: :test}`
+- [ ] `mix.exs` + `test/test_helper.exs` - Supertester `~> 0.3.1` dependency and harness wiring in place
 
 ### 7.2 Testing Checklist
 
@@ -819,6 +860,7 @@ Phase 2A is **complete** when ALL of the following are true:
 - [ ] PoolKey validation tests (invalid URLs raise ArgumentError)
 - [ ] Config creation and validation tests
 - [ ] Config error cases (missing api_key, invalid values)
+- [ ] Tests run under `Supertester.ExUnitFoundation` (no raw `ExUnit.Case`)
 - [ ] All tests pass: `mix test test/tinkex/pool_key_test.exs test/tinkex/config_test.exs`
 
 ### 7.3 Type Safety Checklist

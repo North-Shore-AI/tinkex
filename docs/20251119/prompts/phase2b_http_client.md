@@ -676,6 +676,12 @@ end
 
 ## 4. Test-Driven Development
 
+### 4.0 Supertester Integration
+
+- `test/tinkex/api/api_test.exs` (and any helper modules) must `use Supertester.ExUnitFoundation, isolation: :full_isolation`. This ensures Finch pools, Bypass servers, and helper Agents are tracked per test without cross-pollution.
+- The concurrency + chaos coverage (20 concurrent requests, telemetry fire-and-forget checks) runs through `Supertester.ConcurrentHarness`. Phase 2C introduces `Tinkex.TestSupport.APIWorker`, a GenServer that wraps `Tinkex.API` and `use Supertester.TestableGenServer`, enabling the harness to orchestrate HTTP requests deterministically, monitor mailboxes, and emit telemetry for every run.
+- When asserting on async telemetry, wrap the API call with `Supertester.MessageHarness.trace_messages/3` so you record mailbox traffic instead of relying on `Process.sleep/1`. The helper from Phase 2C exposes `attach_telemetry/1` to pair nicely with Supertester’s instrumentation.
+
 ### 4.1 Test Structure
 
 ```
@@ -712,7 +718,7 @@ Tests are defined in `test/tinkex/api/api_test.exs` as specified in Phase 2C. Th
 **Connection error tests:**
 - Handles connection refused (Bypass.down)
 
-**Note**: The concrete 408 test is defined in Phase 2C's API test module.
+**Note**: The concrete 408 test and the Supertester-based concurrency/telemetry scaffolding live in Phase 2C's API test module.
 
 ---
 
@@ -742,6 +748,7 @@ Phase 2B is **complete** when ALL of the following are true:
 - [ ] Case-insensitive header tests
 - [ ] Error categorization tests
 - [ ] Config threading tests (no Application.get_env at call time)
+- [ ] API test module leverages `Supertester.ExUnitFoundation` + ConcurrentHarness coverage (see Phase 2C)
 - [ ] All tests pass: `mix test test/tinkex/api/`
 
 ### 5.3 Type Safety Checklist
@@ -764,6 +771,7 @@ Phase 2B is **complete** when ALL of the following are true:
 8. **Don't put 429/5xx branches after general {:ok, %Finch.Response{}}** - They become unreachable
 9. **Don't use Process.sleep in tests** - Use request counters for deterministic tests
 10. **Don't use timing assertions in tests** - Verify behavior via state, not elapsed time
+11. **Don't skip the Supertester harness** - concurrent/telemetry tests must run via `Supertester.ConcurrentHarness`
 
 ---
 

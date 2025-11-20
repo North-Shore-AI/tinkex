@@ -54,7 +54,8 @@ lib/tinkex/api/
 
 test/
 ├── support/
-│   └── http_case.ex  # Tinkex.HTTPCase test helper
+│   ├── http_case.ex  # Tinkex.HTTPCase + Supertester helper macros
+│   └── api_worker.ex # GenServer wrapper for Supertester.ConcurrentHarness
 └── tinkex/api/
     ├── api_test.exs
     ├── training_test.exs
@@ -443,7 +444,15 @@ end
 
 ## 4. Test Suite
 
-### 4.1 Test Helper Module
+### 4.0 Supertester Setup
+
+- Every HTTP-focused test module `use`s `Tinkex.HTTPCase`, which now injects `Supertester.ExUnitFoundation, isolation: :full_isolation` plus the OTP/test helpers we need. This guarantees deterministic cleanup of Finch pools, Bypass servers, Agents, and spawned Tasks.
+- `test/test_helper.exs` must both start Supertester (`Application.ensure_all_started(:supertester)`) and load the helper modules. The snippet below shows the exact wiring.
+- High-concurrency/verifier tests run through `Supertester.ConcurrentHarness` using a dedicated GenServer (`Tinkex.TestSupport.APIWorker`) that wraps `Tinkex.API`. The harness lets us mix chaos hooks, mailbox sampling, telemetry, and performance assertions without time-based sleeps.
+- Async telemetry behavior (e.g., the fire-and-forget API) should use `Supertester.MessageHarness.trace_messages/3` when you need deterministic mailbox snapshots.
+- Bypass still requires synchronous tests (`async: false`), but Supertester isolation keeps individual runs hermetic even while the overall suite runs in parallel.
+
+### 4.1 Test Helper Modules
 
 Create a test helper to reduce boilerplate:
 
@@ -460,6 +469,10 @@ defmodule Tinkex.HTTPCase do
 
   using do
     quote do
+      use Supertester.ExUnitFoundation, isolation: :full_isolation
+      import Supertester.Assertions
+      import Supertester.MessageHarness
+      alias Supertester.ConcurrentHarness
       import Tinkex.HTTPCase
     end
   end
@@ -592,14 +605,64 @@ defmodule Tinkex.HTTPCase do
 end
 ```
 
+#### Supertester API Worker
+
+This GenServer powers the ConcurrentHarness scenarios. It wraps `Tinkex.API` calls so the harness can
+drive HTTP requests via `cast_and_sync/2`, track invariants, and emit telemetry without bespoke glue.
+
+```elixir
+# test/support/api_worker.ex
+defmodule Tinkex.TestSupport.APIWorker do
+  @moduledoc """
+  Simple GenServer wrapper around Tinkex.API for use with Supertester.ConcurrentHarness.
+  """
+
+  use GenServer
+  use Supertester.TestableGenServer
+
+  def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+
+  @impl true
+  def init(opts) do
+    {:ok, Map.new(opts)}
+  end
+
+  @impl true
+  def handle_call({:post, path, payload}, from, state) do
+    handle_call({:post, path, payload, []}, from, state)
+  end
+
+  @impl true
+  def handle_call({:post, path, payload, extra_opts}, _from, %{config: config} = state) do
+    result = Tinkex.API.post(path, payload, Keyword.put_new(extra_opts, :config, config))
+    {:reply, result, state}
+  end
+
+  @impl true
+  def handle_call({:get, path}, from, state) do
+    handle_call({:get, path, []}, from, state)
+  end
+
+  @impl true
+  def handle_call({:get, path, extra_opts}, _from, %{config: config} = state) do
+    result = Tinkex.API.get(path, Keyword.put_new(extra_opts, :config, config))
+    {:reply, result, state}
+  end
+end
+```
+
 Don't forget to add to test_helper.exs:
 
 ```elixir
 # test/test_helper.exs
+require Logger
+
 ExUnit.start()
+Application.ensure_all_started(:supertester)
 
 # Load test support modules
 Code.require_file("support/http_case.ex", __DIR__)
+Code.require_file("support/api_worker.ex", __DIR__)
 ```
 
 ### 4.2 Complete API Test Suite
@@ -609,8 +672,7 @@ Code.require_file("support/http_case.ex", __DIR__)
 ```elixir
 defmodule Tinkex.APITest do
   # NOT async: true - Bypass can be fussy with concurrent tests
-  use ExUnit.Case
-  import Tinkex.HTTPCase
+  use Tinkex.HTTPCase, async: false
 
   setup :setup_http_client
 
@@ -856,7 +918,7 @@ defmodule Tinkex.APITest do
   end
 
   describe "concurrent requests" do
-    test "handles 20 concurrent requests", %{bypass: bypass, config: config} do
+    test "handles 20 concurrent requests via Supertester harness", %{bypass: bypass, config: config} do
       {:ok, counter} = Agent.start_link(fn -> 0 end)
 
       Bypass.expect(bypass, fn conn ->
@@ -866,16 +928,31 @@ defmodule Tinkex.APITest do
         |> Plug.Conn.resp(200, ~s({"result": "ok"}))
       end)
 
-      tasks = for i <- 1..20 do
-        Task.async(fn ->
-          Tinkex.API.post("/test", %{id: i}, config: config)
-        end)
-      end
+      operations =
+        for idx <- 1..4 do
+          {:call, {:post, "/test", %{sequence: idx}}}
+        end
 
-      results = Task.await_many(tasks, 10_000)
-      assert Enum.all?(results, &match?({:ok, _}, &1))
+      scenario =
+        ConcurrentHarness.simple_genserver_scenario(
+          Tinkex.TestSupport.APIWorker,
+          operations,
+          5,
+          setup: fn ->
+            {:ok, pid} = GenServer.start_link(Tinkex.TestSupport.APIWorker, %{config: config})
+            {:ok, pid, %{config: config}}
+          end,
+          cleanup: fn pid, _ -> GenServer.stop(pid, :normal) end,
+          mailbox: [sampling_interval: 1],
+          performance_expectations: [max_time_ms: 2_000],
+          invariant: fn _pid, ctx ->
+            assert ctx.metrics.total_operations == 20
+          end,
+          metadata: %{test: :concurrent_requests}
+        )
 
-      # Verify all 20 requests were actually made
+      assert {:ok, report} = ConcurrentHarness.run(scenario)
+      assert report.metrics.total_operations == 20
       assert Agent.get(counter, & &1) == 20
 
       Agent.stop(counter)
@@ -890,8 +967,7 @@ Example test for Training endpoints:
 
 ```elixir
 defmodule Tinkex.API.TrainingTest do
-  use ExUnit.Case
-  import Tinkex.HTTPCase
+  use Tinkex.HTTPCase, async: false
 
   setup :setup_http_client
 
@@ -946,27 +1022,26 @@ end
 
 ```elixir
 defmodule Tinkex.API.TelemetryTest do
-  use ExUnit.Case
-  import Tinkex.HTTPCase
+  use Tinkex.HTTPCase, async: false
 
   setup :setup_http_client
 
   describe "send/2" do
     test "fires and forgets asynchronously", %{bypass: bypass, config: config} do
-      test_pid = self()
-
       Bypass.expect_once(bypass, "POST", "/api/v1/telemetry", fn conn ->
-        send(test_pid, :telemetry_received)
+        send(self(), :telemetry_received)
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(200, ~s({"status": "ok"}))
       end)
 
-      result = Tinkex.API.Telemetry.send(%{event: "test"}, config: config)
-      assert result == :ok
+      report =
+        trace_messages(self(), fn ->
+          result = Tinkex.API.Telemetry.send(%{event: "test"}, config: config)
+          assert result == :ok
+        end)
 
-      # Wait for async task to complete
-      assert_receive :telemetry_received, 1000
+      assert :telemetry_received in report.messages
     end
   end
 
@@ -1000,15 +1075,17 @@ Phase 2C is **complete** when ALL of the following are true:
 - [ ] `Tinkex.API.Service` - create_model, create_sampling_session
 - [ ] `Tinkex.API.Weights` - save_weights, load_weights, save_weights_for_sampler
 - [ ] `Tinkex.API.Telemetry` - send (fire-and-forget with `inspect(error)`), send_sync
-- [ ] `Tinkex.HTTPCase` - test helper module with @spec for setup_http_client
+- [ ] `Tinkex.HTTPCase` - test helper module with Supertester wiring + `setup_http_client/1`
+- [ ] `Tinkex.TestSupport.APIWorker` - GenServer harness for `Supertester.ConcurrentHarness`
 
 ### 5.2 Testing Checklist
 
 - [ ] All retry logic tests from Phase 2B pass
 - [ ] x-should-retry on 400 test passes
 - [ ] Case-insensitive header tests pass
-- [ ] Concurrent request tests (20 concurrent) pass
-- [ ] Telemetry event tests pass
+- [ ] All HTTP-focused modules `use Tinkex.HTTPCase` (Supertester isolation)
+- [ ] Concurrent request test uses `Supertester.ConcurrentHarness` + `Tinkex.TestSupport.APIWorker` and passes (20 ops)
+- [ ] Telemetry event tests pass using deterministic message tracing (no sleeps)
 - [ ] Each endpoint module has at least endpoint verification tests
 - [ ] All Bypass-based tests are NOT async: true
 - [ ] No Process.sleep or :timer.sleep in tests (use observable mechanisms)
@@ -1043,6 +1120,7 @@ Phase 2C is **complete** when ALL of the following are true:
 8. **Don't forget on_exit cleanup for Agents** - stub_sequence must clean up
 9. **Don't use Process.sleep or :timer.sleep in tests** - All timing must use observable mechanisms (messages, counters, Bypass.expect_once)
 10. **Don't use timing assertions** - Verify behavior via state, not elapsed time
+11. **Don't skip the Supertester harness** - Always go through `Tinkex.HTTPCase` + `Tinkex.TestSupport.APIWorker` for concurrency/telemetry coverage
 
 ---
 
