@@ -12,12 +12,12 @@ config =
   )
 
 {:ok, service} = Tinkex.ServiceClient.start_link(config: config)
-{:ok, training} = Tinkex.ServiceClient.create_lora_training_client(service, base_model: "meta-llama/Meta-Llama-3-8B")
+{:ok, training} = Tinkex.ServiceClient.create_lora_training_client(service, base_model: "meta-llama/Llama-3.1-8B")
 
 {:ok, prompt} =
   Tinkex.Types.ModelInput.from_text(
     "Fine-tuning sample prompt",
-    model_name: "meta-llama/Meta-Llama-3-8B",
+    model_name: "meta-llama/Llama-3.1-8B",
     training_client: training
   )
 

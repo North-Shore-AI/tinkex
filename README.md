@@ -48,7 +48,7 @@ config :tinkex,
 {:ok, service_client} = Tinkex.ServiceClient.new()
 {:ok, training_client} = Tinkex.ServiceClient.create_lora_training_client(
   service_client,
-  base_model: "Qwen/Qwen2.5-7B"
+  base_model: "meta-llama/Llama-3.1-8B"
 )
 
 # Prepare training data
@@ -102,7 +102,7 @@ Create a `ServiceClient`, derive a `SamplingClient`, and issue sampling requests
 config = Tinkex.Config.new(api_key: "tenant-key")
 
 {:ok, service} = Tinkex.ServiceClient.start_link(config: config)
-{:ok, sampler} = Tinkex.ServiceClient.create_sampling_client(service, base_model: "Qwen/Qwen2.5-7B")
+{:ok, sampler} = Tinkex.ServiceClient.create_sampling_client(service, base_model: "meta-llama/Llama-3.1-8B")
 
 prompt = Tinkex.Types.ModelInput.from_ints([1, 2, 3])
 params = %Tinkex.Types.SamplingParams{max_tokens: 64, temperature: 0.7}
@@ -223,7 +223,7 @@ Build the CLI escript (production settings) and invoke the checkpoint workflow:
 MIX_ENV=prod mix escript.build   # produces ./tinkex
 
 ./tinkex checkpoint \
-  --base-model Qwen/Qwen2.5-7B \
+  --base-model meta-llama/Llama-3.1-8B \
   --rank 32 \
   --output ./checkpoint.json \
   --api-key "$TINKER_API_KEY"
@@ -235,7 +235,7 @@ Generate text with a sampling client:
 
 ```bash
 ./tinkex run \
-  --base-model Qwen/Qwen2.5-7B \
+  --base-model meta-llama/Llama-3.1-8B \
   --prompt "Hello there" \
   --max-tokens 64 \
   --temperature 0.7 \
