@@ -91,6 +91,18 @@ params = %Tinkex.Types.SamplingParams{
 {:ok, response} = Task.await(sample_task)
 ```
 
+## HTTP Connection Pools
+
+Tinkex uses Finch for HTTP/2 with dedicated pools per operation type (training, sampling, telemetry, etc.). The application supervisor boots these pools automatically when `config :tinkex, :enable_http_pools, true` (the default in `config/config.exs`). For most apps you should keep this enabled so requests reuse the tuned pools. If you need to run in a lightweight environment (e.g., unit tests or host applications that manage their own pools), you can temporarily disable them with:
+
+```elixir
+# config/test.exs
+import Config
+config :tinkex, :enable_http_pools, false
+```
+
+When you disable the pools, Finch falls back to its default pool configuration. Re-enable them in dev/prod configs to match the retry and pool-routing behavior expected by the SDK.
+
 ## Architecture
 
 Tinkex follows Elixir conventions and leverages OTP for fault tolerance:
