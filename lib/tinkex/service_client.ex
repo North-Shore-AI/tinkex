@@ -58,19 +58,20 @@ defmodule Tinkex.ServiceClient do
     sampling_module = Keyword.get(opts, :sampling_client_module, Tinkex.SamplingClient)
     session_manager = Keyword.get(opts, :session_manager, SessionManager)
 
-    with {:ok, session_id} <- SessionManager.start_session(config, session_manager) do
-      state = %{
-        session_id: session_id,
-        training_client_counter: 0,
-        sampling_client_counter: 0,
-        config: config,
-        training_client_module: training_module,
-        sampling_client_module: sampling_module,
-        session_manager: session_manager
-      }
+    case SessionManager.start_session(config, session_manager) do
+      {:ok, session_id} ->
+        state = %{
+          session_id: session_id,
+          training_client_counter: 0,
+          sampling_client_counter: 0,
+          config: config,
+          training_client_module: training_module,
+          sampling_client_module: sampling_module,
+          session_manager: session_manager
+        }
 
-      {:ok, state}
-    else
+        {:ok, state}
+
       {:error, reason} ->
         {:stop, reason}
     end

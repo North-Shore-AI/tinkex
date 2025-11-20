@@ -54,38 +54,38 @@ defmodule Tinkex.SamplingClient do
     service_api = Keyword.get(opts, :service_api, Service)
     sampling_api = Keyword.get(opts, :sampling_api, Sampling)
 
-    with {:ok, sampling_session_id} <-
-           create_sampling_session(
-             session_id,
-             sampling_client_id,
-             base_model,
-             model_path,
-             config,
-             service_api
-           ) do
-      limiter = RateLimiter.for_key({config.base_url, config.api_key})
-      request_counter = :atomics.new(1, signed: false)
+    case create_sampling_session(
+           session_id,
+           sampling_client_id,
+           base_model,
+           model_path,
+           config,
+           service_api
+         ) do
+      {:ok, sampling_session_id} ->
+        limiter = RateLimiter.for_key({config.base_url, config.api_key})
+        request_counter = :atomics.new(1, signed: false)
 
-      entry = %{
-        sampling_session_id: sampling_session_id,
-        http_pool: config.http_pool,
-        request_id_counter: request_counter,
-        rate_limiter: limiter,
-        config: config,
-        sampling_api: sampling_api
-      }
+        entry = %{
+          sampling_session_id: sampling_session_id,
+          http_pool: config.http_pool,
+          request_id_counter: request_counter,
+          rate_limiter: limiter,
+          config: config,
+          sampling_api: sampling_api
+        }
 
-      :ok = SamplingRegistry.register(self(), entry)
+        :ok = SamplingRegistry.register(self(), entry)
 
-      {:ok,
-       %{
-         sampling_session_id: sampling_session_id,
-         request_id_counter: request_counter,
-         rate_limiter: limiter,
-         config: config,
-         sampling_api: sampling_api
-       }}
-    else
+        {:ok,
+         %{
+           sampling_session_id: sampling_session_id,
+           request_id_counter: request_counter,
+           rate_limiter: limiter,
+           config: config,
+           sampling_api: sampling_api
+         }}
+
       {:error, reason} ->
         {:stop, reason}
     end

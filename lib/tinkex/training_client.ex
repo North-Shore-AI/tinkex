@@ -100,21 +100,22 @@ defmodule Tinkex.TrainingClient do
     weights_api = Keyword.get(opts, :weights_api, Weights)
     future_module = Keyword.get(opts, :future_module, Tinkex.Future)
 
-    with {:ok, model_id} <- ensure_model(opts, session_id, model_seq_id, config, service_api) do
-      state = %{
-        model_id: model_id,
-        session_id: session_id,
-        model_seq_id: model_seq_id,
-        config: config,
-        http_pool: config.http_pool,
-        request_id_counter: 0,
-        training_api: training_api,
-        weights_api: weights_api,
-        future_module: future_module
-      }
+    case ensure_model(opts, session_id, model_seq_id, config, service_api) do
+      {:ok, model_id} ->
+        state = %{
+          model_id: model_id,
+          session_id: session_id,
+          model_seq_id: model_seq_id,
+          config: config,
+          http_pool: config.http_pool,
+          request_id_counter: 0,
+          training_api: training_api,
+          weights_api: weights_api,
+          future_module: future_module
+        }
 
-      {:ok, state}
-    else
+        {:ok, state}
+
       {:error, reason} ->
         {:stop, reason}
     end

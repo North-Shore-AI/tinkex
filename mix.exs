@@ -7,6 +7,7 @@ defmodule Tinkex.MixProject do
       version: "0.1.0",
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
+      escript: [main_module: Tinkex.CLI],
       deps: deps()
     ]
   end
@@ -39,6 +40,7 @@ defmodule Tinkex.MixProject do
 
       # Development
       {:dialyxir, "~> 1.4", only: :dev, runtime: false},
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.30", only: :dev, runtime: false},
 
       # Testing

@@ -195,6 +195,20 @@ mix docs
 - [Porting Guide](docs/20251118/port_research/) - Technical deep dive on the Python to Elixir port
 - [Python SDK Documentation](https://tinker-docs.thinkingmachines.ai/)
 
+## CLI (scaffold)
+
+Build the CLI escript and run the scaffolded commands:
+
+```bash
+mix escript.build         # produces ./tinkex
+./tinkex --help           # global help + command list
+./tinkex checkpoint --help
+./tinkex run --help
+./tinkex --version        # alias for `tinkex version`
+```
+
+The CLI is scaffolded for upcoming phases; command bodies will be filled in next.
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request.

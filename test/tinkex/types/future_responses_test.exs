@@ -76,13 +76,13 @@ defmodule Tinkex.Types.FutureRetrieveResponseTest do
         "type" => "try_again",
         "request_id" => "req-789",
         "queue_state" => "paused_rate_limit",
-        "retry_after_ms" => 10000
+        "retry_after_ms" => 10_000
       }
 
       result = FutureRetrieveResponse.from_json(json)
 
       assert result.queue_state == :paused_rate_limit
-      assert result.retry_after_ms == 10000
+      assert result.retry_after_ms == 10_000
     end
 
     test "maps unknown queue_state strings to :unknown" do

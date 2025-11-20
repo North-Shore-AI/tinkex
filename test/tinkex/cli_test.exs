@@ -1,0 +1,110 @@
+defmodule Tinkex.CLITest do
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
+
+  import ExUnit.CaptureIO
+
+  alias Tinkex.CLI
+
+  describe "help output" do
+    test "shows global help with --help" do
+      output =
+        capture_io(fn ->
+          assert {:ok, :help} = CLI.run(["--help"])
+        end)
+
+      assert output =~ "Usage:"
+      assert output =~ "checkpoint"
+      assert output =~ "version"
+    end
+
+    test "shows subcommand help" do
+      output =
+        capture_io(fn ->
+          assert {:ok, :help} = CLI.run(["checkpoint", "--help"])
+        end)
+
+      assert output =~ "tinkex checkpoint"
+      assert output =~ "--base-model"
+    end
+  end
+
+  describe "routing and parsing" do
+    test "parses checkpoint options" do
+      output =
+        capture_io(fn ->
+          assert {:ok, %{command: :checkpoint, options: opts}} =
+                   CLI.run([
+                     "checkpoint",
+                     "--base-model",
+                     "Qwen/Qwen2.5-7B",
+                     "--rank",
+                     "4",
+                     "--train-mlp"
+                   ])
+
+          assert opts[:base_model] == "Qwen/Qwen2.5-7B"
+          assert opts[:rank] == 4
+          assert opts[:train_mlp]
+        end)
+
+      assert output =~ "checkpoint command"
+      assert output =~ "base_model"
+    end
+
+    test "parses run options" do
+      output =
+        capture_io(fn ->
+          assert {:ok, %{command: :run, options: opts}} =
+                   CLI.run([
+                     "run",
+                     "--prompt",
+                     "hello",
+                     "--max-tokens",
+                     "16",
+                     "--top-p",
+                     "0.9",
+                     "--json"
+                   ])
+
+          assert opts[:prompt] == "hello"
+          assert opts[:max_tokens] == 16
+          assert_in_delta opts[:top_p], 0.9, 0.0001
+          assert opts[:json]
+        end)
+
+      assert output =~ "run command"
+      assert output =~ "prompt"
+    end
+
+    test "routes --version alias to version command" do
+      output =
+        capture_io(fn ->
+          assert {:ok, %{command: :version, version: version}} = CLI.run(["--version"])
+          assert is_binary(version)
+          assert version != ""
+        end)
+
+      assert output =~ "tinkex "
+    end
+
+    test "supports JSON version output" do
+      output =
+        capture_io(fn ->
+          assert {:ok, %{command: :version, options: %{json: true}}} =
+                   CLI.run(["version", "--json"])
+        end)
+
+      assert String.trim(output) |> String.starts_with?("{\"version\"")
+    end
+
+    test "errors on unknown command" do
+      output =
+        capture_io(:stderr, fn ->
+          assert {:error, :invalid_args} = CLI.run(["unknown"])
+        end)
+
+      assert output =~ "Unknown command"
+      assert output =~ "checkpoint"
+    end
+  end
+end
