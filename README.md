@@ -219,6 +219,10 @@ MIX_ENV=prod mix escript.build
 - Troubleshooting playbook: `docs/guides/troubleshooting.md`
 - Tokenization and end-to-end training slices: `docs/guides/tokenization.md`, `docs/guides/training_loop.md`
 
+## Python parity checks
+
+When comparing Elixir and Python responses, hold the base model, prompt text, sampling parameters, and (if supported) seed constant. Expect similar logprobs/stop reasons rather than bit-identical text. See `docs/guides/api_reference.md` for a template that runs both SDKs side by side.
+
 ## CLI
 
 Build the CLI escript (production settings) and invoke the checkpoint workflow:
