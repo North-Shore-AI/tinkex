@@ -15,6 +15,7 @@ defmodule Tinkex.Application do
     ensure_ets_tables()
 
     enable_http_pools? = Application.get_env(:tinkex, :enable_http_pools, true)
+    heartbeat_interval_ms = Application.get_env(:tinkex, :heartbeat_interval_ms, 10_000)
 
     base_url =
       Application.get_env(
@@ -27,7 +28,7 @@ defmodule Tinkex.Application do
 
     children =
       maybe_add_http_pool(enable_http_pools?, normalized_base) ++
-        base_children()
+        base_children(heartbeat_interval_ms)
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Tinkex.Supervisor)
   end
@@ -63,9 +64,10 @@ defmodule Tinkex.Application do
     end
   end
 
-  defp base_children do
+  defp base_children(heartbeat_interval_ms) do
     [
       Tinkex.SamplingRegistry,
+      {Tinkex.SessionManager, heartbeat_interval_ms: heartbeat_interval_ms},
       {DynamicSupervisor, name: Tinkex.ClientSupervisor, strategy: :one_for_one}
     ]
   end
