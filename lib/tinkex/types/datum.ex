@@ -51,7 +51,7 @@ defmodule Tinkex.Types.Datum do
     %TensorData{
       data: List.flatten(list),
       dtype: dtype,
-      shape: infer_shape(list)
+      shape: nil
     }
   end
 
@@ -64,12 +64,4 @@ defmodule Tinkex.Types.Datum do
   defp infer_dtype([first | _]) when is_float(first), do: :float32
   defp infer_dtype([[first | _] | _]), do: infer_dtype([first])
   defp infer_dtype([]), do: :float32
-
-  defp infer_shape(list) when is_list(list) do
-    case list do
-      [] -> [0]
-      [first | _] when is_list(first) -> [length(list) | infer_shape(first)]
-      _ -> [length(list)]
-    end
-  end
 end

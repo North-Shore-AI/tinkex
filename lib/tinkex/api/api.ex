@@ -441,9 +441,10 @@ defmodule Tinkex.API do
     if dump_headers?() do
       url = request_url(request)
       headers = redact_headers(request.headers)
+      body = dump_body(request.body)
 
       Logger.info(
-        "HTTP #{String.upcase(to_string(request.method))} #{url} attempt=#{attempt} headers=#{inspect(headers)}"
+        "HTTP #{String.upcase(to_string(request.method))} #{url} attempt=#{attempt} headers=#{inspect(headers)} body=#{body}"
       )
     end
   end
@@ -470,6 +471,16 @@ defmodule Tinkex.API do
       other ->
         other
     end)
+  end
+
+  defp dump_body(nil), do: "nil"
+
+  defp dump_body(body) do
+    try do
+      IO.iodata_to_binary(body)
+    rescue
+      _ -> inspect(body)
+    end
   end
 
   defp dump_headers? do
