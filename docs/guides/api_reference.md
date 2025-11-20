@@ -58,9 +58,15 @@ params = %Tinkex.Types.SamplingParams{max_tokens: 64, temperature: 0.7, top_p: 0
 
 ```python
 # Python (sampling)
-client = TinkerClient(api_key=os.environ["TINKER_API_KEY"])
+from tinker import ServiceClient
+
+client = ServiceClient(api_key=os.environ["TINKER_API_KEY"])
 sampler = client.create_sampling_client(base_model=model)
-resp = sampler.sample(prompt=prompt, sampling_params={"max_tokens": 64, "temperature": 0.7, "top_p": 0.9, "seed": 123}, prompt_logprobs=True)
+resp = sampler.sample(
+    prompt=prompt,
+    sampling_params={"max_tokens": 64, "temperature": 0.7, "top_p": 0.9, "seed": 123},
+    prompt_logprobs=True,
+)
 ```
 
 Compare per-token logprobs and stop reasons rather than raw text. If seeds are not honored by the backend, hold `temperature`, `top_p`, and `max_tokens` constant and look for similar response shapes (number of tokens, finishing reason, and approximate probabilities).
