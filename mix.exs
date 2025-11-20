@@ -2,6 +2,8 @@ defmodule Tinkex.MixProject do
   use Mix.Project
 
   @version "0.1.0"
+  @source_url "https://github.com/North-Shore-AI/tinkex"
+  @docs_url "https://hexdocs.pm/tinkex"
 
   def version, do: @version
 
@@ -12,7 +14,16 @@ defmodule Tinkex.MixProject do
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       escript: [main_module: Tinkex.CLI],
-      deps: deps()
+      deps: deps(),
+      docs: docs(),
+      description: description(),
+      package: package(),
+      name: "Tinkex",
+      source_url: @source_url,
+      homepage_url: @source_url,
+      preferred_cli_env: [
+        dialyzer: :test
+      ]
     ]
   end
 
@@ -51,6 +62,44 @@ defmodule Tinkex.MixProject do
       {:mox, "~> 1.0", only: :test},
       {:bypass, "~> 2.1", only: :test},
       {:supertester, "~> 0.3.1", only: :test}
+    ]
+  end
+
+  defp description do
+    """
+    Elixir SDK for Tinker: LoRA training, sampling, and future-based workflows with telemetry and HTTP/2.
+    """
+  end
+
+  defp docs do
+    [
+      main: "readme",
+      source_ref: "v#{@version}",
+      source_url: @source_url,
+      homepage_url: @docs_url,
+      extras: [
+        "README.md",
+        "docs/guides/training_loop.md",
+        "docs/guides/tokenization.md"
+      ],
+      groups_for_extras: [
+        Guides: [
+          "docs/guides/training_loop.md",
+          "docs/guides/tokenization.md"
+        ]
+      ]
+    ]
+  end
+
+  defp package do
+    [
+      name: "tinkex",
+      licenses: ["Apache-2.0"],
+      links: %{
+        "GitHub" => @source_url,
+        "Docs" => @docs_url
+      },
+      files: ~w(lib mix.exs README.md LICENSE assets docs/guides)
     ]
   end
 end
