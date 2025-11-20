@@ -49,10 +49,13 @@ config =
 {:ok, _} = Application.ensure_all_started(:tinkex)
 
 {:ok, service} = Tinkex.ServiceClient.start_link(config: config)
-{:ok, sampler} = Tinkex.ServiceClient.create_sampling_client(service, base_model: "Qwen/Qwen2.5-7B")
+{:ok, sampler} =
+  Tinkex.ServiceClient.create_sampling_client(service,
+    base_model: "meta-llama/Llama-3.1-8B"
+  )
 
 {:ok, prompt} =
-  Tinkex.Types.ModelInput.from_text("Hello there", model_name: "Qwen/Qwen2.5-7B")
+  Tinkex.Types.ModelInput.from_text("Hello there", model_name: "meta-llama/Llama-3.1-8B")
 
 params = %Tinkex.Types.SamplingParams{max_tokens: 64, temperature: 0.7, top_p: 0.9}
 
@@ -70,14 +73,14 @@ After `MIX_ENV=prod mix escript.build`, invoke the CLI:
 ```bash
 # Save weights metadata for a base model
 ./tinkex checkpoint \
-  --base-model Qwen/Qwen2.5-7B \
+  --base-model meta-llama/Llama-3.1-8B \
   --rank 32 \
   --output ./checkpoint.json \
   --api-key "$TINKER_API_KEY"
 
 # Generate text with configurable sampling params
 ./tinkex run \
-  --base-model Qwen/Qwen2.5-7B \
+  --base-model meta-llama/Llama-3.1-8B \
   --prompt "Hello there" \
   --max-tokens 64 \
   --temperature 0.7 \

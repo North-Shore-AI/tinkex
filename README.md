@@ -232,7 +232,7 @@ See `docs/guides/getting_started.md` for the full CLI walkthrough and `docs/guid
 MIX_ENV=prod mix escript.build   # produces ./tinkex
 
 ./tinkex checkpoint \
-  --base-model Qwen/Qwen2.5-7B \
+  --base-model meta-llama/Llama-3.1-8B \
   --rank 32 \
   --output ./checkpoint.json \
   --api-key "$TINKER_API_KEY"
@@ -244,7 +244,7 @@ Generate text with a sampling client:
 
 ```bash
 ./tinkex run \
-  --base-model Qwen/Qwen2.5-7B \
+  --base-model meta-llama/Llama-3.1-8B \
   --prompt "Hello there" \
   --max-tokens 64 \
   --temperature 0.7 \

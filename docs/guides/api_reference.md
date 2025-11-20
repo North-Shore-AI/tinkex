@@ -45,7 +45,7 @@ Use the same base model, prompt, sampling params, and (if supported by the serve
 
 ```elixir
 # Elixir (sampling)
-model = "Qwen/Qwen2.5-7B"
+model = "meta-llama/Llama-3.1-8B"
 prompt = "Summarize: Tinkex ports the Python SDK."
 params = %Tinkex.Types.SamplingParams{max_tokens: 64, temperature: 0.7, top_p: 0.9, seed: 123}
 
