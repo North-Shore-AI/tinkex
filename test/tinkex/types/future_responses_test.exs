@@ -1,5 +1,5 @@
 defmodule Tinkex.Types.FutureRetrieveResponseTest do
-  use ExUnit.Case, async: true
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
 
   alias Tinkex.Types.{
     FutureRetrieveResponse,
@@ -22,6 +22,7 @@ defmodule Tinkex.Types.FutureRetrieveResponseTest do
         "status" => "completed",
         "result" => %{"data" => "test"}
       }
+
       result = FutureRetrieveResponse.from_json(json)
 
       assert %FutureCompletedResponse{status: "completed", result: %{"data" => "test"}} = result
@@ -32,6 +33,7 @@ defmodule Tinkex.Types.FutureRetrieveResponseTest do
         "status" => "failed",
         "error" => %{"message" => "Something went wrong"}
       }
+
       result = FutureRetrieveResponse.from_json(json)
 
       assert %FutureFailedResponse{status: "failed"} = result
@@ -45,6 +47,7 @@ defmodule Tinkex.Types.FutureRetrieveResponseTest do
         "queue_state" => "active",
         "retry_after_ms" => nil
       }
+
       result = FutureRetrieveResponse.from_json(json)
 
       assert %TryAgainResponse{} = result
@@ -61,6 +64,7 @@ defmodule Tinkex.Types.FutureRetrieveResponseTest do
         "queue_state" => "paused_capacity",
         "retry_after_ms" => 5000
       }
+
       result = FutureRetrieveResponse.from_json(json)
 
       assert result.queue_state == :paused_capacity
@@ -74,6 +78,7 @@ defmodule Tinkex.Types.FutureRetrieveResponseTest do
         "queue_state" => "paused_rate_limit",
         "retry_after_ms" => 10000
       }
+
       result = FutureRetrieveResponse.from_json(json)
 
       assert result.queue_state == :paused_rate_limit

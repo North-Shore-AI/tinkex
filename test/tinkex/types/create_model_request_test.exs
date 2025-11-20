@@ -1,5 +1,5 @@
 defmodule Tinkex.Types.CreateModelRequestTest do
-  use ExUnit.Case, async: true
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
 
   alias Tinkex.Types.{CreateModelRequest, LoraConfig}
 

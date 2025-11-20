@@ -7,7 +7,13 @@ defmodule Tinkex.Types.SaveWeightsForSamplerRequest do
 
   @enforce_keys [:model_id]
   @derive {Jason.Encoder, only: [:model_id, :path, :sampling_session_seq_id, :seq_id, :type]}
-  defstruct [:model_id, :path, :sampling_session_seq_id, :seq_id, type: "save_weights_for_sampler"]
+  defstruct [
+    :model_id,
+    :path,
+    :sampling_session_seq_id,
+    :seq_id,
+    type: "save_weights_for_sampler"
+  ]
 
   @type t :: %__MODULE__{
           model_id: String.t(),

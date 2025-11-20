@@ -12,12 +12,10 @@ defmodule Tinkex.Types.AdamParams do
   """
 
   @derive {Jason.Encoder, only: [:learning_rate, :beta1, :beta2, :eps]}
-  defstruct [
-    learning_rate: 0.0001,
-    beta1: 0.9,
-    beta2: 0.95,
-    eps: 1.0e-12
-  ]
+  defstruct learning_rate: 0.0001,
+            beta1: 0.9,
+            beta2: 0.95,
+            eps: 1.0e-12
 
   @type t :: %__MODULE__{
           learning_rate: float(),

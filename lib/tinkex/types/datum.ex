@@ -56,7 +56,8 @@ defmodule Tinkex.Types.Datum do
   end
 
   defp maybe_convert_tensor(value) do
-    raise ArgumentError, "Unsupported tensor value in loss_fn_inputs: #{inspect(value)}. Expected Nx.Tensor, TensorData, or list."
+    raise ArgumentError,
+          "Unsupported tensor value in loss_fn_inputs: #{inspect(value)}. Expected Nx.Tensor, TensorData, or list."
   end
 
   defp infer_dtype([first | _]) when is_integer(first), do: :int64

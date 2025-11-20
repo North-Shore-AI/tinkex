@@ -10,7 +10,10 @@ defmodule Tinkex.Types.ModelInput do
   @derive {Jason.Encoder, only: [:chunks]}
   defstruct chunks: []
 
-  @type chunk :: EncodedTextChunk.t() | Tinkex.Types.ImageChunk.t() | Tinkex.Types.ImageAssetPointerChunk.t()
+  @type chunk ::
+          EncodedTextChunk.t()
+          | Tinkex.Types.ImageChunk.t()
+          | Tinkex.Types.ImageAssetPointerChunk.t()
   @type t :: %__MODULE__{
           chunks: [chunk()]
         }
@@ -48,5 +51,7 @@ defmodule Tinkex.Types.ModelInput do
 
   defp chunk_length(%EncodedTextChunk{} = chunk), do: EncodedTextChunk.length(chunk)
   defp chunk_length(%Tinkex.Types.ImageChunk{} = chunk), do: Tinkex.Types.ImageChunk.length(chunk)
-  defp chunk_length(%Tinkex.Types.ImageAssetPointerChunk{} = chunk), do: Tinkex.Types.ImageAssetPointerChunk.length(chunk)
+
+  defp chunk_length(%Tinkex.Types.ImageAssetPointerChunk{} = chunk),
+    do: Tinkex.Types.ImageAssetPointerChunk.length(chunk)
 end

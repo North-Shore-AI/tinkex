@@ -1,5 +1,5 @@
 defmodule Tinkex.Types.AdamParamsTest do
-  use ExUnit.Case, async: true
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
 
   alias Tinkex.Types.AdamParams
 
@@ -9,17 +9,20 @@ defmodule Tinkex.Types.AdamParamsTest do
 
       assert params.learning_rate == 0.0001
       assert params.beta1 == 0.9
-      assert params.beta2 == 0.95  # NOT 0.999!
-      assert params.eps == 1.0e-12  # NOT 1e-8!
+      # NOT 0.999!
+      assert params.beta2 == 0.95
+      # NOT 1e-8!
+      assert params.eps == 1.0e-12
     end
 
     test "accepts custom values" do
-      {:ok, params} = AdamParams.new(
-        learning_rate: 0.001,
-        beta1: 0.8,
-        beta2: 0.9,
-        eps: 1.0e-8
-      )
+      {:ok, params} =
+        AdamParams.new(
+          learning_rate: 0.001,
+          beta1: 0.8,
+          beta2: 0.9,
+          eps: 1.0e-8
+        )
 
       assert params.learning_rate == 0.001
       assert params.beta1 == 0.8

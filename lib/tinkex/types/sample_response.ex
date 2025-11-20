@@ -39,7 +39,9 @@ defmodule Tinkex.Types.SampleResponse do
 
   defp parse_topk_prompt_logprobs(entries) when is_list(entries) do
     Enum.map(entries, fn
-      nil -> nil
+      nil ->
+        nil
+
       inner when is_list(inner) ->
         Enum.map(inner, &parse_topk_entry/1)
     end)

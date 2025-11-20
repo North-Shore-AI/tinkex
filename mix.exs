@@ -14,6 +14,7 @@ defmodule Tinkex.MixProject do
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
+      mod: {Tinkex.Application, []},
       extra_applications: [:logger]
     ]
   end
@@ -42,7 +43,8 @@ defmodule Tinkex.MixProject do
 
       # Testing
       {:mox, "~> 1.0", only: :test},
-      {:bypass, "~> 2.1", only: :test}
+      {:bypass, "~> 2.1", only: :test},
+      {:supertester, "~> 0.3.1", only: :test}
     ]
   end
 end

@@ -6,13 +6,11 @@ defmodule Tinkex.Types.LoraConfig do
   """
 
   @derive {Jason.Encoder, only: [:rank, :seed, :train_mlp, :train_attn, :train_unembed]}
-  defstruct [
-    rank: 32,
-    seed: nil,
-    train_mlp: true,
-    train_attn: true,
-    train_unembed: true
-  ]
+  defstruct rank: 32,
+            seed: nil,
+            train_mlp: true,
+            train_attn: true,
+            train_unembed: true
 
   @type t :: %__MODULE__{
           rank: pos_integer(),

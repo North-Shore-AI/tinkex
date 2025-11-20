@@ -8,7 +8,8 @@ defmodule Tinkex.Types.CreateModelRequest do
   alias Tinkex.Types.LoraConfig
 
   @enforce_keys [:session_id, :model_seq_id, :base_model]
-  @derive {Jason.Encoder, only: [:session_id, :model_seq_id, :base_model, :user_metadata, :lora_config, :type]}
+  @derive {Jason.Encoder,
+           only: [:session_id, :model_seq_id, :base_model, :user_metadata, :lora_config, :type]}
   defstruct [
     :session_id,
     :model_seq_id,

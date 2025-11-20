@@ -6,8 +6,15 @@ defmodule Tinkex.Types.CreateSamplingSessionRequest do
   """
 
   @enforce_keys [:session_id, :sampling_session_seq_id]
-  @derive {Jason.Encoder, only: [:session_id, :sampling_session_seq_id, :base_model, :model_path, :type]}
-  defstruct [:session_id, :sampling_session_seq_id, :base_model, :model_path, type: "create_sampling_session"]
+  @derive {Jason.Encoder,
+           only: [:session_id, :sampling_session_seq_id, :base_model, :model_path, :type]}
+  defstruct [
+    :session_id,
+    :sampling_session_seq_id,
+    :base_model,
+    :model_path,
+    type: "create_sampling_session"
+  ]
 
   @type t :: %__MODULE__{
           session_id: String.t(),

@@ -1,5 +1,5 @@
 defmodule Tinkex.Types.ImageChunkTest do
-  use ExUnit.Case, async: true
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
 
   alias Tinkex.Types.ImageChunk
 

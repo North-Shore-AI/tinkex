@@ -1,5 +1,5 @@
 defmodule TinkexTest do
-  use ExUnit.Case
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
   doctest Tinkex
 
   test "greets the world" do
