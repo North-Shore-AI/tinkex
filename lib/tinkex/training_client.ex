@@ -13,7 +13,7 @@ defmodule Tinkex.TrainingClient do
 
   use GenServer
 
-  alias Tinkex.API.{Service, Training}
+  alias Tinkex.API.{Service, Training, Weights}
   alias Tinkex.Error
   alias Tinkex.Future.Combiner
 
@@ -25,7 +25,8 @@ defmodule Tinkex.TrainingClient do
     ForwardBackwardRequest,
     LoraConfig,
     OptimStepRequest,
-    OptimStepResponse
+    OptimStepResponse,
+    SaveWeightsForSamplerRequest
   }
 
   @max_chunk_len 128
@@ -76,6 +77,19 @@ defmodule Tinkex.TrainingClient do
      Task.async(fn -> GenServer.call(client, {:optim_step, adam_params, opts}, :infinity) end)}
   end
 
+  @doc """
+  Save weights for downstream sampling.
+
+  Returns a `Task.t()` that yields `{:ok, map()}` or `{:error, %Tinkex.Error{}}`.
+  """
+  @spec save_weights_for_sampler(t(), keyword()) :: {:ok, Task.t()} | {:error, Error.t()}
+  def save_weights_for_sampler(client, opts \\ []) do
+    {:ok,
+     Task.async(fn ->
+       GenServer.call(client, {:save_weights_for_sampler, opts}, :infinity)
+     end)}
+  end
+
   @impl true
   def init(opts) do
     config = Keyword.fetch!(opts, :config)
@@ -83,6 +97,7 @@ defmodule Tinkex.TrainingClient do
     model_seq_id = Keyword.fetch!(opts, :model_seq_id)
     service_api = Keyword.get(opts, :service_api, Service)
     training_api = Keyword.get(opts, :training_api, Training)
+    weights_api = Keyword.get(opts, :weights_api, Weights)
     future_module = Keyword.get(opts, :future_module, Tinkex.Future)
 
     with {:ok, model_id} <- ensure_model(opts, session_id, model_seq_id, config, service_api) do
@@ -94,6 +109,7 @@ defmodule Tinkex.TrainingClient do
         http_pool: config.http_pool,
         request_id_counter: 0,
         training_api: training_api,
+        weights_api: weights_api,
         future_module: future_module
       }
 
@@ -212,6 +228,41 @@ defmodule Tinkex.TrainingClient do
   end
 
   @impl true
+  def handle_call({:save_weights_for_sampler, opts}, from, state) do
+    seq_id = state.request_id_counter
+    new_counter = seq_id + 1
+
+    case send_save_weights_for_sampler_request(seq_id, opts, state) do
+      {:error, reason} ->
+        {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
+
+      {:ok, response} ->
+        Task.start(fn ->
+          reply =
+            try do
+              handle_save_weights_response(response, state, opts)
+            rescue
+              e ->
+                {:error,
+                 %Error{
+                   message: "Save weights failed: #{Exception.message(e)}",
+                   type: :request_failed,
+                   data: %{exception: e, stacktrace: __STACKTRACE__}
+                 }}
+            end
+
+          try do
+            GenServer.reply(from, reply)
+          rescue
+            ArgumentError -> :ok
+          end
+        end)
+
+        {:noreply, %{state | request_id_counter: new_counter}}
+    end
+  end
+
+  @impl true
   def handle_call(_message, _from, state), do: {:reply, {:error, :unsupported}, state}
 
   @impl true
@@ -296,6 +347,33 @@ defmodule Tinkex.TrainingClient do
     end
   end
 
+  defp send_save_weights_for_sampler_request(seq_id, opts, state) do
+    request = %SaveWeightsForSamplerRequest{
+      model_id: state.model_id,
+      path: Keyword.get(opts, :path),
+      sampling_session_seq_id: Keyword.get(opts, :sampling_session_seq_id),
+      seq_id: seq_id
+    }
+
+    case state.weights_api.save_weights_for_sampler(request, config: state.config) do
+      {:ok, %{"request_id" => _} = future} ->
+        {:ok, future}
+
+      {:ok, %{request_id: _} = future} ->
+        {:ok, future}
+
+      {:ok, result} ->
+        {:ok, result}
+
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      other ->
+        {:error,
+         Error.new(:validation, "Invalid save_weights_for_sampler response: #{inspect(other)}")}
+    end
+  end
+
   defp await_forward_backward_results([], _future_module), do: {:ok, []}
 
   defp await_forward_backward_results([task | rest], future_module) do
@@ -368,6 +446,22 @@ defmodule Tinkex.TrainingClient do
   end
 
   defp unlink_task(_), do: :ok
+
+  defp handle_save_weights_response(%{"request_id" => _} = future, state, opts) do
+    poll_save_weights_future(future, state, opts)
+  end
+
+  defp handle_save_weights_response(%{request_id: _} = future, state, opts) do
+    poll_save_weights_future(future, state, opts)
+  end
+
+  defp handle_save_weights_response(result, _state, _opts), do: {:ok, result}
+
+  defp poll_save_weights_future(future, state, opts) do
+    task = state.future_module.poll(future, poll_opts(state, opts))
+    unlink_task(task)
+    safe_await(state.future_module, task, await_timeout(opts))
+  end
 
   defp poll_opts(state, opts) do
     opts
