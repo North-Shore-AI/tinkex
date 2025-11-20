@@ -135,15 +135,16 @@
     </text>
   </g>
 
-  <!-- Corner accent marks for Elixir style -->
+  <!-- Corner accent marks - 90° angles at hexagon vertices -->
   <g id="accents" opacity="0.6">
-    <!-- Top corners -->
-    <path d="M 100 125 L 95 120 L 100 115" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
-    <path d="M 400 125 L 405 120 L 400 115" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
-
-    <!-- Bottom corners -->
-    <path d="M 100 275 L 95 280 L 100 285" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
-    <path d="M 400 275 L 405 280 L 400 285" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
+    <!-- Top-left vertex (100, 125) -->
+    <path d="M 86 130 L 100 125 L 95 111" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
+    <!-- Top-right vertex (400, 125) -->
+    <path d="M 405 111 L 400 125 L 414 130" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
+    <!-- Bottom-left vertex (100, 275) -->
+    <path d="M 95 289 L 100 275 L 86 270" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
+    <!-- Bottom-right vertex (400, 275) -->
+    <path d="M 414 270 L 400 275 L 405 289" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
   </g>
 
   <!-- Subtle sparkle effects -->
