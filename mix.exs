@@ -1,7 +1,7 @@
 defmodule Tinkex.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
+  @version "0.1.1"
   @source_url "https://github.com/North-Shore-AI/tinkex"
   @docs_url "https://hexdocs.pm/tinkex"
 
@@ -73,14 +73,16 @@ defmodule Tinkex.MixProject do
 
   defp docs do
     [
-      main: "readme",
+      main: "overview",
       source_ref: "v#{@version}",
       source_url: @source_url,
       homepage_url: @docs_url,
       assets: %{"assets" => "assets"},
       extras: [
-        "README.md",
-        "LICENSE",
+        {"README.md", [filename: "overview", title: "Overview"]},
+        {"CHANGELOG.md", [filename: "changelog", title: "Changelog"]},
+        {"LICENSE", [filename: "license", title: "License"]},
+        {"examples/README.md", [filename: "examples", title: "Examples"]},
         "docs/guides/getting_started.md",
         "docs/guides/api_reference.md",
         "docs/guides/troubleshooting.md",
@@ -107,7 +109,7 @@ defmodule Tinkex.MixProject do
         "GitHub" => @source_url,
         "Docs" => @docs_url
       },
-      files: ~w(lib mix.exs README.md LICENSE assets docs/guides)
+      files: ~w(lib mix.exs README.md CHANGELOG.md LICENSE assets docs/guides examples)
     ]
   end
 end

@@ -23,3 +23,8 @@ tinkex-*.tar
 /tmp/
 
 tinker/
+
+*:train:*/
+*.safetensors
+checkpoint_complete
+examples/repomix-output.xml

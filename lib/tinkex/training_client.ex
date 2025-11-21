@@ -90,6 +90,23 @@ defmodule Tinkex.TrainingClient do
      end)}
   end
 
+  @doc """
+  Create a sampling client from this training client asynchronously.
+
+  Takes a model_path (checkpoint path) and returns a Task that resolves to a sampling client.
+
+  ## Examples
+
+      task = TrainingClient.create_sampling_client_async(training_pid, "tinker://run-1/weights/0001")
+      {:ok, sampling_pid} = Task.await(task)
+  """
+  @spec create_sampling_client_async(t(), String.t(), keyword()) :: Task.t()
+  def create_sampling_client_async(client, model_path, opts \\ []) do
+    Task.async(fn ->
+      GenServer.call(client, {:create_sampling_client, model_path, opts}, :infinity)
+    end)
+  end
+
   @impl true
   def init(opts) do
     config = Keyword.fetch!(opts, :config)
@@ -99,6 +116,7 @@ defmodule Tinkex.TrainingClient do
     training_api = Keyword.get(opts, :training_api, Training)
     weights_api = Keyword.get(opts, :weights_api, Weights)
     future_module = Keyword.get(opts, :future_module, Tinkex.Future)
+    client_supervisor = Keyword.get(opts, :client_supervisor, Tinkex.ClientSupervisor)
 
     case ensure_model(opts, session_id, model_seq_id, config, service_api) do
       {:ok, model_id} ->
@@ -111,7 +129,8 @@ defmodule Tinkex.TrainingClient do
           request_id_counter: 0,
           training_api: training_api,
           weights_api: weights_api,
-          future_module: future_module
+          future_module: future_module,
+          client_supervisor: client_supervisor
         }
 
         {:ok, state}
@@ -270,6 +289,29 @@ defmodule Tinkex.TrainingClient do
         end)
 
         {:noreply, %{state | request_id_counter: new_counter}}
+    end
+  end
+
+  @impl true
+  def handle_call({:create_sampling_client, model_path, opts}, _from, state) do
+    # Create a sampling client with the given model_path
+    # Uses the training client's session_id and config
+    child_opts =
+      opts
+      |> Keyword.put(:session_id, state.session_id)
+      |> Keyword.put(:config, state.config)
+      |> Keyword.put(:model_path, model_path)
+      |> Keyword.put(:sampling_client_id, state.request_id_counter)
+
+    case DynamicSupervisor.start_child(
+           state.client_supervisor,
+           {Tinkex.SamplingClient, child_opts}
+         ) do
+      {:ok, pid} ->
+        {:reply, {:ok, pid}, %{state | request_id_counter: state.request_id_counter + 1}}
+
+      {:error, _} = error ->
+        {:reply, error, state}
     end
   end
 

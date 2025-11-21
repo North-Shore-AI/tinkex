@@ -18,6 +18,8 @@ Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-
 - **TrainingClient**: Fine-tune models with forward/backward passes and gradient-based optimization
 - **SamplingClient**: Generate text completions with customizable sampling parameters
 - **ServiceClient**: Manage models, sessions, and service operations
+- **RestClient**: List sessions, enumerate user checkpoints, fetch archive URLs, and delete checkpoints
+- **CheckpointDownload**: Download and extract checkpoints with optional progress reporting
 - **Async/Concurrent**: Built on Elixir's actor model for efficient concurrent operations
 - **Type Safety**: Leverages Elixir typespecs and pattern matching
 - **HTTP/2**: Modern HTTP client with connection pooling and streaming support
@@ -31,7 +33,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.0"}
+    {:tinkex, "~> 0.1.1"}
   ]
 end
 ```
@@ -96,6 +98,33 @@ params = %Tinkex.Types.SamplingParams{
 {:ok, response} = Task.await(sample_task)
 ```
 
+## Examples
+
+Self-contained workflows live in the `examples/` directory. Browse `examples/README.md` for per-script docs or export `TINKER_API_KEY` and run `examples/run_all.sh` to execute the curated collection sequentially.
+
+## Sessions & checkpoints (REST)
+
+Use the `RestClient` for synchronous session and checkpoint management, and `CheckpointDownload` to pull artifacts locally:
+
+```elixir
+{:ok, service} = Tinkex.ServiceClient.start_link(config: config)
+{:ok, rest} = Tinkex.ServiceClient.create_rest_client(service)
+
+{:ok, sessions} = Tinkex.RestClient.list_sessions(rest, limit: 10)
+IO.inspect(sessions.sessions, label: "sessions")
+
+{:ok, checkpoints} = Tinkex.RestClient.list_user_checkpoints(rest, limit: 20)
+IO.inspect(Enum.map(checkpoints.checkpoints, & &1.tinker_path), label: "checkpoints")
+
+{:ok, download} =
+  Tinkex.CheckpointDownload.download(rest, "tinker://run-123/weights/0001",
+    output_dir: "./models",
+    force: true
+  )
+
+IO.puts("Extracted to #{download.destination}")
+```
+
 ## Sampling Workflow
 
 Create a `ServiceClient`, derive a `SamplingClient`, and issue sampling requests via Tasks so you can `Task.await/2` or orchestrate concurrency with `Task.await_many/2` or `Task.async_stream/3`.
@@ -117,6 +146,7 @@ params = %Tinkex.Types.SamplingParams{max_tokens: 64, temperature: 0.7}
 - Rate limits are enforced per `{base_url, api_key}` bucket using a shared `Tinkex.RateLimiter`; a `429` sets a backoff window that later sampling calls will wait through before hitting the server again.
 - Sampling uses `max_retries: 0` at the HTTP layer: server/user errors (e.g., 5xx, 400) surface immediately so callers can decide how to retry.
 - Multi-tenant safety: different API keys or base URLs use separate rate limiters and stay isolated even when one tenant is backing off.
+- Prefer asynchronous client creation for fan-out workflows: `Tinkex.ServiceClient.create_sampling_client_async/2`, `Tinkex.SamplingClient.create_async/2`, and `Tinkex.TrainingClient.create_sampling_client_async/3` return Tasks you can await or `Task.await_many/2`.
 
 ## Telemetry Quickstart
 
@@ -219,6 +249,7 @@ mix docs
 - API overview & parity checklist: `docs/guides/api_reference.md`
 - Troubleshooting playbook: `docs/guides/troubleshooting.md`
 - Tokenization and end-to-end training slices: `docs/guides/tokenization.md`, `docs/guides/training_loop.md`
+- End-to-end examples (sessions, checkpoints, downloads, async factories): see `examples/*.exs`
 
 ## Python parity checks
 

@@ -95,6 +95,26 @@ defmodule Tinkex.ConfigTest do
     end
   end
 
+  describe "mask_api_key/1" do
+    test "masks long keys" do
+      assert Config.mask_api_key("tml-abcdef123456") == "tml-ab...3456"
+    end
+
+    test "replaces short keys with asterisks" do
+      assert Config.mask_api_key("abcd") == "****"
+    end
+  end
+
+  describe "Inspect implementation" do
+    test "hides raw api key" do
+      config = Config.new(api_key: "tml-abcdef123456")
+      inspected = inspect(config)
+
+      refute inspected =~ "tml-abcdef123456"
+      assert inspected =~ "tml-ab...3456"
+    end
+  end
+
   defp without_api_key_sources(fun) when is_function(fun, 0) do
     prev_app_key = Application.get_env(:tinkex, :api_key)
     prev_env_key = System.get_env("TINKER_API_KEY")

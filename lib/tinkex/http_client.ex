@@ -13,4 +13,7 @@ defmodule Tinkex.HTTPClient do
 
   @callback get(path :: String.t(), opts :: keyword()) ::
               {:ok, map()} | {:error, Error.t()}
+
+  @callback delete(path :: String.t(), opts :: keyword()) ::
+              {:ok, map()} | {:error, Error.t()}
 end

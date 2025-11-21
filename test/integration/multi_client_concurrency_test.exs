@@ -87,17 +87,19 @@ defmodule Tinkex.Integration.MultiClientConcurrencyTest do
         telemetry_handler,
         [:tinkex, :http, :request, :stop],
         fn _event, measurements, metadata, _ ->
-          duration_ms = System.convert_time_unit(measurements.duration, :native, :millisecond)
+          if Process.alive?(telemetry_log) do
+            duration_ms = System.convert_time_unit(measurements.duration, :native, :millisecond)
 
-          Agent.update(telemetry_log, fn %{counts: counts, stop_events: stop} ->
-            counts = Map.update(counts, metadata.base_url, 1, &(&1 + 1))
+            Agent.update(telemetry_log, fn %{counts: counts, stop_events: stop} ->
+              counts = Map.update(counts, metadata.base_url, 1, &(&1 + 1))
 
-            %{
-              counts: counts,
-              stop_events: stop + 1,
-              last_duration: duration_ms
-            }
-          end)
+              %{
+                counts: counts,
+                stop_events: stop + 1,
+                last_duration: duration_ms
+              }
+            end)
+          end
         end,
         nil
       )

@@ -1,0 +1,238 @@
+# Tinkex Examples
+
+This directory contains examples demonstrating the core functionality of the Tinkex SDK. Each example is a self-contained script that illustrates specific features and workflows, from basic sampling operations to advanced checkpoint management and training loops.
+
+## Overview
+
+The examples are organized by functionality and complexity, ranging from simple single-operation demonstrations to complete end-to-end workflows. All examples require a valid Tinker API key and can be configured through environment variables to customize their behavior.
+
+## Prerequisites
+
+Before running any example, ensure you have:
+
+- Elixir 1.14 or later installed
+- A valid Tinker API key
+- Network access to the Tinker API endpoints
+- The Tinkex application dependencies installed via `mix deps.get`
+
+## Configuration
+
+All examples use environment variables for configuration. The following variables are commonly used across multiple examples:
+
+**Required Variables:**
+- `TINKER_API_KEY` - Your Tinker API authentication key
+
+**Optional Variables:**
+- `TINKER_BASE_URL` - API endpoint URL (defaults to production endpoint)
+- `TINKER_BASE_MODEL` - Model identifier for sampling and training operations
+- `TINKER_PROMPT` - Custom prompt text for sampling examples
+- `TINKER_MAX_TOKENS` - Maximum tokens to generate in sampling operations
+- `TINKER_TEMPERATURE` - Temperature parameter for sampling (controls randomness)
+- `TINKER_NUM_SAMPLES` - Number of sequences to generate
+
+## Running Examples
+
+Each example can be executed directly using the Mix run command:
+
+```bash
+export TINKER_API_KEY="your-api-key-here"
+mix run examples/example_name.exs
+```
+
+For examples requiring additional configuration, set the relevant environment variables before execution:
+
+```bash
+export TINKER_API_KEY="your-api-key-here"
+export TINKER_BASE_MODEL="meta-llama/Llama-3.1-8B"
+export TINKER_PROMPT="Your custom prompt here"
+mix run examples/sampling_basic.exs
+```
+
+### Run every example in one go
+
+To run the curated set of runnable scripts sequentially, use the helper script:
+
+```bash
+export TINKER_API_KEY="your-api-key-here"
+examples/run_all.sh
+```
+
+The script simply iterates through the example list and executes `mix run examples/<name>.exs` for each entry, exiting on the first failure. Export any additional variables (e.g., `TINKER_BASE_MODEL`, `TINKER_PROMPT`, `TINKEX_DEBUG=1`) before invoking the script so they apply to every example.
+
+## Example Descriptions
+
+### sampling_basic.exs
+
+This example demonstrates the fundamental sampling workflow using the Tinkex SDK. It creates a service client, initializes a sampling client with a base model, and generates text completions from a given prompt.
+
+**Key Features:**
+- Service client initialization and configuration
+- Sampling client creation from base models
+- Prompt encoding and tokenization
+- Asynchronous sampling with configurable parameters
+- Response decoding and output formatting
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional)
+- `TINKER_BASE_MODEL` (optional, defaults to Llama-3.1-8B)
+- `TINKER_PROMPT` (optional, defaults to "Hello from Tinkex!")
+- `TINKER_MAX_TOKENS` (optional, defaults to 64)
+- `TINKER_TEMPERATURE` (optional, defaults to 0.7)
+- `TINKER_NUM_SAMPLES` (optional, defaults to 1)
+- `TINKER_SAMPLE_TIMEOUT` (optional, defaults to 30000ms)
+
+### training_loop.exs
+
+This example illustrates a complete training workflow including forward-backward passes, optimizer steps, weight persistence, and optional sampling from trained weights. It demonstrates the full lifecycle of fine-tuning a language model using LoRA (Low-Rank Adaptation).
+
+**Key Features:**
+- Training client initialization with LoRA configuration
+- Model input preparation and tokenization
+- Forward-backward pass execution for gradient computation
+- Optimizer step application (Adam)
+- Weight saving for inference
+- Optional sampling from fine-tuned weights
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional)
+- `TINKER_BASE_MODEL` (optional, defaults to Llama-3.1-8B)
+- `TINKER_PROMPT` (optional, training prompt)
+- `TINKER_SAMPLE_AFTER_TRAIN` (optional, "1" to enable post-training sampling)
+- `TINKER_SAMPLE_PROMPT` (optional, prompt for post-training sampling)
+
+### sessions_management.exs
+
+This example demonstrates the session management capabilities introduced in SDK version 0.1.1. It shows how to create a REST client, list all active sessions, and retrieve detailed information about specific sessions including associated training runs and samplers.
+
+**Key Features:**
+- REST client creation and initialization
+- Session listing with pagination support
+- Session detail retrieval
+- Training run and sampler enumeration
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional)
+
+### checkpoints_management.exs
+
+This example showcases checkpoint management operations including listing user checkpoints, filtering by training run, and viewing detailed checkpoint metadata such as size, creation time, and accessibility status.
+
+**Key Features:**
+- User checkpoint listing with pagination
+- Run-specific checkpoint filtering
+- Checkpoint metadata inspection
+- Size formatting and status reporting
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional)
+- `TINKER_RUN_ID` (optional, filters checkpoints by training run)
+
+### checkpoint_download.exs
+
+This example demonstrates the complete checkpoint download workflow including URL retrieval, archive download with progress tracking, and automatic extraction. It includes intelligent fallback mechanisms to automatically discover available checkpoints when none are explicitly specified.
+
+**Key Features:**
+- Checkpoint discovery and validation
+- Archive URL retrieval
+- Streaming download with progress callbacks
+- Tar archive extraction
+- Automatic cleanup of temporary files
+- Fallback checkpoint creation for testing
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional)
+- `TINKER_CHECKPOINT_PATH` (optional, explicit checkpoint to download)
+- `TINKER_OUTPUT_DIR` (optional, defaults to current directory)
+- `FORCE` (optional, "true" to overwrite existing directories)
+- `TINKER_BASE_MODEL` (optional, used for fallback checkpoint generation)
+
+### async_client_creation.exs
+
+This example illustrates asynchronous client creation patterns enabling concurrent initialization of multiple sampling clients. It demonstrates the use of Elixir tasks for parallel operations and efficient resource utilization.
+
+**Key Features:**
+- Asynchronous sampling client creation
+- Concurrent multi-client initialization
+- Task-based parallelism with Task.await_many
+- Performance timing and reporting
+- Error handling for concurrent operations
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional)
+- `TINKER_BASE_MODEL` (optional, for single client mode)
+- `TINKER_CHECKPOINT_PATHS` (optional, comma-separated paths for concurrent mode)
+
+### cli_run_text.exs
+
+This example demonstrates programmatic usage of the Tinkex CLI interface for text-based sampling operations. It shows how to construct CLI arguments dynamically and invoke the CLI from within Elixir code.
+
+**Key Features:**
+- Programmatic CLI invocation
+- Dynamic argument construction
+- Configuration via environment variables
+- JSON output support
+- Error handling and reporting
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional)
+- `TINKER_BASE_MODEL` (optional)
+- `TINKER_PROMPT` (optional)
+- `TINKER_MAX_TOKENS` (optional)
+- `TINKER_TEMPERATURE` (optional)
+- `TINKER_NUM_SAMPLES` (optional)
+
+### cli_run_prompt_file.exs
+
+This example demonstrates CLI usage with file-based prompts, showing how to prepare prompt files, execute CLI commands with file inputs, and capture JSON-formatted outputs to disk.
+
+**Key Features:**
+- Prompt file preparation and management
+- File-based CLI invocation
+- JSON output capture
+- Temporary file handling
+- Output preview and verification
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional)
+- `TINKER_BASE_MODEL` (optional)
+- `TINKER_PROMPT` or `TINKER_PROMPT_TOKENS` (optional, prompt file content)
+
+## Common Patterns
+
+Several patterns appear consistently across these examples and represent best practices for working with the Tinkex SDK:
+
+**Application Startup:** All examples begin with `Application.ensure_all_started(:tinkex)` to ensure proper initialization of the SDK and its dependencies.
+
+**Configuration Management:** Examples use environment variables extensively, providing sensible defaults while allowing customization for different deployment scenarios.
+
+**Error Handling:** Examples demonstrate proper error handling using Elixir's tagged tuple pattern, with fallback behaviors and user-friendly error messages.
+
+**Resource Cleanup:** Examples properly clean up resources by stopping GenServer processes and removing temporary files when operations complete.
+
+**Async Operations:** Examples that perform network operations use Task-based asynchronous patterns to avoid blocking the caller and enable concurrent operations.
+
+## Troubleshooting
+
+If you encounter issues running these examples, consider the following:
+
+**Authentication Failures:** Verify that your `TINKER_API_KEY` is valid and has not expired. The key should be set as an environment variable before running any example.
+
+**Network Connectivity:** Ensure you have network access to the Tinker API endpoints. If using a custom base URL, verify the endpoint is reachable and properly configured.
+
+**Model Availability:** Some models may not be available in all deployment environments. If you encounter model-related errors, try using a different base model or verify that your account has access to the specified model.
+
+**Timeout Issues:** Long-running operations may exceed default timeout values. Consider increasing timeout values through configuration or environment variables if you encounter timeout errors.
+
+**Checkpoint Not Found:** In checkpoint examples, ensure that checkpoints actually exist for your account. The checkpoint download example includes automatic fallback mechanisms, but other examples may require valid checkpoint identifiers.
+
+## Additional Resources
+
+For more detailed information about specific SDK features and APIs, refer to the main Tinkex documentation and the implementation guides in the `20251121/tinker-updates/` directory, which provide comprehensive technical specifications and usage patterns.

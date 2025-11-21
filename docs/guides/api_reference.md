@@ -7,9 +7,21 @@ This guide summarizes the public modules that make up the Tinkex SDK. Full types
 - `start_link/1` – boots a session using `Tinkex.Config` (pulling API key/base URL from env if not supplied).
 - `create_lora_training_client/2` – spawns a TrainingClient; pass `:base_model`, optional `:lora_config`, and user metadata.
 - `create_sampling_client/2` – spawns a SamplingClient for a base model or an existing model path.
-- `create_rest_client/1` – returns `%{session_id, config}` for low-level API calls.
+- `create_sampling_client_async/2` – async variant that returns a `Task.t()` for concurrent bootstrapping.
+- `create_rest_client/1` – returns a `Tinkex.RestClient` for session/checkpoint REST calls.
 
 Each ServiceClient maintains sequencing counters for per-model operations; Training/Sampling clients inherit the session/config so multi-tenant callers can keep pools isolated by config.
+
+## RestClient
+
+- `list_sessions/2` – paginate through active session IDs.
+- `get_session/2` – fetch training run IDs and sampler IDs for a session.
+- `list_user_checkpoints/2` – paginate through the caller's checkpoints (with cursor metadata).
+- `list_checkpoints/2` – list checkpoints for a specific training run.
+- `get_checkpoint_archive_url/2` – return a signed download URL for a checkpoint.
+- `delete_checkpoint/2` – delete a checkpoint by `tinker://` path.
+
+All methods return typed structs (`ListSessionsResponse`, `GetSessionResponse`, `CheckpointsListResponse`, `CheckpointArchiveUrlResponse`) to match the Python SDK wire format.
 
 ## TrainingClient
 
@@ -18,15 +30,23 @@ Each ServiceClient maintains sequencing counters for per-model operations; Train
 - `optim_step/3` – performs an optimizer step with `%Tinkex.Types.AdamParams{}`.
 - `save_weights_for_sampler/2` – persists weights and optionally specifies `:path` and `:sampling_session_seq_id` for deterministic naming. Returns a Task whose result may include a polling future.
 - `get_info/1` – stubbed until the info endpoint is wired; used by tokenizer resolution when available.
+- `create_sampling_client_async/3` – create a SamplingClient from a checkpoint path in a Task for concurrent fan-out.
 
 Training clients are stateful per model (`model_seq_id`) and reuse the HTTP pool configured in `Tinkex.Config`.
 
 ## SamplingClient
 
 - `sample/4` – submits a sampling request and returns a Task. Accepts `num_samples`, `prompt_logprobs`, `topk_prompt_logprobs`, `:timeout`, and `:await_timeout` options.
+- `create_async/2` – convenience wrapper over `ServiceClient.create_sampling_client_async/2` when you already have a service PID.
 - Reads config and rate limiter state from ETS for lock-free concurrent sampling (fan out Tasks freely).
 - Honors `Tinkex.RateLimiter` backoff; a 429 response sets a backoff window, while successful calls clear it.
 - Accepts prompts as `%Tinkex.Types.ModelInput{}` (use `ModelInput.from_text/2` for plain text).
+
+## CheckpointDownload
+
+- `download/3` – fetch and extract a checkpoint archive for a given `tinker://` path.
+- Supports `:output_dir`, `:force` overwrite, and `:progress` callbacks (`fn downloaded, total -> ... end`).
+- Cleans up temporary archives and returns the extraction directory for downstream processing.
 
 ## Tokenizers and Types
 

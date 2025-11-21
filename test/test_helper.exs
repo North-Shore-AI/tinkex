@@ -10,6 +10,7 @@ end
 
 ExUnit.start()
 {:ok, _} = Application.ensure_all_started(:supertester)
+{:ok, _} = Application.ensure_all_started(:tinkex)
 
 ExUnit.configure(exclude: [slow: true])
 

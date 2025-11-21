@@ -27,8 +27,9 @@ defmodule Tinkex.SessionManager do
   Create a new session for the given config.
   """
   @spec start_session(Config.t(), GenServer.server()) :: {:ok, session_id()} | {:error, term()}
-  def start_session(config, server \\ __MODULE__) do
-    GenServer.call(server, {:start_session, config})
+  def start_session(%Config{} = config, server \\ __MODULE__) do
+    timeout = config.timeout + timeout_buffer(config.timeout)
+    GenServer.call(server, {:start_session, config}, timeout)
   end
 
   @doc """
@@ -38,6 +39,9 @@ defmodule Tinkex.SessionManager do
   def stop_session(session_id, server \\ __MODULE__) when is_binary(session_id) do
     GenServer.cast(server, {:stop_session, session_id})
   end
+
+  defp timeout_buffer(timeout_ms) when timeout_ms < 5_000, do: 5_000
+  defp timeout_buffer(_timeout_ms), do: 1_000
 
   @impl true
   def init(opts) do

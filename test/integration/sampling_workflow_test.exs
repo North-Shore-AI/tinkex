@@ -11,6 +11,14 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
     :ok
   end
 
+  setup %{config: config} do
+    {config.base_url, config.api_key}
+    |> RateLimiter.for_key()
+    |> RateLimiter.clear_backoff()
+
+    :ok
+  end
+
   test "creates sampling client and returns sample response", %{bypass: bypass, config: config} do
     Bypass.expect(bypass, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)

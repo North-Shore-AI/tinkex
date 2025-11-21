@@ -35,6 +35,21 @@ defmodule Tinkex.SamplingClient do
   end
 
   @doc """
+  Create a sampling client asynchronously.
+
+  This is a convenience function that delegates to `ServiceClient.create_sampling_client_async/2`.
+
+  ## Examples
+
+      task = SamplingClient.create_async(service_pid, base_model: "meta-llama/Llama-3.2-1B")
+      {:ok, sampling_pid} = Task.await(task)
+  """
+  @spec create_async(pid(), keyword()) :: Task.t()
+  def create_async(service_client, opts \\ []) do
+    Tinkex.ServiceClient.create_sampling_client_async(service_client, opts)
+  end
+
+  @doc """
   Submit a sampling request.
 
   Returns a `Task.t()` that yields `{:ok, %SampleResponse{}}` or

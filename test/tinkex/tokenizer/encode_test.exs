@@ -59,12 +59,7 @@ defmodule Tinkex.Tokenizer.EncodeTest do
   end
 
   defp ensure_table do
-    case :ets.whereis(:tinkex_tokenizers) do
-      :undefined ->
-        :ets.new(:tinkex_tokenizers, [:set, :public, :named_table, read_concurrency: true])
-
-      _ ->
-        :ok
-    end
+    {:ok, _} = Application.ensure_all_started(:tinkex)
+    :ok
   end
 end

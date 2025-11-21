@@ -43,15 +43,45 @@ defmodule Tinkex.ServiceClient do
   end
 
   @doc """
-  Return a thin REST client representation (session + config).
+  Create a sampling client asynchronously.
+
+  Returns a Task that resolves to `{:ok, pid}` or `{:error, reason}`.
+
+  ## Examples
+
+      task = ServiceClient.create_sampling_client_async(service_pid, base_model: "meta-llama/Llama-3.2-1B")
+      {:ok, sampling_pid} = Task.await(task)
   """
-  @spec create_rest_client(t()) :: {:ok, map()}
+  @spec create_sampling_client_async(t(), keyword()) :: Task.t()
+  def create_sampling_client_async(service_client, opts \\ []) do
+    Task.async(fn ->
+      create_sampling_client(service_client, opts)
+    end)
+  end
+
+  @doc """
+  Return a REST client for session and checkpoint management.
+  """
+  @spec create_rest_client(t()) :: {:ok, Tinkex.RestClient.t()}
   def create_rest_client(service_client) do
     GenServer.call(service_client, :create_rest_client)
   end
 
   @impl true
   def init(opts) do
+    client_supervisor = Keyword.get(opts, :client_supervisor, :local)
+
+    with {:ok, _} <- Application.ensure_all_started(:tinkex),
+         :ok <- ensure_core_tables(),
+         {:ok, client_supervisor_pid} <- ensure_client_supervisor(client_supervisor),
+         :ok <- ensure_sampling_registry() do
+      do_init(opts, client_supervisor_pid)
+    else
+      {:error, reason} -> {:stop, reason}
+    end
+  end
+
+  defp do_init(opts, client_supervisor) do
     config = opts[:config] || Config.new(opts)
 
     training_module = Keyword.get(opts, :training_client_module, Tinkex.TrainingClient)
@@ -67,13 +97,84 @@ defmodule Tinkex.ServiceClient do
           config: config,
           training_client_module: training_module,
           sampling_client_module: sampling_module,
-          session_manager: session_manager
+          session_manager: session_manager,
+          client_supervisor: client_supervisor
         }
 
         {:ok, state}
 
       {:error, reason} ->
         {:stop, reason}
+    end
+  end
+
+  defp ensure_client_supervisor(:local) do
+    DynamicSupervisor.start_link(strategy: :one_for_one)
+  end
+
+  defp ensure_client_supervisor(pid) when is_pid(pid), do: {:ok, pid}
+
+  defp ensure_client_supervisor(name) when is_atom(name) do
+    case Process.whereis(name) do
+      nil ->
+        DynamicSupervisor.start_link(strategy: :one_for_one, name: name)
+
+      pid ->
+        {:ok, pid}
+    end
+  end
+
+  defp ensure_sampling_registry do
+    case Process.whereis(Tinkex.SamplingRegistry) do
+      nil ->
+        case Tinkex.SamplingRegistry.start_link(name: Tinkex.SamplingRegistry) do
+          {:ok, _pid} -> :ok
+          {:error, {:already_started, _pid}} -> :ok
+          {:error, reason} -> {:error, reason}
+        end
+
+      _pid ->
+        :ok
+    end
+  end
+
+  defp ensure_core_tables do
+    ensure_table(:tinkex_sampling_clients, [
+      :set,
+      :public,
+      :named_table,
+      read_concurrency: true
+    ])
+
+    ensure_table(:tinkex_rate_limiters, [
+      :set,
+      :public,
+      :named_table,
+      read_concurrency: true,
+      write_concurrency: true
+    ])
+
+    ensure_table(:tinkex_tokenizers, [
+      :set,
+      :public,
+      :named_table,
+      read_concurrency: true
+    ])
+
+    :ok
+  end
+
+  defp ensure_table(name, options) do
+    case :ets.whereis(name) do
+      :undefined ->
+        try do
+          :ets.new(name, options)
+        rescue
+          ArgumentError -> :ok
+        end
+
+      _ ->
+        :ok
     end
   end
 
@@ -86,9 +187,10 @@ defmodule Tinkex.ServiceClient do
       |> Keyword.put(:session_id, state.session_id)
       |> Keyword.put(:config, state.config)
       |> Keyword.put(:model_seq_id, model_seq_id)
+      |> Keyword.put(:client_supervisor, state.client_supervisor)
 
     case DynamicSupervisor.start_child(
-           Tinkex.ClientSupervisor,
+           state.client_supervisor,
            {state.training_client_module, child_opts}
          ) do
       {:ok, pid} ->
@@ -110,7 +212,7 @@ defmodule Tinkex.ServiceClient do
       |> Keyword.put(:sampling_client_id, sampling_client_id)
 
     case DynamicSupervisor.start_child(
-           Tinkex.ClientSupervisor,
+           state.client_supervisor,
            {state.sampling_client_module, child_opts}
          ) do
       {:ok, pid} ->
@@ -123,7 +225,8 @@ defmodule Tinkex.ServiceClient do
 
   @impl true
   def handle_call(:create_rest_client, _from, state) do
-    {:reply, {:ok, %{session_id: state.session_id, config: state.config}}, state}
+    client = Tinkex.RestClient.new(state.session_id, state.config)
+    {:reply, {:ok, client}, state}
   end
 
   @impl true

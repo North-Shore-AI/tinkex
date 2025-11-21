@@ -4,6 +4,16 @@ defmodule Tinkex.SessionManagerTest do
   alias Plug.Conn
   alias Tinkex.{Config, SessionManager}
 
+  defmodule SlowSessionAPI do
+    def create(_request, config: _config) do
+      delay = Application.get_env(:tinkex, :session_api_delay, 0)
+      Process.sleep(delay)
+      {:ok, %{"session_id" => "session-timeout"}}
+    end
+
+    def heartbeat(_request, config: _config), do: {:ok, %{}}
+  end
+
   setup do
     bypass = Bypass.open()
     base_url = "http://localhost:#{bypass.port}"
@@ -100,8 +110,9 @@ defmodule Tinkex.SessionManagerTest do
     SessionManager.stop_session("session-3", manager)
   end
 
-  defp expect_create_session(bypass, session_id) do
+  defp expect_create_session(bypass, session_id, delay_ms \\ 0) do
     Bypass.expect_once(bypass, "POST", "/api/v1/create_session", fn conn ->
+      Process.sleep(delay_ms)
       Conn.resp(conn, 200, ~s({"session_id":"#{session_id}"}))
     end)
   end
@@ -123,5 +134,27 @@ defmodule Tinkex.SessionManagerTest do
 
   defp sessions(manager) do
     :sys.get_state(manager).sessions
+  end
+
+  test "start_session respects config timeout", %{
+    config: config
+  } do
+    short_config = %{config | timeout: 200}
+    Application.put_env(:tinkex, :session_api_delay, short_config.timeout)
+
+    child_spec =
+      Supervisor.child_spec(
+        {SessionManager,
+         name: :"session_manager_timeout_#{System.unique_integer([:positive])}",
+         heartbeat_interval_ms: 1_000_000,
+         session_api: SlowSessionAPI},
+        id: {:session_manager_timeout, System.unique_integer([:positive])}
+      )
+
+    {:ok, manager_pid} = start_supervised(child_spec)
+
+    on_exit(fn -> Application.delete_env(:tinkex, :session_api_delay) end)
+
+    assert {:ok, "session-timeout"} = SessionManager.start_session(short_config, manager_pid)
   end
 end

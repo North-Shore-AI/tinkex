@@ -122,4 +122,35 @@ defmodule Tinkex.Config do
       end
     end
   end
+
+  @doc false
+  @spec mask_api_key(String.t() | nil) :: String.t() | nil
+  def mask_api_key(nil), do: nil
+
+  def mask_api_key(api_key) when is_binary(api_key) do
+    case String.length(api_key) do
+      len when len <= 4 ->
+        String.duplicate("*", len)
+
+      len ->
+        prefix = String.slice(api_key, 0, min(6, len - 2))
+        suffix = String.slice(api_key, -4, 4)
+        "#{prefix}...#{suffix}"
+    end
+  end
+
+  def mask_api_key(other), do: other
+end
+
+defimpl Inspect, for: Tinkex.Config do
+  import Inspect.Algebra
+
+  def inspect(config, opts) do
+    data =
+      config
+      |> Map.from_struct()
+      |> Map.update(:api_key, nil, &Tinkex.Config.mask_api_key/1)
+
+    concat(["#Tinkex.Config<", to_doc(data, opts), ">"])
+  end
 end

@@ -86,6 +86,38 @@ defmodule Tinkex.API do
     handle_response(result)
   end
 
+  @impl true
+  @spec delete(String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def delete(path, opts) do
+    config = Keyword.fetch!(opts, :config)
+
+    url = build_url(config.base_url, path)
+    timeout = Keyword.get(opts, :timeout, config.timeout)
+    headers = build_headers(:delete, config.api_key, opts, timeout)
+    max_retries = Keyword.get(opts, :max_retries, config.max_retries)
+    pool_type = Keyword.get(opts, :pool_type, :default)
+
+    metadata = %{
+      method: :delete,
+      path: path,
+      pool_type: pool_type,
+      base_url: config.base_url
+    }
+
+    request = Finch.build(:delete, url, headers)
+
+    pool_key = PoolKey.build(config.base_url, pool_type)
+
+    {result, _retry_count} =
+      execute_with_telemetry(
+        &with_retries/5,
+        [request, config.http_pool, timeout, pool_key, max_retries],
+        metadata
+      )
+
+    handle_response(result)
+  end
+
   defp execute_with_telemetry(fun, args, metadata) do
     start_native = System.monotonic_time()
 
@@ -128,12 +160,21 @@ defmodule Tinkex.API do
     base = URI.parse(base_url)
     base_path = base.path || "/"
 
+    {relative_path, query} =
+      case String.split(path, "?", parts: 2) do
+        [p, q] -> {p, q}
+        [p] -> {p, nil}
+      end
+
     merged_path =
-      path
+      relative_path
       |> String.trim_leading("/")
       |> then(fn trimmed -> Path.join(base_path, trimmed) end)
 
-    %{base | path: merged_path} |> URI.to_string()
+    uri = %{base | path: merged_path}
+    uri = if query, do: %{uri | query: query}, else: uri
+
+    URI.to_string(uri)
   end
 
   defp build_headers(method, api_key, opts, timeout_ms) do
@@ -206,6 +247,25 @@ defmodule Tinkex.API do
     {:error, build_error(message, :api_connection, nil, nil, %{exception: exception})}
   end
 
+  defp do_handle_response(%Finch.Response{status: status, headers: headers} = response)
+       when status in [301, 302, 307, 308] do
+    case find_header_value(headers, "location") do
+      nil ->
+        {:error,
+         build_error(
+           "Redirect without Location header",
+           :api_status,
+           status,
+           :server,
+           %{body: response.body}
+         )}
+
+      location ->
+        expires = find_header_value(headers, "expires")
+        {:ok, %{"url" => location, "status" => status, "expires" => expires}}
+    end
+  end
+
   defp do_handle_response(%Finch.Response{status: status, body: body})
        when status in 200..299 do
     case Jason.decode(body) do
@@ -275,6 +335,18 @@ defmodule Tinkex.API do
       {:ok, data} -> data
       {:error, _} -> %{"message" => body}
     end
+  end
+
+  defp find_header_value(headers, target) do
+    target = String.downcase(target)
+
+    Enum.find_value(headers, fn
+      {k, v} ->
+        if String.downcase(k) == target, do: v, else: nil
+
+      _ ->
+        nil
+    end)
   end
 
   defp build_error(message, type, status, category, data, retry_after_ms \\ nil) do

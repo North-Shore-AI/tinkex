@@ -221,7 +221,25 @@ defmodule Tinkex.Tokenizer do
   defp ensure_table! do
     case :ets.whereis(@tokenizer_table) do
       :undefined ->
-        :ets.new(@tokenizer_table, [:set, :public, :named_table, read_concurrency: true])
+        # Ensure the application is started so the shared ETS tables are created
+        case Application.ensure_all_started(:tinkex) do
+          {:ok, _} ->
+            :ok
+
+          {:error, {:already_started, _}} ->
+            :ok
+
+          {:error, reason} ->
+            raise ArgumentError, "could not start :tinkex application: #{inspect(reason)}"
+        end
+
+        case :ets.whereis(@tokenizer_table) do
+          :undefined ->
+            :ets.new(@tokenizer_table, [:set, :public, :named_table, read_concurrency: true])
+
+          _ ->
+            @tokenizer_table
+        end
 
       _ ->
         @tokenizer_table

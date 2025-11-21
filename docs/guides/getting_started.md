@@ -10,7 +10,7 @@ Add the dependency and fetch packages:
 # mix.exs
 def deps do
   [
-    {:tinkex, "~> 0.1.0"}
+    {:tinkex, "~> 0.1.1"}
   ]
 end
 ```
@@ -66,6 +66,29 @@ IO.inspect(response.samples, label: "samples")
 
 `SamplingClient.sample/4` returns a `Task.t()` so you can await, stream, or supervise requests alongside other work.
 
+## Session & checkpoint management (REST)
+
+Use the synchronous `RestClient` to inspect sessions and checkpoints, then pull artifacts with `CheckpointDownload`:
+
+```elixir
+{:ok, service} = Tinkex.ServiceClient.start_link(config: config)
+{:ok, rest} = Tinkex.ServiceClient.create_rest_client(service)
+
+{:ok, sessions} = Tinkex.RestClient.list_sessions(rest, limit: 10)
+IO.inspect(sessions.sessions, label: "sessions")
+
+{:ok, checkpoints} = Tinkex.RestClient.list_user_checkpoints(rest, limit: 20)
+IO.inspect(Enum.map(checkpoints.checkpoints, & &1.tinker_path), label: "checkpoints")
+
+{:ok, download} =
+  Tinkex.CheckpointDownload.download(rest, "tinker://run-123/weights/0001",
+    output_dir: "./models",
+    force: true
+  )
+
+IO.puts("Extracted to #{download.destination}")
+```
+
 ## CLI checkpoints and runs
 
 After `MIX_ENV=prod mix escript.build`, invoke the CLI:
@@ -93,6 +116,7 @@ Flags to know:
 - `--prompt-file <path>` reads a prompt from disk (plain text or JSON array of token IDs).
 - `--json` prints the full response payload instead of decoded text.
 - `--output <path>` writes generation output to a file.
+- For parallelism and quicker startup, prefer the async client factories (`Tinkex.ServiceClient.create_sampling_client_async/2` and `Tinkex.SamplingClient.create_async/2`) inside your own scripts; the CLI remains a thin wrapper over the same APIs.
 
 See `./tinkex checkpoint --help` and `./tinkex run --help` for the full option set, plus the troubleshooting guide for timeout/backoff tips.
 
