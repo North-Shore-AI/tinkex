@@ -40,6 +40,23 @@ defmodule Tinkex.Types.FutureRetrieveResponseTest do
       assert result.error["message"] == "Something went wrong"
     end
 
+    test "parses forward_backward output without status" do
+      json = %{
+        "loss_fn_output_type" => "CrossEntropyLossReturn",
+        "loss_fn_outputs" => [
+          %{
+            "elementwise_loss" => %{"data" => [1.0, 2.0], "dtype" => "float32", "shape" => [2]},
+            "logprobs" => %{"data" => [0.1, 0.2], "dtype" => "float32", "shape" => [2]}
+          }
+        ],
+        "metrics" => %{"loss" => 3.5}
+      }
+
+      result = FutureRetrieveResponse.from_json(json)
+
+      assert %FutureCompletedResponse{status: "completed", result: ^json} = result
+    end
+
     test "parses try_again response with active queue" do
       json = %{
         "type" => "try_again",

@@ -101,6 +101,17 @@ defmodule Tinkex.Types.FutureRetrieveResponse do
     }
   end
 
+  # Some endpoints (e.g. thinker forward_backward) return the final result
+  # directly with no status/type wrapper. Detect the ForwardBackwardOutput shape
+  # and normalize it into a completed response so the poll loop can handle it.
+  def from_json(%{"loss_fn_output_type" => _} = json) do
+    %FutureCompletedResponse{status: "completed", result: json}
+  end
+
+  def from_json(%{loss_fn_output_type: _} = json) do
+    %FutureCompletedResponse{status: "completed", result: json}
+  end
+
   def from_json(%{"type" => _} = json) do
     %FutureCompletedResponse{status: "completed", result: json}
   end
