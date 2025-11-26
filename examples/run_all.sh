@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 EXAMPLES=(
   "sampling_basic.exs"
   "training_loop.exs"
+  "forward_inference.exs"
   "sessions_management.exs"
   "checkpoints_management.exs"
   "weights_inspection.exs"

@@ -13,15 +13,17 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the Tinker distributed machine learning platform. It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.3 Highlights
+## 0.1.4 Highlights
 
-- `SessionManager.stop_session/2` now makes a synchronous GenServer call so heartbeat loops finish cleaning up before clients return, and heartbeat errors caused by user-visible failures (e.g., missing sessions) now silently drop the stale session to match the Python SDK.
-- New REST endpoints let you fetch samplers, weights metadata, and training runs; richer types (`GetSamplerResponse`, `WeightsInfoResponse`, `ImageChunk.expected_tokens`, `LoadWeightsRequest.load_optimizer_state`, and `:cispo`/`:dro` `LossFnType`) plus updated regen tests round-trip these payloads.
-- `weights_inspection.exs` walks through querying checkpoint metadata, LoRA rank, and sampler state via the REST client, and the docs now include architectural analysis plus a Structured Regularizers design document that guides composable loss functions and telemetry with Nx/EXLA gradients.
+- **EXLA Backend**: Added `{:exla, "~> 0.7"}` dependency and configured Nx to use EXLA for GPU/CPU-accelerated tensor operations, enabling custom loss computation in Elixir.
+- **Forward-Only API**: New `TrainingClient.forward/4` runs inference without backward pass, returning logprobs that can be converted to Nx tensors via `TensorData.to_nx/1` for custom loss workflows.
+- **Custom Loss Foundation**: The forward API + EXLA backend enables structured regularizer pipelines where gradients are computed in Elixir/Nx rather than on the server.
 
 ## Features
 
 - **TrainingClient**: Fine-tune models with forward/backward passes and gradient-based optimization
+- **Forward-Only Inference**: `TrainingClient.forward/4` returns logprobs without backward pass for custom loss computation
+- **EXLA Backend**: Nx tensors use EXLA for GPU/CPU-accelerated operations out of the box
 - **SamplingClient**: Generate text completions with customizable sampling parameters
 - **ServiceClient**: Manage models, sessions, and service operations
 - **RestClient**: List sessions, enumerate user checkpoints, fetch archive URLs, and delete checkpoints
@@ -41,7 +43,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.3"}
+    {:tinkex, "~> 0.1.4"}
   ]
 end
 ```
@@ -311,6 +313,7 @@ Packaging options:
 Run any of the sample scripts with `mix run examples/<name>.exs` (requires `TINKER_API_KEY`):
 
 - `training_loop.exs` – minimal forward/backward + optim + save flow
+- `forward_inference.exs` – forward-only pass with Nx/EXLA tensor conversion for custom loss
 - `sampling_basic.exs` – create a sampling client and decode completions
 - `sessions_management.exs` – explore REST-based session listing and lookup
 - `checkpoints_management.exs` – list user checkpoints and inspect metadata

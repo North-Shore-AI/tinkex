@@ -23,6 +23,7 @@ defmodule Tinkex.TrainingClient do
     ForwardBackwardInput,
     ForwardBackwardOutput,
     ForwardBackwardRequest,
+    ForwardRequest,
     LoraConfig,
     OptimStepRequest,
     OptimStepResponse,
@@ -62,6 +63,33 @@ defmodule Tinkex.TrainingClient do
     {:ok,
      Task.async(fn ->
        GenServer.call(client, {:forward_backward, data, loss_fn, opts}, :infinity)
+     end)}
+  end
+
+  @doc """
+  Run a forward-only pass over the provided data (inference without backward).
+
+  Returns logprobs that can be converted to Nx tensors via `TensorData.to_nx/1`.
+  Useful for custom loss computation where gradients are computed in Elixir/Nx.
+
+  Returns a `Task.t()` that yields `{:ok, %ForwardBackwardOutput{}}` or
+  `{:error, %Tinkex.Error{}}`.
+
+  ## Examples
+
+      {:ok, task} = TrainingClient.forward(client, data, :cross_entropy)
+      {:ok, output} = Task.await(task)
+
+      # Access logprobs from output.loss_fn_outputs
+      [%{"logprobs" => logprobs_data}] = output.loss_fn_outputs
+      tensor = TensorData.to_nx(%TensorData{...logprobs_data})
+  """
+  @spec forward(t(), [map()], atom() | String.t(), keyword()) ::
+          {:ok, Task.t()} | {:error, Error.t()}
+  def forward(client, data, loss_fn, opts \\ []) do
+    {:ok,
+     Task.async(fn ->
+       GenServer.call(client, {:forward, data, loss_fn, opts}, :infinity)
      end)}
   end
 
@@ -126,7 +154,7 @@ defmodule Tinkex.TrainingClient do
           model_seq_id: model_seq_id,
           config: config,
           http_pool: config.http_pool,
-          request_id_counter: 0,
+          request_id_counter: 1,
           training_api: training_api,
           weights_api: weights_api,
           future_module: future_module,
@@ -176,6 +204,69 @@ defmodule Tinkex.TrainingClient do
                 end)
 
               case await_forward_backward_results(polling_tasks, state.future_module) do
+                {:ok, outputs} ->
+                  {:ok, Combiner.combine_forward_backward_results(outputs)}
+
+                {:error, %Error{} = error} ->
+                  {:error, error}
+              end
+            rescue
+              e ->
+                {:error,
+                 %Error{
+                   message: "Polling failed: #{Exception.message(e)}",
+                   type: :request_failed,
+                   data: %{exception: e, stacktrace: __STACKTRACE__}
+                 }}
+            end
+
+          try do
+            GenServer.reply(from, reply)
+          rescue
+            ArgumentError -> :ok
+          end
+        end)
+
+        {:noreply, %{state | request_id_counter: new_counter}}
+    end
+  end
+
+  @impl true
+  def handle_call({:forward, data, loss_fn, opts}, from, state) do
+    chunks = chunk_data(data)
+    {seq_ids, new_counter} = allocate_request_ids(length(chunks), state.request_id_counter)
+
+    send_result =
+      Enum.reduce_while(Enum.zip(seq_ids, chunks), {:ok, []}, fn {seq_id, chunk}, {:ok, acc} ->
+        case send_forward_request(chunk, loss_fn, seq_id, opts, state) do
+          {:ok, future} -> {:cont, {:ok, [future | acc]}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+
+    case send_result do
+      {:error, reason} ->
+        {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
+
+      {:ok, futures_rev} ->
+        futures = Enum.reverse(futures_rev)
+
+        Task.start(fn ->
+          reply =
+            try do
+              polling_tasks =
+                Enum.map(futures, fn future ->
+                  task =
+                    state.future_module.poll(
+                      future,
+                      poll_opts_with_type(state, opts, "Forward")
+                    )
+
+                  unlink_task(task)
+                  task
+                end)
+
+              case await_forward_results(polling_tasks, state.future_module) do
                 {:ok, outputs} ->
                   {:ok, Combiner.combine_forward_backward_results(outputs)}
 
@@ -385,6 +476,32 @@ defmodule Tinkex.TrainingClient do
     end
   end
 
+  defp send_forward_request(chunk, loss_fn, seq_id, opts, state) do
+    request = %ForwardRequest{
+      forward_input: %ForwardBackwardInput{
+        data: chunk,
+        loss_fn: loss_fn,
+        loss_fn_config: Keyword.get(opts, :loss_fn_config)
+      },
+      model_id: state.model_id,
+      seq_id: seq_id
+    }
+
+    case state.training_api.forward_future(request, config: state.config) do
+      {:ok, %{"request_id" => request_id}} ->
+        {:ok, %{request_id: request_id}}
+
+      {:ok, %{request_id: _} = future} ->
+        {:ok, future}
+
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      other ->
+        {:error, Error.new(:validation, "Invalid forward response: #{inspect(other)}")}
+    end
+  end
+
   defp send_optim_step_request(adam_params, seq_id, _opts, state) do
     request = %OptimStepRequest{
       adam_params: adam_params,
@@ -433,6 +550,21 @@ defmodule Tinkex.TrainingClient do
     case safe_await(future_module, task, :infinity) do
       {:ok, result} ->
         with {:ok, remaining} <- await_forward_backward_results(rest, future_module) do
+          {:ok, [ForwardBackwardOutput.from_json(result) | remaining]}
+        end
+
+      {:error, %Error{} = error} ->
+        Enum.each(rest, &Task.shutdown(&1, :brutal_kill))
+        {:error, error}
+    end
+  end
+
+  defp await_forward_results([], _future_module), do: {:ok, []}
+
+  defp await_forward_results([task | rest], future_module) do
+    case safe_await(future_module, task, :infinity) do
+      {:ok, result} ->
+        with {:ok, remaining} <- await_forward_results(rest, future_module) do
           {:ok, [ForwardBackwardOutput.from_json(result) | remaining]}
         end
 

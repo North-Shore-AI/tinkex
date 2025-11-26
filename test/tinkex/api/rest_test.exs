@@ -189,10 +189,11 @@ defmodule Tinkex.API.RestTest do
   end
 
   describe "get_weights_info_by_tinker_path/2" do
-    test "sends GET request with URL-encoded path", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, "GET", "/api/v1/weights/info", fn conn ->
-        # The tinker path gets URL-encoded
-        assert conn.query_params["path"] == "tinker://run-id/weights/checkpoint-001"
+    test "sends POST request with tinker_path in body", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "POST", "/api/v1/weights_info", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        payload = Jason.decode!(body)
+        assert payload["tinker_path"] == "tinker://run-id/weights/checkpoint-001"
 
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
@@ -212,7 +213,7 @@ defmodule Tinkex.API.RestTest do
     end
 
     test "handles response without lora_rank", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, "GET", "/api/v1/weights/info", fn conn ->
+      Bypass.expect_once(bypass, "POST", "/api/v1/weights_info", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(200, ~s({"base_model": "test-model", "is_lora": false}))
@@ -225,7 +226,7 @@ defmodule Tinkex.API.RestTest do
     end
 
     test "returns error on failure", %{bypass: bypass, config: config} do
-      Bypass.expect_once(bypass, "GET", "/api/v1/weights/info", fn conn ->
+      Bypass.expect_once(bypass, "POST", "/api/v1/weights_info", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(404, ~s({"error": "Weights not found"}))

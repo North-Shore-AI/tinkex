@@ -1,12 +1,11 @@
 defmodule Tinkex.Examples.WeightsInspection do
   @moduledoc """
-  Example demonstrating weights and sampler inspection APIs.
+  Example demonstrating training run and checkpoint inspection APIs.
 
   Shows how to:
-  - Inspect checkpoint metadata (base model, LoRA rank, etc.)
-  - Query sampler state and loaded weights
   - List and inspect training runs
-  - Validate checkpoint compatibility before loading
+  - List checkpoints for training runs
+  - Get checkpoint archive URLs for downloads
   """
 
   alias Tinkex.{ServiceClient, RestClient, Config}
@@ -37,17 +36,12 @@ defmodule Tinkex.Examples.WeightsInspection do
     # List training runs
     list_training_runs(config)
 
-    # If a checkpoint path is provided, inspect it
-    if checkpoint_path = System.get_env("TINKER_CHECKPOINT_PATH") do
-      inspect_checkpoint(config, checkpoint_path)
-    else
-      # Try to find a checkpoint to inspect
-      maybe_inspect_first_checkpoint(rest_client, config)
-    end
+    # List user checkpoints
+    list_user_checkpoints(rest_client)
 
-    # If a sampler ID is provided, query its state
-    if sampler_id = System.get_env("TINKER_SAMPLER_ID") do
-      inspect_sampler(config, sampler_id)
+    # If a training run ID is provided, list its checkpoints
+    if run_id = System.get_env("TINKER_RUN_ID") do
+      list_run_checkpoints(rest_client, run_id)
     end
 
     GenServer.stop(service_pid)
@@ -63,20 +57,27 @@ defmodule Tinkex.Examples.WeightsInspection do
         IO.puts("Found #{length(runs)} training runs:\n")
 
         Enum.each(runs, fn run ->
-          run_id = run["id"] || run[:id]
-          status = run["status"] || run[:status]
+          run_id = run["training_run_id"] || run[:training_run_id]
           base_model = run["base_model"] || run[:base_model]
+          is_lora = run["is_lora"] || run[:is_lora]
+          lora_rank = run["lora_rank"] || run[:lora_rank]
+          corrupted = run["corrupted"] || run[:corrupted]
+          last_checkpoint = run["last_checkpoint"] || run[:last_checkpoint]
+          model_owner = run["model_owner"] || run[:model_owner]
 
           IO.puts("  #{run_id}")
-          IO.puts("    Status: #{status || "N/A"}")
           IO.puts("    Base Model: #{base_model || "N/A"}")
+          IO.puts("    Is LoRA: #{is_lora}, Rank: #{lora_rank || "N/A"}")
+          IO.puts("    Corrupted: #{corrupted || false}")
+          IO.puts("    Last Checkpoint: #{last_checkpoint || "none"}")
+          IO.puts("    Owner: #{model_owner || "N/A"}")
           IO.puts("")
         end)
 
         # Inspect first run in detail if available
         if length(runs) > 0 do
           first_run = hd(runs)
-          run_id = first_run["id"] || first_run[:id]
+          run_id = first_run["training_run_id"] || first_run[:training_run_id]
           inspect_training_run(config, run_id)
         end
 
@@ -90,118 +91,75 @@ defmodule Tinkex.Examples.WeightsInspection do
 
     case Rest.get_training_run(config, run_id) do
       {:ok, run} ->
-        IO.puts("  ID: #{run["id"] || run[:id]}")
-        IO.puts("  Status: #{run["status"] || run[:status] || "N/A"}")
+        IO.puts("  ID: #{run["training_run_id"] || run[:training_run_id]}")
         IO.puts("  Base Model: #{run["base_model"] || run[:base_model] || "N/A"}")
-        IO.puts("  Created: #{run["created_at"] || run[:created_at] || "N/A"}")
+        IO.puts("  Is LoRA: #{run["is_lora"] || run[:is_lora]}")
+        IO.puts("  LoRA Rank: #{run["lora_rank"] || run[:lora_rank] || "N/A"}")
+        IO.puts("  Corrupted: #{run["corrupted"] || run[:corrupted] || false}")
+        IO.puts("  Last Checkpoint: #{run["last_checkpoint"] || run[:last_checkpoint] || "none"}")
 
-        if lora_rank = run["lora_rank"] || run[:lora_rank] do
-          IO.puts("  LoRA Rank: #{lora_rank}")
-        end
+        IO.puts(
+          "  Last Sampler Checkpoint: #{run["last_sampler_checkpoint"] || run[:last_sampler_checkpoint] || "none"}"
+        )
+
+        IO.puts("  Last Request: #{run["last_request_time"] || run[:last_request_time] || "N/A"}")
+        IO.puts("  Owner: #{run["model_owner"] || run[:model_owner] || "N/A"}")
 
       {:error, error} ->
         IO.puts("Error getting training run: #{inspect(error)}")
     end
   end
 
-  defp maybe_inspect_first_checkpoint(rest_client, config) do
-    IO.puts("\n--- Looking for checkpoints to inspect ---")
+  defp list_user_checkpoints(rest_client) do
+    IO.puts("\n--- User Checkpoints ---")
 
-    case RestClient.list_user_checkpoints(rest_client, limit: 5) do
+    case RestClient.list_user_checkpoints(rest_client, limit: 10) do
       {:ok, response} ->
         checkpoints = response.checkpoints || []
+        IO.puts("Found #{length(checkpoints)} checkpoint(s):\n")
 
-        if length(checkpoints) > 0 do
-          first = hd(checkpoints)
-          IO.puts("Found #{length(checkpoints)} checkpoint(s), inspecting first one...")
-          inspect_checkpoint(config, first.tinker_path)
-        else
-          IO.puts(
-            "No checkpoints found. Set TINKER_CHECKPOINT_PATH to inspect a specific checkpoint."
-          )
-        end
+        Enum.each(checkpoints, fn checkpoint ->
+          IO.puts("  #{checkpoint.tinker_path}")
+          IO.puts("    Type: #{checkpoint.checkpoint_type}")
+          IO.puts("    ID: #{checkpoint.checkpoint_id}")
+
+          if checkpoint.size_bytes do
+            size_mb = checkpoint.size_bytes / (1024 * 1024)
+            IO.puts("    Size: #{Float.round(size_mb, 2)} MB")
+          end
+
+          IO.puts("    Time: #{checkpoint.time}")
+          IO.puts("")
+        end)
 
       {:error, error} ->
         IO.puts("Error listing checkpoints: #{inspect(error)}")
     end
   end
 
-  defp inspect_checkpoint(config, tinker_path) do
-    IO.puts("\n--- Checkpoint Inspection: #{tinker_path} ---")
+  defp list_run_checkpoints(rest_client, run_id) do
+    IO.puts("\n--- Checkpoints for Run: #{run_id} ---")
 
-    case Rest.get_weights_info_by_tinker_path(config, tinker_path) do
-      {:ok, weights_info} ->
-        IO.puts("  Base Model: #{weights_info.base_model}")
-        IO.puts("  Is LoRA: #{weights_info.is_lora}")
+    case RestClient.list_checkpoints(rest_client, run_id) do
+      {:ok, response} ->
+        checkpoints = response.checkpoints || []
+        IO.puts("Found #{length(checkpoints)} checkpoint(s):\n")
 
-        if weights_info.lora_rank do
-          IO.puts("  LoRA Rank: #{weights_info.lora_rank}")
-        end
+        Enum.each(checkpoints, fn checkpoint ->
+          IO.puts("  #{checkpoint.checkpoint_id}")
+          IO.puts("    Path: #{checkpoint.tinker_path}")
+          IO.puts("    Type: #{checkpoint.checkpoint_type}")
 
-        # Example: Validate compatibility
-        validate_compatibility(weights_info)
+          if checkpoint.size_bytes do
+            size_mb = checkpoint.size_bytes / (1024 * 1024)
+            IO.puts("    Size: #{Float.round(size_mb, 2)} MB")
+          end
 
-        # Also get training run info from the path
-        inspect_training_run_from_path(config, tinker_path)
-
-      {:error, error} ->
-        IO.puts("Error inspecting checkpoint: #{inspect(error)}")
-    end
-  end
-
-  defp validate_compatibility(weights_info) do
-    IO.puts("\n  Compatibility Check:")
-
-    expected_rank = System.get_env("TINKER_EXPECTED_RANK")
-
-    cond do
-      expected_rank == nil ->
-        IO.puts("    (Set TINKER_EXPECTED_RANK to validate LoRA rank compatibility)")
-
-      not weights_info.is_lora ->
-        IO.puts("    WARNING: Checkpoint is not LoRA, cannot validate rank")
-
-      weights_info.lora_rank == String.to_integer(expected_rank) ->
-        IO.puts("    OK: LoRA rank #{weights_info.lora_rank} matches expected #{expected_rank}")
-
-      true ->
-        IO.puts("    MISMATCH: LoRA rank #{weights_info.lora_rank} != expected #{expected_rank}")
-    end
-  end
-
-  defp inspect_training_run_from_path(config, tinker_path) do
-    IO.puts("\n  Training Run (from path):")
-
-    case Rest.get_training_run_by_tinker_path(config, tinker_path) do
-      {:ok, run} ->
-        IO.puts("    Run ID: #{run["id"] || run[:id]}")
-        IO.puts("    Status: #{run["status"] || run[:status] || "N/A"}")
+          IO.puts("")
+        end)
 
       {:error, error} ->
-        IO.puts("    Could not fetch training run: #{inspect(error)}")
-    end
-  end
-
-  defp inspect_sampler(config, sampler_id) do
-    IO.puts("\n--- Sampler Inspection: #{sampler_id} ---")
-
-    case Rest.get_sampler(config, sampler_id) do
-      {:ok, sampler_info} ->
-        IO.puts("  Sampler ID: #{sampler_info.sampler_id}")
-        IO.puts("  Base Model: #{sampler_info.base_model}")
-
-        if sampler_info.model_path do
-          IO.puts("  Loaded Weights: #{sampler_info.model_path}")
-
-          # If weights are loaded, we can inspect them too
-          IO.puts("\n  Inspecting loaded weights...")
-          inspect_checkpoint(config, sampler_info.model_path)
-        else
-          IO.puts("  Loaded Weights: (none - using base model)")
-        end
-
-      {:error, error} ->
-        IO.puts("Error inspecting sampler: #{inspect(error)}")
+        IO.puts("Error listing run checkpoints: #{inspect(error)}")
     end
   end
 end

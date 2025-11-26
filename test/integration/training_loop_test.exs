@@ -71,9 +71,10 @@ defmodule Tinkex.Integration.TrainingLoopTest do
         "/api/v1/retrieve_future" ->
           payload = Jason.decode!(body)
 
+          # seq_ids start at 1 since 0 is used by create_model
           response =
             case payload["request_id"] do
-              "fw-0" ->
+              "fw-1" ->
                 %{
                   status: "completed",
                   result: %{
@@ -83,7 +84,7 @@ defmodule Tinkex.Integration.TrainingLoopTest do
                   }
                 }
 
-              "fw-1" ->
+              "fw-2" ->
                 %{
                   status: "completed",
                   result: %{
@@ -93,10 +94,10 @@ defmodule Tinkex.Integration.TrainingLoopTest do
                   }
                 }
 
-              "opt-2" ->
+              "opt-3" ->
                 %{status: "completed", result: %{"metrics" => %{"lr" => 0.02}}}
 
-              "save-3" ->
+              "save-4" ->
                 %{
                   status: "completed",
                   result: %{"status" => "saved", "path" => "/weights/mock.bin"}
@@ -131,7 +132,7 @@ defmodule Tinkex.Integration.TrainingLoopTest do
       TrainingClient.forward_backward(training, data, :cross_entropy, sleep_fun: fn _ -> :ok end)
 
     assert {:ok, %ForwardBackwardOutput{} = output} = Task.await(fb_task, 5_000)
-    assert Agent.get(request_log, &Enum.slice(&1, 0, 2)) == [{:forward, 0}, {:forward, 1}]
+    assert Agent.get(request_log, &Enum.slice(&1, 0, 2)) == [{:forward, 1}, {:forward, 2}]
 
     assert length(output.loss_fn_outputs) == 4
     assert_in_delta output.metrics["loss"], 2.5, 0.001
@@ -149,7 +150,7 @@ defmodule Tinkex.Integration.TrainingLoopTest do
     total_duration = System.monotonic_time(:millisecond) - loop_start
     Logger.info("training loop completed in #{total_duration}ms (integration test)")
 
-    assert Agent.get(request_log, & &1) == [{:forward, 0}, {:forward, 1}, {:optim, 2}, {:save, 3}]
+    assert Agent.get(request_log, & &1) == [{:forward, 1}, {:forward, 2}, {:optim, 3}, {:save, 4}]
 
     GenServer.stop(service)
   end

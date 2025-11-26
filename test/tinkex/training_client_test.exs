@@ -45,7 +45,7 @@ defmodule Tinkex.TrainingClientTest do
           chunk_result = %{
             "loss_fn_output_type" => "mean",
             "loss_fn_outputs" => [%{"chunk" => payload["request_id"]}],
-            "metrics" => %{"loss" => if(payload["request_id"] == "req-0", do: 1.0, else: 3.0)}
+            "metrics" => %{"loss" => if(payload["request_id"] == "req-1", do: 1.0, else: 3.0)}
           }
 
           conn
@@ -70,7 +70,8 @@ defmodule Tinkex.TrainingClientTest do
     {:ok, task} = TrainingClient.forward_backward(client, data, :cross_entropy)
     assert {:ok, %ForwardBackwardOutput{} = output} = Task.await(task, 5_000)
 
-    assert Agent.get(order, & &1) == [0, 1]
+    # seq_ids start at 1 since 0 is used by create_model
+    assert Agent.get(order, & &1) == [1, 2]
     assert length(output.loss_fn_outputs) == 2
     assert_in_delta output.metrics["loss"], 2.0, 0.001
   end

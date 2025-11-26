@@ -69,10 +69,27 @@ defmodule Tinkex.API.Training do
 
   @doc """
   Forward pass only (inference).
+
+  This helper awaits the future internally. Use
+  `forward_future/2` to get the raw future response.
   """
   @spec forward(map(), keyword()) ::
-          {:ok, map()} | {:error, Tinkex.Error.t()}
+          {:ok, ForwardBackwardOutput.t() | map()} | {:error, Tinkex.Error.t()}
   def forward(request, opts) do
+    with {:ok, response} <- forward_future(request, opts) do
+      handle_forward_response(response, opts)
+    end
+  end
+
+  @doc """
+  Forward pass that returns a server-side future reference.
+
+  Returns a future that can be polled for the forward pass result containing
+  logprobs that can be converted to Nx tensors via `TensorData.to_nx/1`.
+  """
+  @spec forward_future(map(), keyword()) ::
+          {:ok, map()} | {:error, Tinkex.Error.t()}
+  def forward_future(request, opts) do
     Tinkex.API.post(
       "/api/v1/forward",
       request,
@@ -125,6 +142,24 @@ defmodule Tinkex.API.Training do
   end
 
   defp handle_optim_step_response(other, _opts), do: {:ok, other}
+
+  defp handle_forward_response(%{"request_id" => _} = future, opts) do
+    poll_and_parse_future(future, opts, &ForwardBackwardOutput.from_json/1, "Forward")
+  end
+
+  defp handle_forward_response(%{request_id: _} = future, opts) do
+    poll_and_parse_future(future, opts, &ForwardBackwardOutput.from_json/1, "Forward")
+  end
+
+  defp handle_forward_response(%{"loss_fn_output_type" => _} = result, _opts) do
+    {:ok, ForwardBackwardOutput.from_json(result)}
+  end
+
+  defp handle_forward_response(%{loss_fn_output_type: _} = result, _opts) do
+    {:ok, ForwardBackwardOutput.from_json(Map.new(result))}
+  end
+
+  defp handle_forward_response(other, _opts), do: {:ok, other}
 
   defp poll_and_parse_future(future, opts, parse_fun, request_type) do
     poll_task =

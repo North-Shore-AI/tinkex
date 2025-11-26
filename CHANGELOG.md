@@ -2,6 +2,14 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.4] - 2025-11-25
+
+- Added EXLA dependency (`{:exla, "~> 0.7"}`) and configured Nx to use `EXLA.Backend` by default, enabling GPU/CPU-accelerated tensor operations for custom loss computation in Elixir.
+- Introduced `TrainingClient.forward/4` for forward-only inference without backward pass, returning logprobs that can be converted to Nx tensors via `TensorData.to_nx/1`.
+- Added `Training.forward_future/2` API endpoint for server-side future-based forward pass requests.
+- Created `forward_inference.exs` example demonstrating the forward-only API, Nx tensor conversion, and EXLA-accelerated operations.
+- Foundation for structured regularizer pipelines where custom loss functions and gradients are computed in Elixir/Nx rather than on the server.
+
 ## [0.1.3] - 2025-11-25
 
 - Made `SessionManager.stop_session/2` a synchronous GenServer call so heartbeat removal finishes before the client returns and refined heartbeat error handling to drop sessions silently on client-visible errors (e.g., 404) just like the Python SDK.

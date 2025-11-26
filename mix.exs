@@ -1,7 +1,7 @@
 defmodule Tinkex.MixProject do
   use Mix.Project
 
-  @version "0.1.3"
+  @version "0.1.4"
   @source_url "https://github.com/North-Shore-AI/tinkex"
   @docs_url "https://hexdocs.pm/tinkex"
 
@@ -46,6 +46,9 @@ defmodule Tinkex.MixProject do
 
       # Numerical computing (tensor operations)
       {:nx, "~> 0.7"},
+
+      # GPU/CPU-accelerated backend for Nx
+      {:exla, "~> 0.7"},
 
       # Tokenization (HuggingFace models)
       {:tokenizers, "~> 0.5"},

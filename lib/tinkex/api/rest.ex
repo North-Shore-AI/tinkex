@@ -174,10 +174,9 @@ defmodule Tinkex.API.Rest do
   @spec get_weights_info_by_tinker_path(Config.t(), String.t()) ::
           {:ok, Tinkex.Types.WeightsInfoResponse.t()} | {:error, Tinkex.Error.t()}
   def get_weights_info_by_tinker_path(config, tinker_path) do
-    encoded_path = URI.encode(tinker_path, &URI.char_unreserved?/1)
-    path = "/api/v1/weights/info?path=#{encoded_path}"
+    body = %{"tinker_path" => tinker_path}
 
-    case API.get(path, config: config, pool_type: :training) do
+    case API.post("/api/v1/weights_info", body, config: config, pool_type: :training) do
       {:ok, json} ->
         {:ok, Tinkex.Types.WeightsInfoResponse.from_json(json)}
 

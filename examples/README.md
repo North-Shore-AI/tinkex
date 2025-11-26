@@ -10,6 +10,7 @@ The examples are organized by functionality and complexity, ranging from simple 
 
 - `sampling_basic.exs` – basic sampling client creation and prompt decoding
 - `training_loop.exs` – forward/backward pass, optim step, save weights, and optional sampling
+- `forward_inference.exs` – forward-only pass returning logprobs for custom loss computation with Nx/EXLA
 - `sessions_management.exs` – REST session listing and detail queries
 - `checkpoints_management.exs` – user checkpoint listing with metadata inspection
 - `checkpoint_download.exs` – archive discovery, download, and extraction with progress callbacks
@@ -114,6 +115,29 @@ This example illustrates a complete training workflow including forward-backward
 - `TINKER_PROMPT` (optional, training prompt)
 - `TINKER_SAMPLE_AFTER_TRAIN` (optional, "1" to enable post-training sampling)
 - `TINKER_SAMPLE_PROMPT` (optional, prompt for post-training sampling)
+
+### forward_inference.exs
+
+This example demonstrates the forward-only API introduced in SDK version 0.1.4 for running inference without a backward pass. It shows how to obtain logprobs from a forward pass and convert them to Nx tensors using the EXLA backend for accelerated custom loss computation.
+
+**Key Features:**
+- Forward-only inference without backward pass overhead
+- Logprobs extraction from forward output
+- Conversion to Nx tensors via `TensorData.to_nx/1`
+- EXLA-accelerated tensor operations demonstration
+- Custom loss computation foundation for advanced training workflows
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional)
+- `TINKER_BASE_MODEL` (optional, defaults to Llama-3.1-8B)
+- `TINKER_PROMPT` (optional, prompt for forward pass)
+
+**Use Cases:**
+- Custom loss functions computed in Elixir/Nx with EXLA acceleration
+- Inference-only workflows that need logprobs
+- Building structured regularizer pipelines
+- Gradient computation in Elixir rather than on the server
 
 ### sessions_management.exs
 
