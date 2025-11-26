@@ -11,6 +11,8 @@ The examples are organized by functionality and complexity, ranging from simple 
 - `sampling_basic.exs` – basic sampling client creation and prompt decoding
 - `training_loop.exs` – forward/backward pass, optim step, save weights, and optional sampling
 - `forward_inference.exs` – forward-only pass returning logprobs for custom loss computation with Nx/EXLA
+- `structured_regularizers.exs` – composable regularizer pipeline demo with mock data (runs offline)
+- `structured_regularizers_live.exs` – custom loss with regularizers via live Tinker API
 - `sessions_management.exs` – REST session listing and detail queries
 - `checkpoints_management.exs` – user checkpoint listing with metadata inspection
 - `checkpoint_download.exs` – archive discovery, download, and extraction with progress callbacks
@@ -138,6 +140,55 @@ This example demonstrates the forward-only API introduced in SDK version 0.1.4 f
 - Inference-only workflows that need logprobs
 - Building structured regularizer pipelines
 - Gradient computation in Elixir rather than on the server
+
+### structured_regularizers.exs
+
+This example demonstrates the structured regularizer composition system introduced in SDK version 0.1.5. It shows how to define composable regularizers, execute them in parallel or sequentially, track gradient norms, and serialize outputs to JSON. This example uses mock data and runs without a Tinker server connection.
+
+**Key Features:**
+- RegularizerSpec configuration with weight and name
+- Multiple regularizer types (L1 sparsity, entropy, L2 weight decay)
+- Pipeline.compute for orchestrated loss composition
+- Parallel vs sequential execution comparison
+- Gradient norm tracking for training dynamics monitoring
+- Async regularizers for I/O-bound operations
+- Direct Executor and GradientTracker usage
+- Telemetry integration with attach_logger
+- JSON serialization of CustomLossOutput and RegularizerOutput
+- Error handling for duplicate names and invalid inputs
+- Module-based regularizers using Tinkex.Regularizer behaviour
+
+**Configuration Variables:**
+- None required (uses mock data)
+
+**Use Cases:**
+- Learning the regularizer API without server access
+- Testing regularizer functions before live deployment
+- Understanding the loss composition formula
+- Exploring gradient tracking capabilities
+
+### structured_regularizers_live.exs
+
+This example demonstrates custom loss computation with composable regularizers using the live Tinker API. It connects to a real Tinker server, performs a forward pass to obtain logprobs, and computes the composed loss with gradient tracking.
+
+**Key Features:**
+- Live API connection with TrainingClient
+- Tokenization of text prompts via ModelInput.from_text
+- L1 sparsity and entropy regularizers
+- TrainingClient.forward_backward_custom integration
+- Real gradient norm computation from server logprobs
+- JSON output with complete metrics
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional)
+- `TINKER_BASE_MODEL` (optional, defaults to Llama-3.1-8B)
+
+**Use Cases:**
+- Production custom loss computation
+- Research workflows with real model logprobs
+- Training dynamics monitoring with gradient norms
+- Composable regularization in live training loops
 
 ### sessions_management.exs
 

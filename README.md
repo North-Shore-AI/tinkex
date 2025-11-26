@@ -13,15 +13,19 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the Tinker distributed machine learning platform. It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.4 Highlights
+## 0.1.5 Highlights
 
-- **EXLA Backend**: Added `{:exla, "~> 0.7"}` dependency and configured Nx to use EXLA for GPU/CPU-accelerated tensor operations, enabling custom loss computation in Elixir.
-- **Forward-Only API**: New `TrainingClient.forward/4` runs inference without backward pass, returning logprobs that can be converted to Nx tensors via `TensorData.to_nx/1` for custom loss workflows.
-- **Custom Loss Foundation**: The forward API + EXLA backend enables structured regularizer pipelines where gradients are computed in Elixir/Nx rather than on the server.
+- **Structured Regularizer Composition**: New `TrainingClient.forward_backward_custom/4` enables custom loss functions with composable regularizers computed in Elixir/Nx.
+- **Regularizer Pipeline**: Define multiple weighted regularizers with parallel execution via `Task.async_stream`, gradient norm tracking, and comprehensive telemetry.
+- **Type-Safe Configuration**: `RegularizerSpec`, `RegularizerOutput`, and `CustomLossOutput` types with JSON encoding and validation.
+- **Gradient Tracking**: Optional per-regularizer gradient L2 norm computation using `Nx.Defn.grad` for monitoring training dynamics.
+- **EXLA Backend**: Nx tensors use EXLA for GPU/CPU-accelerated operations, enabling custom loss computation in Elixir.
+- **Forward-Only API**: `TrainingClient.forward/4` returns logprobs without backward pass, convertible to Nx tensors via `TensorData.to_nx/1`.
 
 ## Features
 
 - **TrainingClient**: Fine-tune models with forward/backward passes and gradient-based optimization
+- **Custom Loss Composition**: `TrainingClient.forward_backward_custom/4` with regularizer pipelines and gradient tracking
 - **Forward-Only Inference**: `TrainingClient.forward/4` returns logprobs without backward pass for custom loss computation
 - **EXLA Backend**: Nx tensors use EXLA for GPU/CPU-accelerated operations out of the box
 - **SamplingClient**: Generate text completions with customizable sampling parameters
@@ -43,7 +47,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.4"}
+    {:tinkex, "~> 0.1.5"}
   ]
 end
 ```
@@ -184,6 +188,105 @@ You can also attach your own handler to ship metrics to StatsD/OTLP:
 )
 ```
 
+## Structured Regularizers
+
+Tinkex supports custom loss computation with composable regularizers using `TrainingClient.forward_backward_custom/4`. This API enables research workflows where loss functions are computed in Elixir/Nx with full gradient tracking.
+
+### Basic Usage
+
+```elixir
+alias Tinkex.Types.RegularizerSpec
+
+# Define your base loss function
+base_loss_fn = fn _data, logprobs ->
+  loss = Nx.negate(Nx.mean(logprobs))
+  {loss, %{"nll" => Nx.to_number(loss)}}
+end
+
+# Define regularizers with weights
+regularizers = [
+  %RegularizerSpec{
+    fn: fn _data, logprobs ->
+      l1 = Nx.sum(Nx.abs(logprobs))
+      {l1, %{"l1_sum" => Nx.to_number(l1)}}
+    end,
+    weight: 0.01,
+    name: "l1_sparsity"
+  },
+  %RegularizerSpec{
+    fn: fn _data, logprobs ->
+      entropy = Nx.negate(Nx.sum(Nx.multiply(Nx.exp(logprobs), logprobs)))
+      {entropy, %{}}
+    end,
+    weight: 0.001,
+    name: "entropy"
+  }
+]
+
+# Compute composed loss with gradient tracking
+{:ok, task} = Tinkex.TrainingClient.forward_backward_custom(
+  training_client,
+  data,
+  base_loss_fn,
+  regularizers: regularizers,
+  track_grad_norms: true,
+  parallel: true
+)
+
+{:ok, output} = Task.await(task)
+
+# Access structured metrics
+IO.puts("Total loss: #{output.loss_total}")
+IO.puts("Base loss: #{output.base_loss.value}")
+IO.puts("Regularizer total: #{output.regularizer_total}")
+
+# Per-regularizer metrics
+for {name, reg} <- output.regularizers do
+  IO.puts("#{name}: value=#{reg.value} contribution=#{reg.contribution} grad_norm=#{reg.grad_norm}")
+end
+```
+
+### Loss Composition Formula
+
+The total loss is computed as:
+
+```
+loss_total = base_loss + Σ(weight_i × regularizer_i_loss)
+```
+
+### Telemetry Events
+
+The regularizer pipeline emits telemetry for monitoring:
+
+- `[:tinkex, :custom_loss, :start]` - When computation begins
+- `[:tinkex, :custom_loss, :stop]` - With duration, loss_total, regularizer_total
+- `[:tinkex, :regularizer, :compute, :start]` - Per regularizer
+- `[:tinkex, :regularizer, :compute, :stop]` - With value, contribution, grad_norm
+
+```elixir
+handler = Tinkex.Regularizer.Telemetry.attach_logger(level: :debug)
+# ... run computations ...
+Tinkex.Regularizer.Telemetry.detach(handler)
+```
+
+### Async Regularizers
+
+For I/O-bound operations (external APIs, database queries), regularizers can return Tasks:
+
+```elixir
+%RegularizerSpec{
+  fn: fn data, _logprobs ->
+    Task.async(fn ->
+      result = external_validation_api(data)
+      {Nx.tensor(result.penalty), %{"validated" => true}}
+    end)
+  end,
+  weight: 0.1,
+  name: "external_validation",
+  async: true
+}
+```
+
 ## HTTP Connection Pools
 
 Tinkex uses Finch for HTTP/2 with dedicated pools per operation type (training, sampling, telemetry, etc.). The application supervisor boots these pools automatically when `config :tinkex, :enable_http_pools, true` (the default in `config/config.exs`). For most apps you should keep this enabled so requests reuse the tuned pools. If you need to run in a lightweight environment (e.g., unit tests or host applications that manage their own pools), you can temporarily disable them with:
@@ -314,6 +417,8 @@ Run any of the sample scripts with `mix run examples/<name>.exs` (requires `TINK
 
 - `training_loop.exs` – minimal forward/backward + optim + save flow
 - `forward_inference.exs` – forward-only pass with Nx/EXLA tensor conversion for custom loss
+- `structured_regularizers.exs` – composable regularizer pipeline demo with mock data (runs offline)
+- `structured_regularizers_live.exs` – custom loss with regularizers via live Tinker API
 - `sampling_basic.exs` – create a sampling client and decode completions
 - `sessions_management.exs` – explore REST-based session listing and lookup
 - `checkpoints_management.exs` – list user checkpoints and inspect metadata

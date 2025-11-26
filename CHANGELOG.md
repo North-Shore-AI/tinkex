@@ -2,6 +2,41 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.5] - 2025-11-25
+
+### Added
+
+- **Structured Regularizer Composition**: New `TrainingClient.forward_backward_custom/4` API for computing custom loss functions with composable regularizers in Elixir/Nx.
+- **RegularizerSpec type** (`lib/tinkex/types/regularizer_spec.ex`): Typed configuration struct for regularizers with validation, supporting:
+  - `fn` - Regularizer function of arity 2 returning `{loss_tensor, metrics_map}`
+  - `weight` - Non-negative float multiplier for loss contribution
+  - `name` - String identifier for telemetry and metrics
+  - `async` - Boolean flag for Task-returning regularizers
+- **RegularizerOutput type** (`lib/tinkex/types/regularizer_output.ex`): Metrics struct for individual regularizer results including value, weight, contribution, and optional gradient norms.
+- **CustomLossOutput type** (`lib/tinkex/types/custom_loss_output.ex`): Structured output from composed loss computation with base loss metrics, per-regularizer outputs, and totals. Implements `Jason.Encoder` for serialization.
+- **Regularizer behaviour** (`lib/tinkex/regularizer/regularizer.ex`): Formal interface with `@callback compute/3` and optional `@callback name/0` for module-based regularizers.
+- **GradientTracker** (`lib/tinkex/regularizer/gradient_tracker.ex`): Nx-based gradient norm computation using `Nx.Defn.grad` for monitoring training dynamics:
+  - `compute_grad_norm/2` - L2 norm for arbitrary loss functions
+  - `grad_norm_for_regularizer/3` - Per-regularizer gradient norms
+  - `total_grad_norm/4` - Combined gradient norm for full loss composition
+- **Executor** (`lib/tinkex/regularizer/executor.ex`): Parallel/sequential regularizer execution using `Task.async_stream/3`:
+  - Configurable parallelism with `max_concurrency` option
+  - Timeout handling with task cleanup
+  - Support for async (Task-returning) regularizers
+  - Telemetry emission for start/stop/exception events
+- **Pipeline** (`lib/tinkex/regularizer/pipeline.ex`): Orchestration module coordinating base loss and regularizer execution:
+  - Input validation and duplicate name detection
+  - Parallel execution by default
+  - Optional gradient norm tracking
+  - Comprehensive telemetry events
+- **Regularizer Telemetry** (`lib/tinkex/regularizer/telemetry.ex`): Convenience helpers for attaching telemetry handlers to regularizer events:
+  - `[:tinkex, :custom_loss, :start | :stop | :exception]`
+  - `[:tinkex, :regularizer, :compute, :start | :stop | :exception]`
+
+### Changed
+
+- **TrainingClient**: Added `forward_backward_custom/4` public function and corresponding `handle_call` clause for custom loss computation with regularizers.
+
 ## [0.1.4] - 2025-11-25
 
 - Added EXLA dependency (`{:exla, "~> 0.7"}`) and configured Nx to use `EXLA.Backend` by default, enabling GPU/CPU-accelerated tensor operations for custom loss computation in Elixir.
