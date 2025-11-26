@@ -70,17 +70,31 @@ defmodule Tinkex.SamplingClient do
     service_api = Keyword.get(opts, :service_api, Service)
     sampling_api = Keyword.get(opts, :sampling_api, Sampling)
 
+    telemetry_metadata =
+      opts
+      |> Keyword.get(:telemetry_metadata, %{})
+      |> Map.new()
+      |> Map.put_new(:session_id, session_id)
+
     case create_sampling_session(
            session_id,
            sampling_client_id,
            base_model,
            model_path,
            config,
+           telemetry_metadata,
            service_api
          ) do
       {:ok, sampling_session_id} ->
         limiter = RateLimiter.for_key({config.base_url, config.api_key})
         request_counter = :atomics.new(1, signed: false)
+
+        telemetry_metadata =
+          opts
+          |> Keyword.get(:telemetry_metadata, %{})
+          |> Map.new()
+          |> Map.put_new(:session_id, session_id)
+          |> Map.put_new(:sampling_session_id, sampling_session_id)
 
         entry = %{
           sampling_session_id: sampling_session_id,
@@ -88,7 +102,9 @@ defmodule Tinkex.SamplingClient do
           request_id_counter: request_counter,
           rate_limiter: limiter,
           config: config,
-          sampling_api: sampling_api
+          sampling_api: sampling_api,
+          telemetry_metadata: telemetry_metadata,
+          session_id: session_id
         }
 
         :ok = SamplingRegistry.register(self(), entry)
@@ -99,7 +115,9 @@ defmodule Tinkex.SamplingClient do
            request_id_counter: request_counter,
            rate_limiter: limiter,
            config: config,
-           sampling_api: sampling_api
+           sampling_api: sampling_api,
+           telemetry_metadata: telemetry_metadata,
+           session_id: session_id
          }}
 
       {:error, reason} ->
@@ -132,6 +150,10 @@ defmodule Tinkex.SamplingClient do
           |> Keyword.put(:config, entry.config)
           |> Keyword.put(:tinker_request_type, "Sample")
           |> Keyword.put(:tinker_request_iteration, seq_id)
+          |> Keyword.put(
+            :telemetry_metadata,
+            merge_metadata(entry.telemetry_metadata, opts[:telemetry_metadata])
+          )
 
         case entry.sampling_api.sample_async(request, api_opts) do
           {:ok, resp} ->
@@ -157,6 +179,7 @@ defmodule Tinkex.SamplingClient do
          base_model,
          model_path,
          config,
+         telemetry_metadata,
          service_api
        ) do
     request = %CreateSamplingSessionRequest{
@@ -166,7 +189,10 @@ defmodule Tinkex.SamplingClient do
       model_path: model_path
     }
 
-    case service_api.create_sampling_session(request, config: config) do
+    case service_api.create_sampling_session(request,
+           config: config,
+           telemetry_metadata: telemetry_metadata
+         ) do
       {:ok, %CreateSamplingSessionResponse{sampling_session_id: sampling_session_id}} ->
         {:ok, sampling_session_id}
 
@@ -210,7 +236,7 @@ defmodule Tinkex.SamplingClient do
         config: entry.config,
         timeout: Keyword.get(opts, :timeout, :infinity),
         http_timeout: Keyword.get(opts, :http_timeout, entry.config.timeout),
-        telemetry_metadata: opts[:telemetry_metadata],
+        telemetry_metadata: merge_metadata(entry.telemetry_metadata, opts[:telemetry_metadata]),
         queue_state_observer: opts[:queue_state_observer],
         sleep_fun: opts[:sleep_fun],
         tinker_request_type: "Sample",
@@ -221,5 +247,14 @@ defmodule Tinkex.SamplingClient do
       {:ok, result} -> {:ok, SampleResponse.from_json(result)}
       {:error, %Error{} = error} -> {:error, error}
     end
+  end
+
+  defp merge_metadata(base, override) do
+    base = base || %{}
+    override = override || %{}
+
+    base
+    |> Map.new()
+    |> Map.merge(Map.new(override))
   end
 end

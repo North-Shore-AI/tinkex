@@ -2,6 +2,19 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.7] - 2025-11-26
+
+### Added
+
+- **Telemetry Reporter**: New `Tinkex.Telemetry.Reporter` batches client-side telemetry (session start/end, HTTP, queue, custom events, exceptions) with configurable flush interval/threshold, HTTP timeout, and retry/backoff, plus wait-until-drained semantics and fatal-exception flushing. `ServiceClient` boots a reporter automatically and exposes it via `telemetry_reporter/1`; telemetry can be disabled with `TINKER_TELEMETRY=0`.
+- **Telemetry examples**: Added `examples/telemetry_live.exs` and `examples/telemetry_reporter_demo.exs`, documented in READMEs and included in `examples/run_all.sh`, showcasing reporter lifecycle, custom events, retries, drain/wait, and graceful shutdown.
+- **Coverage**: Added `test/tinkex/telemetry_reporter_test.exs` for reporter lifecycle, backoff, exception handling, and drain semantics; tests disable backend telemetry via `TINKER_TELEMETRY=0`.
+
+### Changed
+
+- **Telemetry attribution**: Sampling/training/client APIs now merge optional `:telemetry_metadata` (including session, sampling session, and model sequence IDs) into HTTP telemetry so backend events are session-scoped; telemetry POSTs honor configurable timeouts.
+- **Docs**: README highlights the telemetry reporter, backend shipping flow, and metadata tagging; installation snippet bumped to `~> 0.1.7`.
+
 ## [0.1.6] - 2025-11-25
 
 ### Added

@@ -33,12 +33,14 @@ defmodule Tinkex.API do
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     pool_type = Keyword.get(opts, :pool_type, :default)
 
-    metadata = %{
-      method: :post,
-      path: path,
-      pool_type: pool_type,
-      base_url: config.base_url
-    }
+    metadata =
+      %{
+        method: :post,
+        path: path,
+        pool_type: pool_type,
+        base_url: config.base_url
+      }
+      |> merge_telemetry_metadata(opts)
 
     request = Finch.build(:post, url, headers, Jason.encode!(body))
 
@@ -65,12 +67,14 @@ defmodule Tinkex.API do
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     pool_type = Keyword.get(opts, :pool_type, :default)
 
-    metadata = %{
-      method: :get,
-      path: path,
-      pool_type: pool_type,
-      base_url: config.base_url
-    }
+    metadata =
+      %{
+        method: :get,
+        path: path,
+        pool_type: pool_type,
+        base_url: config.base_url
+      }
+      |> merge_telemetry_metadata(opts)
 
     request = Finch.build(:get, url, headers)
 
@@ -97,12 +101,14 @@ defmodule Tinkex.API do
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     pool_type = Keyword.get(opts, :pool_type, :default)
 
-    metadata = %{
-      method: :delete,
-      path: path,
-      pool_type: pool_type,
-      base_url: config.base_url
-    }
+    metadata =
+      %{
+        method: :delete,
+        path: path,
+        pool_type: pool_type,
+        base_url: config.base_url
+      }
+      |> merge_telemetry_metadata(opts)
 
     request = Finch.build(:delete, url, headers)
 
@@ -751,6 +757,13 @@ defmodule Tinkex.API do
       {:halt, {error, attempt}}
     else
       :continue
+    end
+  end
+
+  defp merge_telemetry_metadata(metadata, opts) do
+    case Keyword.get(opts, :telemetry_metadata) do
+      meta when is_map(meta) -> Map.merge(metadata, meta)
+      _ -> metadata
     end
   end
 end

@@ -14,20 +14,29 @@ defmodule Tinkex.API.Telemetry do
 
   require Logger
 
+  @default_timeout_ms 5_000
+
   @doc """
   Send telemetry asynchronously (fire and forget).
 
   Spawns a Task to send telemetry without blocking the caller.
   Returns :ok immediately; failures are logged but not propagated.
+
+  Options:
+    * `:config` - Tinkex.Config.t() (required)
+    * `:timeout` - HTTP timeout in milliseconds (default: 5000)
   """
   @spec send(map(), keyword()) :: :ok
   def send(request, opts) do
+    timeout = Keyword.get(opts, :timeout, @default_timeout_ms)
+
     Task.start(fn ->
       try do
         opts =
           opts
           |> Keyword.put(:pool_type, :telemetry)
           |> Keyword.put(:max_retries, 1)
+          |> Keyword.put(:timeout, timeout)
 
         case Tinkex.API.post("/api/v1/telemetry", request, opts) do
           {:ok, _} ->
@@ -48,18 +57,25 @@ defmodule Tinkex.API.Telemetry do
   end
 
   @doc """
-  Send telemetry synchronously (for testing).
+  Send telemetry synchronously (for testing or flush operations).
 
   Blocks until the telemetry request completes. Use this in tests
-  to verify telemetry behavior.
+  to verify telemetry behavior or during graceful shutdown.
+
+  Options:
+    * `:config` - Tinkex.Config.t() (required)
+    * `:timeout` - HTTP timeout in milliseconds (default: 5000)
   """
   @spec send_sync(map(), keyword()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def send_sync(request, opts) do
+    timeout = Keyword.get(opts, :timeout, @default_timeout_ms)
+
     opts =
       opts
       |> Keyword.put(:pool_type, :telemetry)
       |> Keyword.put(:max_retries, 1)
+      |> Keyword.put(:timeout, timeout)
 
     Tinkex.API.post("/api/v1/telemetry", request, opts)
   end

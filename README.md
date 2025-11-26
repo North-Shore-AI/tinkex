@@ -13,11 +13,11 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the Tinker distributed machine learning platform. It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.6 Highlights
+## 0.1.7 Highlights
 
-- **Metrics aggregation**: New `Tinkex.Metrics` aggregates HTTP telemetry into counters and latency p50/p95/p99 histograms with `snapshot/0`, `flush/0`, and `reset/0`, plus a live example at `examples/metrics_live.exs`.
-- **Structured Regularizer Composition**: `TrainingClient.forward_backward_custom/4` enables custom loss functions with composable regularizers computed in Elixir/Nx.
-- **EXLA + Forward-Only API**: `TrainingClient.forward/4` returns logprobs without backward pass, convertible to Nx tensors via `TensorData.to_nx/1`.
+- **Telemetry reporter to Tinker**: New `Tinkex.Telemetry.Reporter` batches client-side events (session start/end, HTTP telemetry, custom events, exceptions) with backoff, wait-until-drained semantics, fatal-exception flushing, and a `TINKER_TELEMETRY` kill switch. `ServiceClient` now boots one automatically and exposes it via `telemetry_reporter/1`.
+- **End-to-end telemetry examples**: Added `examples/telemetry_live.exs` and `examples/telemetry_reporter_demo.exs` covering reporter lifecycle, custom events, retries, drain/wait, and graceful shutdown; both are runnable via `examples/run_all.sh`.
+- **Telemetry attribution across APIs**: Sampling and training clients now propagate `session_id`, `sampling_session_id`, and `model_seq_id` metadata into HTTP telemetry so backend events are tagged with the active session and request identifiers; HTTP telemetry requests respect configurable timeouts.
 
 ## Features
 
@@ -45,7 +45,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.6"}
+    {:tinkex, "~> 0.1.7"}
   ]
 end
 ```
@@ -186,6 +186,16 @@ handler = Tinkex.Telemetry.attach_logger(level: :info)
 :ok = Tinkex.Telemetry.detach(handler)
 ```
 
+Backend telemetry is enabled by default. When you start a `ServiceClient`, it boots a telemetry reporter and exposes it so you can add custom events without wiring anything else:
+
+```elixir
+{:ok, service} = Tinkex.ServiceClient.start_link(config: config)
+
+with {:ok, reporter} <- Tinkex.ServiceClient.telemetry_reporter(service) do
+  Tinkex.Telemetry.Reporter.log(reporter, "app.start", %{"hostname" => System.get_env("HOSTNAME")})
+end
+```
+
 You can also attach your own handler to ship metrics to StatsD/OTLP:
 
 ```elixir
@@ -198,6 +208,58 @@ You can also attach your own handler to ship metrics to StatsD/OTLP:
   end,
   nil
 )
+```
+
+To ship telemetry back to Tinker, start a reporter with your session id and config (ServiceClient boots one for you):
+
+```elixir
+{:ok, reporter} = Tinkex.Telemetry.Reporter.start_link(
+  session_id: session_id,
+  config: config,
+  # Optional configuration:
+  flush_interval_ms: 10_000,      # periodic flush (default: 10s)
+  flush_threshold: 100,           # flush when queue reaches this size
+  http_timeout_ms: 5_000,         # HTTP request timeout
+  max_retries: 3,                 # retry failed sends with backoff
+  retry_base_delay_ms: 1_000      # base delay for exponential backoff
+)
+
+# add your own events with severity
+Tinkex.Telemetry.Reporter.log(reporter, "checkpoint_saved", %{path: "/tmp/out.pt"}, :info)
+Tinkex.Telemetry.Reporter.log_exception(reporter, RuntimeError.exception("boom"), :error)
+
+# fatal exceptions emit SESSION_END and flush synchronously
+Tinkex.Telemetry.Reporter.log_fatal_exception(reporter, exception, :critical)
+
+# wait until all events are flushed (useful for graceful shutdown)
+true = Tinkex.Telemetry.Reporter.wait_until_drained(reporter, 30_000)
+
+# stop gracefully (emits SESSION_END if not already sent)
+:ok = Tinkex.Telemetry.Reporter.stop(reporter)
+```
+
+The reporter emits `SESSION_START`/`SESSION_END` automatically and forwards HTTP/queue telemetry that carries `session_id` metadata (added by default when using `ServiceClient`). Disable backend telemetry entirely with `TINKER_TELEMETRY=0`.
+
+**Reporter Features:**
+- Retry with exponential backoff on failed sends
+- Wait-until-drained semantics for reliable shutdown
+- Stacktrace capture in exception events
+- Exception cause chain traversal for user error detection
+- Configurable HTTP timeout and flush parameters
+
+See `examples/telemetry_live.exs` for a basic run and `examples/telemetry_reporter_demo.exs` for a comprehensive demonstration of all reporter features.
+
+Sampling and training clients automatically tag HTTP telemetry with `session_id`, `sampling_session_id`, and `model_seq_id`, and you can inject your own tags per request:
+
+```elixir
+{:ok, task} =
+  Tinkex.SamplingClient.sample(
+    sampler,
+    prompt,
+    params,
+    num_samples: 1,
+    telemetry_metadata: %{request_id: "demo-123"}
+  )
 ```
 
 ## Structured Regularizers
@@ -439,6 +501,8 @@ Run any of the sample scripts with `mix run examples/<name>.exs` (requires `TINK
 - `async_client_creation.exs` – parallel sampling client initialization via tasks
 - `cli_run_text.exs` – call `tinkex run` programmatically with a text prompt
 - `cli_run_prompt_file.exs` – use a prompt file and JSON output with `tinkex run`
+- `telemetry_live.exs` – live telemetry with custom events and sampling
+- `telemetry_reporter_demo.exs` – comprehensive reporter demo with retry, drain, and shutdown
 
 Use `examples/run_all.sh` (requires `TINKER_API_KEY`) to run the curated set in sequence.
 

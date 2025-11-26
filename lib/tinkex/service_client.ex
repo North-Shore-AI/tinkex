@@ -67,6 +67,14 @@ defmodule Tinkex.ServiceClient do
     GenServer.call(service_client, :create_rest_client)
   end
 
+  @doc """
+  Return the telemetry reporter pid if backend telemetry is enabled.
+  """
+  @spec telemetry_reporter(t()) :: {:ok, pid()} | {:error, :disabled}
+  def telemetry_reporter(service_client) do
+    GenServer.call(service_client, :telemetry_reporter)
+  end
+
   @impl true
   def init(opts) do
     client_supervisor = Keyword.get(opts, :client_supervisor, :local)
@@ -90,6 +98,8 @@ defmodule Tinkex.ServiceClient do
 
     case SessionManager.start_session(config, session_manager) do
       {:ok, session_id} ->
+        telemetry_metadata = %{session_id: session_id}
+
         state = %{
           session_id: session_id,
           training_client_counter: 0,
@@ -98,7 +108,9 @@ defmodule Tinkex.ServiceClient do
           training_client_module: training_module,
           sampling_client_module: sampling_module,
           session_manager: session_manager,
-          client_supervisor: client_supervisor
+          client_supervisor: client_supervisor,
+          telemetry: maybe_start_telemetry_reporter(session_id, config),
+          telemetry_metadata: telemetry_metadata
         }
 
         {:ok, state}
@@ -188,6 +200,7 @@ defmodule Tinkex.ServiceClient do
       |> Keyword.put(:config, state.config)
       |> Keyword.put(:model_seq_id, model_seq_id)
       |> Keyword.put(:client_supervisor, state.client_supervisor)
+      |> Keyword.put(:telemetry_metadata, state.telemetry_metadata)
 
     case DynamicSupervisor.start_child(
            state.client_supervisor,
@@ -210,6 +223,7 @@ defmodule Tinkex.ServiceClient do
       |> Keyword.put(:session_id, state.session_id)
       |> Keyword.put(:config, state.config)
       |> Keyword.put(:sampling_client_id, sampling_client_id)
+      |> Keyword.put(:telemetry_metadata, state.telemetry_metadata)
 
     case DynamicSupervisor.start_child(
            state.client_supervisor,
@@ -230,10 +244,29 @@ defmodule Tinkex.ServiceClient do
   end
 
   @impl true
+  def handle_call(:telemetry_reporter, _from, %{telemetry: nil} = state) do
+    {:reply, {:error, :disabled}, state}
+  end
+
+  def handle_call(:telemetry_reporter, _from, %{telemetry: pid} = state) when is_pid(pid) do
+    {:reply, {:ok, pid}, state}
+  end
+
+  @impl true
   def terminate(_reason, %{session_id: session_id, session_manager: session_manager}) do
     SessionManager.stop_session(session_id, session_manager)
     :ok
   end
 
   def terminate(_reason, _state), do: :ok
+
+  defp maybe_start_telemetry_reporter(session_id, config) do
+    opts = [session_id: session_id, config: config]
+
+    case Tinkex.Telemetry.Reporter.start_link(opts) do
+      {:ok, pid} -> pid
+      {:error, {:already_started, pid}} -> pid
+      _ -> nil
+    end
+  end
 end

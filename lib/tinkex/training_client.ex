@@ -209,7 +209,13 @@ defmodule Tinkex.TrainingClient do
     future_module = Keyword.get(opts, :future_module, Tinkex.Future)
     client_supervisor = Keyword.get(opts, :client_supervisor, Tinkex.ClientSupervisor)
 
-    case ensure_model(opts, session_id, model_seq_id, config, service_api) do
+    telemetry_metadata =
+      opts
+      |> Keyword.get(:telemetry_metadata, %{})
+      |> Map.new()
+      |> Map.put_new(:session_id, session_id)
+
+    case ensure_model(opts, session_id, model_seq_id, config, service_api, telemetry_metadata) do
       {:ok, model_id} ->
         state = %{
           model_id: model_id,
@@ -221,7 +227,8 @@ defmodule Tinkex.TrainingClient do
           training_api: training_api,
           weights_api: weights_api,
           future_module: future_module,
-          client_supervisor: client_supervisor
+          client_supervisor: client_supervisor,
+          telemetry_metadata: telemetry_metadata
         }
 
         {:ok, state}
@@ -512,7 +519,7 @@ defmodule Tinkex.TrainingClient do
   @impl true
   def handle_info(_msg, state), do: {:noreply, state}
 
-  defp ensure_model(opts, session_id, model_seq_id, config, service_api) do
+  defp ensure_model(opts, session_id, model_seq_id, config, service_api, telemetry_metadata) do
     case opts[:model_id] do
       model_id when is_binary(model_id) ->
         {:ok, model_id}
@@ -528,7 +535,8 @@ defmodule Tinkex.TrainingClient do
                    user_metadata: Keyword.get(opts, :user_metadata, config.user_metadata),
                    lora_config: Keyword.get(opts, :lora_config, %LoraConfig{})
                  },
-                 config: config
+                 config: config,
+                 telemetry_metadata: Map.merge(telemetry_metadata, %{model_seq_id: model_seq_id})
                ) do
           {:ok, parse_model_id(response)}
         end
@@ -561,7 +569,11 @@ defmodule Tinkex.TrainingClient do
       seq_id: seq_id
     }
 
-    case state.training_api.forward_backward_future(request, config: state.config) do
+    case state.training_api.forward_backward_future(request,
+           config: state.config,
+           telemetry_metadata:
+             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
+         ) do
       {:ok, %{"request_id" => request_id}} ->
         {:ok, %{request_id: request_id}}
 
@@ -587,7 +599,11 @@ defmodule Tinkex.TrainingClient do
       seq_id: seq_id
     }
 
-    case state.training_api.forward_future(request, config: state.config) do
+    case state.training_api.forward_future(request,
+           config: state.config,
+           telemetry_metadata:
+             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
+         ) do
       {:ok, %{"request_id" => request_id}} ->
         {:ok, %{request_id: request_id}}
 
@@ -609,7 +625,11 @@ defmodule Tinkex.TrainingClient do
       seq_id: seq_id
     }
 
-    case state.training_api.optim_step_future(request, config: state.config) do
+    case state.training_api.optim_step_future(request,
+           config: state.config,
+           telemetry_metadata:
+             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
+         ) do
       {:ok, %{"request_id" => request_id}} -> {:ok, %{request_id: request_id}}
       {:ok, %{request_id: _} = future} -> {:ok, future}
       {:error, %Error{} = error} -> {:error, error}
@@ -625,7 +645,11 @@ defmodule Tinkex.TrainingClient do
       seq_id: seq_id
     }
 
-    case state.weights_api.save_weights_for_sampler(request, config: state.config) do
+    case state.weights_api.save_weights_for_sampler(request,
+           config: state.config,
+           telemetry_metadata:
+             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
+         ) do
       {:ok, %{"request_id" => _} = future} ->
         {:ok, future}
 
@@ -754,6 +778,10 @@ defmodule Tinkex.TrainingClient do
   end
 
   defp poll_opts(state, opts) do
+    telemetry_metadata =
+      state.telemetry_metadata
+      |> Map.merge(Map.new(Keyword.get(opts, :telemetry_metadata, %{})))
+
     opts
     |> Keyword.take([
       :timeout,
@@ -763,11 +791,16 @@ defmodule Tinkex.TrainingClient do
       :sleep_fun
     ])
     |> Keyword.put(:config, state.config)
+    |> Keyword.put(:telemetry_metadata, telemetry_metadata)
   end
 
   defp poll_opts_with_type(state, opts, request_type) do
     poll_opts(state, opts)
     |> Keyword.put(:tinker_request_type, request_type)
+  end
+
+  defp base_telemetry_metadata(state, extra) when is_map(extra) do
+    Map.merge(state.telemetry_metadata, extra)
   end
 
   defp safe_await(future_module, task, timeout) do

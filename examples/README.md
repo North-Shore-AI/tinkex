@@ -21,6 +21,8 @@ The examples are organized by functionality and complexity, ranging from simple 
 - `cli_run_text.exs` – programmatic `tinkex run` invocation with inline prompts
 - `cli_run_prompt_file.exs` – CLI sampling with prompt files and JSON output capture
 - `metrics_live.exs` – live sampling + metrics snapshot (counters and latency percentiles)
+- `telemetry_live.exs` – live telemetry with custom events and sampling
+- `telemetry_reporter_demo.exs` – comprehensive telemetry reporter demo with all features
 - `examples/run_all.sh` – helper script that runs each example sequentially
 
 ## Prerequisites
@@ -333,6 +335,48 @@ Issue a live sampling request, then print the aggregated metrics snapshot so you
 - `TINKER_BASE_MODEL` (optional, defaults to Llama-3.1-8B)
 - `TINKER_PROMPT` (optional)
 - `TINKER_MAX_TOKENS`, `TINKER_TEMPERATURE`, `TINKER_NUM_SAMPLES`, `TINKER_SAMPLE_TIMEOUT` (optional)
+
+### telemetry_live.exs
+
+Basic telemetry example that starts a reporter, logs custom events, performs sampling, and flushes telemetry to the Tinker backend.
+
+**Key Features:**
+- Manual reporter lifecycle management
+- Custom event logging via `Reporter.log/4`
+- HTTP telemetry capture from sampling operations
+- Synchronous flush before shutdown
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional, defaults to production)
+- `TINKER_BASE_MODEL` (optional, defaults to Llama-3.1-8B)
+- `TINKER_PROMPT` (optional)
+
+### telemetry_reporter_demo.exs
+
+Comprehensive demonstration of all Tinkex.Telemetry.Reporter features including session lifecycle, exception logging, retry logic, and graceful shutdown.
+
+**Key Features:**
+- Session lifecycle events (SESSION_START, SESSION_END)
+- Generic event logging with custom data and severity levels
+- Exception logging (fatal and non-fatal with stacktrace capture)
+- Automatic HTTP telemetry capture from sampling
+- Retry with exponential backoff (configurable max_retries, retry_base_delay_ms)
+- Wait-until-drained semantics for reliable shutdown
+- Graceful shutdown with `Reporter.stop/2`
+- Configurable HTTP timeout and flush parameters
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional, defaults to production)
+- `TINKER_BASE_MODEL` (optional, defaults to Llama-3.1-8B)
+- `TINKER_PROMPT` (optional)
+
+**Use Cases:**
+- Understanding telemetry reporter configuration options
+- Testing telemetry integration before production deployment
+- Debugging telemetry issues with verbose event logging
+- Learning the reporter API and lifecycle management
 
 ## Common Patterns
 

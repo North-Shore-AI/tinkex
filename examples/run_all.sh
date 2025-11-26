@@ -18,6 +18,8 @@ EXAMPLES=(
   "cli_run_text.exs"
   "cli_run_prompt_file.exs"
   "metrics_live.exs"
+  "telemetry_live.exs"
+  "telemetry_reporter_demo.exs"
 )
 
 if [[ -z "${TINKER_API_KEY:-}" ]]; then
