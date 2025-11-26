@@ -66,6 +66,7 @@ defmodule Tinkex.Application do
 
   defp base_children(heartbeat_interval_ms) do
     [
+      Tinkex.Metrics,
       Tinkex.SamplingRegistry,
       {Tinkex.SessionManager, heartbeat_interval_ms: heartbeat_interval_ms},
       {DynamicSupervisor, name: Tinkex.ClientSupervisor, strategy: :one_for_one}

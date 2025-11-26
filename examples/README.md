@@ -20,6 +20,7 @@ The examples are organized by functionality and complexity, ranging from simple 
 - `async_client_creation.exs` – parallel sampling client creation via Task-based flows
 - `cli_run_text.exs` – programmatic `tinkex run` invocation with inline prompts
 - `cli_run_prompt_file.exs` – CLI sampling with prompt files and JSON output capture
+- `metrics_live.exs` – live sampling + metrics snapshot (counters and latency percentiles)
 - `examples/run_all.sh` – helper script that runs each example sequentially
 
 ## Prerequisites
@@ -316,6 +317,22 @@ This example demonstrates CLI usage with file-based prompts, showing how to prep
 - `TINKER_BASE_URL` (optional)
 - `TINKER_BASE_MODEL` (optional)
 - `TINKER_PROMPT` or `TINKER_PROMPT_TOKENS` (optional, prompt file content)
+
+### metrics_live.exs
+
+Issue a live sampling request, then print the aggregated metrics snapshot so you can confirm latency percentiles and success counters without extra scripting.
+
+**Key Features:**
+- Resets metrics at start for a clean run
+- Performs a single live sampling call
+- Prints counters plus p50/p95/p99 latency from `Tinkex.Metrics`
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional, defaults to production)
+- `TINKER_BASE_MODEL` (optional, defaults to Llama-3.1-8B)
+- `TINKER_PROMPT` (optional)
+- `TINKER_MAX_TOKENS`, `TINKER_TEMPERATURE`, `TINKER_NUM_SAMPLES`, `TINKER_SAMPLE_TIMEOUT` (optional)
 
 ## Common Patterns
 

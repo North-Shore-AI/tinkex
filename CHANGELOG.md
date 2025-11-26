@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.6] - 2025-11-25
+
+### Added
+
+- **Metrics aggregation** via `Tinkex.Metrics`: counters for total/success/failure HTTP requests, latency histograms with p50/p95/p99, `snapshot/0`, `reset/0`, and `flush/0`.
+- **Automatic telemetry wiring**: the metrics server starts under `Tinkex.Application` and subscribes to `[:tinkex, :http, :request, :stop]` by default.
+- **Live metrics example**: `examples/metrics_live.exs` runs a sampling call against the live API and prints the metrics snapshot; added to `examples/run_all.sh` and documented in `examples/README.md`.
+
+### Changed
+
+- **Docs**: README now highlights metrics and shows a quick snapshot snippet; installation version bumped to `~> 0.1.6`.
+
 ## [0.1.5] - 2025-11-25
 
 ### Added

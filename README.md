@@ -13,14 +13,11 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the Tinker distributed machine learning platform. It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.5 Highlights
+## 0.1.6 Highlights
 
-- **Structured Regularizer Composition**: New `TrainingClient.forward_backward_custom/4` enables custom loss functions with composable regularizers computed in Elixir/Nx.
-- **Regularizer Pipeline**: Define multiple weighted regularizers with parallel execution via `Task.async_stream`, gradient norm tracking, and comprehensive telemetry.
-- **Type-Safe Configuration**: `RegularizerSpec`, `RegularizerOutput`, and `CustomLossOutput` types with JSON encoding and validation.
-- **Gradient Tracking**: Optional per-regularizer gradient L2 norm computation using `Nx.Defn.grad` for monitoring training dynamics.
-- **EXLA Backend**: Nx tensors use EXLA for GPU/CPU-accelerated operations, enabling custom loss computation in Elixir.
-- **Forward-Only API**: `TrainingClient.forward/4` returns logprobs without backward pass, convertible to Nx tensors via `TensorData.to_nx/1`.
+- **Metrics aggregation**: New `Tinkex.Metrics` aggregates HTTP telemetry into counters and latency p50/p95/p99 histograms with `snapshot/0`, `flush/0`, and `reset/0`, plus a live example at `examples/metrics_live.exs`.
+- **Structured Regularizer Composition**: `TrainingClient.forward_backward_custom/4` enables custom loss functions with composable regularizers computed in Elixir/Nx.
+- **EXLA + Forward-Only API**: `TrainingClient.forward/4` returns logprobs without backward pass, convertible to Nx tensors via `TensorData.to_nx/1`.
 
 ## Features
 
@@ -37,6 +34,7 @@ Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-
 - **HTTP/2**: Modern HTTP client with connection pooling and streaming support
 - **Retry Logic**: Configurable retry strategies with exponential backoff
 - **Telemetry**: Comprehensive observability through Elixir's telemetry ecosystem
+- **Metrics Aggregation**: Built-in `Tinkex.Metrics` for counters, gauges, and latency percentiles with snapshot/export helpers
 - **Session lifecycle resilience**: `SessionManager.stop_session/2` now waits for heartbeat cleanup so clients never race with session removal, and heartbeat errors that stem from user-visible failures simply drop the stale session instead of raising.
 - **REST metadata & inspection APIs**: New endpoints surface samplers, weights metadata, and training runs while the SDK exposes `GetSamplerResponse`, `WeightsInfoResponse`, `ImageChunk.expected_tokens`, `LoadWeightsRequest.load_optimizer_state`, and the `:cispo`/`:dro` `LossFnType` tags for richer load/save tooling.
 
@@ -47,7 +45,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.5"}
+    {:tinkex, "~> 0.1.6"}
   ]
 end
 ```
@@ -111,6 +109,20 @@ params = %Tinkex.Types.SamplingParams{
 )
 {:ok, response} = Task.await(sample_task)
 ```
+
+### Metrics snapshot
+
+`Tinkex.Metrics` subscribes to HTTP telemetry automatically. Flush and snapshot after a run to grab counters and latency percentiles without extra scripting:
+
+```elixir
+:ok = Tinkex.Metrics.flush()
+snapshot = Tinkex.Metrics.snapshot()
+
+IO.inspect(snapshot.counters, label: "counters")
+IO.inspect(snapshot.histograms[:tinkex_request_duration_ms], label: "latency (ms)")
+```
+
+See `examples/metrics_live.exs` for an end-to-end live sampling + metrics printout.
 
 ## Examples
 

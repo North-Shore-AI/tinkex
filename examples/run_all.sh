@@ -17,6 +17,7 @@ EXAMPLES=(
   "async_client_creation.exs"
   "cli_run_text.exs"
   "cli_run_prompt_file.exs"
+  "metrics_live.exs"
 )
 
 if [[ -z "${TINKER_API_KEY:-}" ]]; then

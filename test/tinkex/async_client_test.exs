@@ -30,7 +30,11 @@ defmodule Tinkex.AsyncClientTest do
     {:ok, service_pid} = ServiceClient.start_link(config: config)
 
     on_exit(fn ->
-      if Process.alive?(service_pid), do: GenServer.stop(service_pid)
+      try do
+        if Process.alive?(service_pid), do: GenServer.stop(service_pid, :normal, 5_000)
+      catch
+        :exit, _ -> :ok
+      end
     end)
 
     {:ok, service_pid: service_pid, bypass: bypass, config: config}
@@ -46,7 +50,7 @@ defmodule Tinkex.AsyncClientTest do
 
       assert %Task{} = task
 
-      {:ok, pid} = Task.await(task, 5000)
+      {:ok, pid} = Task.await(task, 5_000)
       assert is_pid(pid)
 
       GenServer.stop(pid)
@@ -82,7 +86,7 @@ defmodule Tinkex.AsyncClientTest do
 
       assert %Task{} = task
 
-      {:ok, pid} = Task.await(task, 5000)
+      {:ok, pid} = Task.await(task, 5_000)
       assert is_pid(pid)
 
       GenServer.stop(pid)
@@ -110,7 +114,7 @@ defmodule Tinkex.AsyncClientTest do
 
       assert %Task{} = task
 
-      {:ok, sampling_pid} = Task.await(task, 5000)
+      {:ok, sampling_pid} = Task.await(task, 5_000)
       assert is_pid(sampling_pid)
 
       # Cleanup in order
