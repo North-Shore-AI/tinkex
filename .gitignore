@@ -22,7 +22,7 @@ tinkex-*.tar
 # Temporary files, for example, from tests.
 /tmp/
 
-tinker/
+/tinker/
 
 *:train:*/
 *.safetensors

@@ -142,4 +142,180 @@ defmodule Tinkex.API.RestTest do
       assert error.status == 404
     end
   end
+
+  describe "get_sampler/2" do
+    test "sends GET request with URL-encoded sampler_id", %{bypass: bypass, config: config} do
+      # The sampler_id contains colons which get URL-encoded
+      Bypass.expect_once(bypass, "GET", "/api/v1/samplers/session-id%3Asample%3A0", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(
+          200,
+          ~s({"sampler_id": "session-id:sample:0", "base_model": "Qwen/Qwen2.5-7B", "model_path": "tinker://run/weights/001"})
+        )
+      end)
+
+      {:ok, resp} = Rest.get_sampler(config, "session-id:sample:0")
+
+      assert %Tinkex.Types.GetSamplerResponse{} = resp
+      assert resp.sampler_id == "session-id:sample:0"
+      assert resp.base_model == "Qwen/Qwen2.5-7B"
+      assert resp.model_path == "tinker://run/weights/001"
+    end
+
+    test "handles response without model_path", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/samplers/test-sampler", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"sampler_id": "test-sampler", "base_model": "test-model"}))
+      end)
+
+      {:ok, resp} = Rest.get_sampler(config, "test-sampler")
+
+      assert resp.model_path == nil
+    end
+
+    test "returns error on failure", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/samplers/unknown", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(404, ~s({"error": "Sampler not found"}))
+      end)
+
+      {:error, error} = Rest.get_sampler(config, "unknown")
+
+      assert error.status == 404
+    end
+  end
+
+  describe "get_weights_info_by_tinker_path/2" do
+    test "sends GET request with URL-encoded path", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/weights/info", fn conn ->
+        # The tinker path gets URL-encoded
+        assert conn.query_params["path"] == "tinker://run-id/weights/checkpoint-001"
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(
+          200,
+          ~s({"base_model": "Qwen/Qwen2.5-7B", "is_lora": true, "lora_rank": 32})
+        )
+      end)
+
+      {:ok, resp} =
+        Rest.get_weights_info_by_tinker_path(config, "tinker://run-id/weights/checkpoint-001")
+
+      assert %Tinkex.Types.WeightsInfoResponse{} = resp
+      assert resp.base_model == "Qwen/Qwen2.5-7B"
+      assert resp.is_lora == true
+      assert resp.lora_rank == 32
+    end
+
+    test "handles response without lora_rank", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/weights/info", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"base_model": "test-model", "is_lora": false}))
+      end)
+
+      {:ok, resp} = Rest.get_weights_info_by_tinker_path(config, "tinker://run/weights/001")
+
+      assert resp.is_lora == false
+      assert resp.lora_rank == nil
+    end
+
+    test "returns error on failure", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/weights/info", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(404, ~s({"error": "Weights not found"}))
+      end)
+
+      {:error, error} = Rest.get_weights_info_by_tinker_path(config, "tinker://bad/path/here")
+
+      assert error.status == 404
+    end
+  end
+
+  describe "get_training_run/2" do
+    test "sends GET request to training_runs endpoint", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/training_runs/run-abc", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(
+          200,
+          ~s({"id": "run-abc", "status": "completed", "base_model": "Qwen/Qwen2.5-7B"})
+        )
+      end)
+
+      {:ok, data} = Rest.get_training_run(config, "run-abc")
+
+      assert data["id"] == "run-abc"
+      assert data["status"] == "completed"
+    end
+
+    test "returns error on failure", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/training_runs/unknown", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(404, ~s({"error": "Training run not found"}))
+      end)
+
+      {:error, error} = Rest.get_training_run(config, "unknown")
+
+      assert error.status == 404
+    end
+  end
+
+  describe "get_training_run_by_tinker_path/2" do
+    test "extracts run_id from tinker path and fetches training run", %{
+      bypass: bypass,
+      config: config
+    } do
+      Bypass.expect_once(bypass, "GET", "/api/v1/training_runs/run-xyz", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"id": "run-xyz", "status": "running"}))
+      end)
+
+      {:ok, data} =
+        Rest.get_training_run_by_tinker_path(config, "tinker://run-xyz/weights/checkpoint-001")
+
+      assert data["id"] == "run-xyz"
+    end
+
+    test "returns error for invalid tinker path", %{config: config} do
+      {:error, error} = Rest.get_training_run_by_tinker_path(config, "invalid-path")
+
+      assert error.type == :validation
+    end
+  end
+
+  describe "list_training_runs/3" do
+    test "sends GET with pagination params", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/training_runs", fn conn ->
+        assert conn.query_params == %{"limit" => "10", "offset" => "5"}
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"training_runs": [{"id": "run-1"}, {"id": "run-2"}]}))
+      end)
+
+      {:ok, data} = Rest.list_training_runs(config, 10, 5)
+
+      assert length(data["training_runs"]) == 2
+    end
+
+    test "uses default pagination", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/training_runs", fn conn ->
+        assert conn.query_params == %{"limit" => "20", "offset" => "0"}
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"training_runs": []}))
+      end)
+
+      {:ok, _} = Rest.list_training_runs(config)
+    end
+  end
 end

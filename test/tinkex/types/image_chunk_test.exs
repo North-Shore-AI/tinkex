@@ -14,6 +14,27 @@ defmodule Tinkex.Types.ImageChunkTest do
       assert chunk.width == 200
       assert chunk.tokens == 50
       assert chunk.type == "image"
+      assert chunk.expected_tokens == nil
+    end
+  end
+
+  describe "new/6 with options" do
+    test "creates chunk with expected_tokens" do
+      binary = "fake_png_data"
+      chunk = ImageChunk.new(binary, :png, 100, 200, 50, expected_tokens: 50)
+
+      assert chunk.data == Base.encode64(binary)
+      assert chunk.format == :png
+      assert chunk.height == 100
+      assert chunk.width == 200
+      assert chunk.tokens == 50
+      assert chunk.expected_tokens == 50
+      assert chunk.type == "image"
+    end
+
+    test "creates chunk without expected_tokens when not provided" do
+      chunk = ImageChunk.new("data", :png, 100, 200, 50, [])
+      assert chunk.expected_tokens == nil
     end
   end
 
@@ -49,6 +70,22 @@ defmodule Tinkex.Types.ImageChunkTest do
       decoded = Jason.decode!(json)
 
       assert decoded["format"] == "jpeg"
+    end
+
+    test "includes expected_tokens when present" do
+      chunk = ImageChunk.new("test_data", :png, 100, 200, 50, expected_tokens: 50)
+      json = Jason.encode!(chunk)
+      decoded = Jason.decode!(json)
+
+      assert decoded["expected_tokens"] == 50
+    end
+
+    test "excludes expected_tokens when nil" do
+      chunk = ImageChunk.new("test_data", :png, 100, 200, 50)
+      json = Jason.encode!(chunk)
+      decoded = Jason.decode!(json)
+
+      refute Map.has_key?(decoded, "expected_tokens")
     end
   end
 end
