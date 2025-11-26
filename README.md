@@ -13,6 +13,12 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the Tinker distributed machine learning platform. It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
+## 0.1.3 Highlights
+
+- `SessionManager.stop_session/2` now makes a synchronous GenServer call so heartbeat loops finish cleaning up before clients return, and heartbeat errors caused by user-visible failures (e.g., missing sessions) now silently drop the stale session to match the Python SDK.
+- New REST endpoints let you fetch samplers, weights metadata, and training runs; richer types (`GetSamplerResponse`, `WeightsInfoResponse`, `ImageChunk.expected_tokens`, `LoadWeightsRequest.load_optimizer_state`, and `:cispo`/`:dro` `LossFnType`) plus updated regen tests round-trip these payloads.
+- `weights_inspection.exs` walks through querying checkpoint metadata, LoRA rank, and sampler state via the REST client, and the docs now include architectural analysis plus a Structured Regularizers design document that guides composable loss functions and telemetry with Nx/EXLA gradients.
+
 ## Features
 
 - **TrainingClient**: Fine-tune models with forward/backward passes and gradient-based optimization
@@ -25,6 +31,8 @@ Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-
 - **HTTP/2**: Modern HTTP client with connection pooling and streaming support
 - **Retry Logic**: Configurable retry strategies with exponential backoff
 - **Telemetry**: Comprehensive observability through Elixir's telemetry ecosystem
+- **Session lifecycle resilience**: `SessionManager.stop_session/2` now waits for heartbeat cleanup so clients never race with session removal, and heartbeat errors that stem from user-visible failures simply drop the stale session instead of raising.
+- **REST metadata & inspection APIs**: New endpoints surface samplers, weights metadata, and training runs while the SDK exposes `GetSamplerResponse`, `WeightsInfoResponse`, `ImageChunk.expected_tokens`, `LoadWeightsRequest.load_optimizer_state`, and the `:cispo`/`:dro` `LossFnType` tags for richer load/save tooling.
 
 ## Installation
 
@@ -33,7 +41,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.2"}
+    {:tinkex, "~> 0.1.3"}
   ]
 end
 ```
@@ -304,9 +312,15 @@ Run any of the sample scripts with `mix run examples/<name>.exs` (requires `TINK
 
 - `training_loop.exs` – minimal forward/backward + optim + save flow
 - `sampling_basic.exs` – create a sampling client and decode completions
+- `sessions_management.exs` – explore REST-based session listing and lookup
+- `checkpoints_management.exs` – list user checkpoints and inspect metadata
+- `checkpoint_download.exs` – download, stream, and extract checkpoint archives
 - `weights_inspection.exs` – inspect checkpoints, samplers, and training runs
+- `async_client_creation.exs` – parallel sampling client initialization via tasks
 - `cli_run_text.exs` – call `tinkex run` programmatically with a text prompt
 - `cli_run_prompt_file.exs` – use a prompt file and JSON output with `tinkex run`
+
+Use `examples/run_all.sh` (requires `TINKER_API_KEY`) to run the curated set in sequence.
 
 ## Contributing
 

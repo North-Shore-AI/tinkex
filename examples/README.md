@@ -6,6 +6,19 @@ This directory contains examples demonstrating the core functionality of the Tin
 
 The examples are organized by functionality and complexity, ranging from simple single-operation demonstrations to complete end-to-end workflows. All examples require a valid Tinker API key and can be configured through environment variables to customize their behavior.
 
+## Example Index
+
+- `sampling_basic.exs` – basic sampling client creation and prompt decoding
+- `training_loop.exs` – forward/backward pass, optim step, save weights, and optional sampling
+- `sessions_management.exs` – REST session listing and detail queries
+- `checkpoints_management.exs` – user checkpoint listing with metadata inspection
+- `checkpoint_download.exs` – archive discovery, download, and extraction with progress callbacks
+- `weights_inspection.exs` – sampler/weights metadata inspection for LoRA+training run validation
+- `async_client_creation.exs` – parallel sampling client creation via Task-based flows
+- `cli_run_text.exs` – programmatic `tinkex run` invocation with inline prompts
+- `cli_run_prompt_file.exs` – CLI sampling with prompt files and JSON output capture
+- `examples/run_all.sh` – helper script that runs each example sequentially
+
 ## Prerequisites
 
 Before running any example, ensure you have:

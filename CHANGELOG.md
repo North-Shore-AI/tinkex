@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.3] - 2025-11-25
+
+- Made `SessionManager.stop_session/2` a synchronous GenServer call so heartbeat removal finishes before the client returns and refined heartbeat error handling to drop sessions silently on client-visible errors (e.g., 404) just like the Python SDK.
+- Added REST endpoints for fetching samplers, weights metadata, and training runs along with the new `GetSamplerResponse` and `WeightsInfoResponse` structs, `ImageChunk.expected_tokens`, `LoadWeightsRequest.load_optimizer_state`, and the `:cispo`/`:dro` `LossFnType` variants; expanded tests, serialization rounds, and `.gitignore` coverage to match the higher API parity.
+- Introduced the `weightsinspection.exs` example showing how to query checkpoint metadata, LoRA ranks, and sampler state via REST plus published detailed architectural documentation and a Structured Regularizers design doc that outlines custom loss/telemetry workflows requiring Nx/EXLA gradient computation support.
+
 ## [0.1.2] - 2025-11-22
 
 - Fixed future polling to handle direct `ForwardBackwardOutput` payloads (no `status`/`type` wrapper) by normalizing them into completed responses, unblocking `TrainingClient.forward_backward/3` result parsing.
