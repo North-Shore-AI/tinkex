@@ -304,6 +304,7 @@ Run any of the sample scripts with `mix run examples/<name>.exs` (requires `TINK
 
 - `training_loop.exs` – minimal forward/backward + optim + save flow
 - `sampling_basic.exs` – create a sampling client and decode completions
+- `weights_inspection.exs` – inspect checkpoints, samplers, and training runs
 - `cli_run_text.exs` – call `tinkex run` programmatically with a text prompt
 - `cli_run_prompt_file.exs` – use a prompt file and JSON output with `tinkex run`
 

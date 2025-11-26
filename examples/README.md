@@ -131,6 +131,30 @@ This example showcases checkpoint management operations including listing user c
 - `TINKER_BASE_URL` (optional)
 - `TINKER_RUN_ID` (optional, filters checkpoints by training run)
 
+### weights_inspection.exs
+
+This example demonstrates the weights and sampler inspection APIs for querying checkpoint metadata, validating LoRA compatibility, and inspecting sampler state. These APIs are useful for validating checkpoints before loading and debugging training workflows.
+
+**Key Features:**
+- Checkpoint metadata inspection (base model, LoRA status, rank)
+- Sampler state querying (loaded weights, base model)
+- Training run listing and detail retrieval
+- LoRA rank compatibility validation
+- Training run lookup from tinker:// paths
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional)
+- `TINKER_CHECKPOINT_PATH` (optional, specific checkpoint to inspect)
+- `TINKER_SAMPLER_ID` (optional, sampler to query)
+- `TINKER_EXPECTED_RANK` (optional, expected LoRA rank for validation)
+
+**Use Cases:**
+- Validate checkpoint compatibility before loading into a sampler
+- Debug why a sampler has unexpected behavior (check loaded weights)
+- Audit training runs and their associated checkpoints
+- Verify LoRA rank matches training configuration
+
 ### checkpoint_download.exs
 
 This example demonstrates the complete checkpoint download workflow including URL retrieval, archive download with progress tracking, and automatic extraction. It includes intelligent fallback mechanisms to automatically discover available checkpoints when none are explicitly specified.

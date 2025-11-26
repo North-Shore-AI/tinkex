@@ -34,10 +34,16 @@ defmodule Tinkex.SessionManager do
 
   @doc """
   Stop tracking a session.
+
+  This is a synchronous call to ensure the session is removed from heartbeat
+  tracking before returning. This prevents race conditions where a heartbeat
+  fires after the caller has shut down but before the session was removed.
   """
   @spec stop_session(session_id(), GenServer.server()) :: :ok
   def stop_session(session_id, server \\ __MODULE__) when is_binary(session_id) do
-    GenServer.cast(server, {:stop_session, session_id})
+    GenServer.call(server, {:stop_session, session_id}, 5_000)
+  catch
+    :exit, _ -> :ok
   end
 
   defp timeout_buffer(timeout_ms) when timeout_ms < 5_000, do: 5_000
@@ -66,8 +72,8 @@ defmodule Tinkex.SessionManager do
   end
 
   @impl true
-  def handle_cast({:stop_session, session_id}, state) do
-    {:noreply, %{state | sessions: Map.delete(state.sessions, session_id)}}
+  def handle_call({:stop_session, session_id}, _from, state) do
+    {:reply, :ok, %{state | sessions: Map.delete(state.sessions, session_id)}}
   end
 
   @impl true
@@ -120,15 +126,21 @@ defmodule Tinkex.SessionManager do
   end
 
   defp send_heartbeat(session_id, %Config{} = config, session_api) do
+    # Python SDK silently catches all heartbeat exceptions and only warns after
+    # 2+ minutes of consecutive failures. We match that behavior by:
+    # - Silently dropping on user errors (4xx including 404 when session ends)
+    # - Keeping session on transient errors (will retry next interval)
+    # - Never logging warnings for individual heartbeat failures
     case session_api.heartbeat(%{session_id: session_id}, config: config) do
       {:ok, _} ->
         :ok
 
       {:error, %Error{} = error} ->
         if Error.user_error?(error) do
-          Logger.warning("Session #{session_id} expired: #{Error.format(error)}")
+          # Session ended server-side (404) or other client error - silently drop
           :drop
         else
+          # Transient error - keep session, will retry next heartbeat
           Logger.debug("Heartbeat failed for #{session_id}: #{Error.format(error)}")
           :ok
         end

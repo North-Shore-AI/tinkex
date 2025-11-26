@@ -9,6 +9,7 @@ EXAMPLES=(
   "training_loop.exs"
   "sessions_management.exs"
   "checkpoints_management.exs"
+  "weights_inspection.exs"
   "checkpoint_download.exs"
   "async_client_creation.exs"
   "cli_run_text.exs"
