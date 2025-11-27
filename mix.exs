@@ -86,19 +86,52 @@ defmodule Tinkex.MixProject do
         {"CHANGELOG.md", [filename: "changelog", title: "Changelog"]},
         {"LICENSE", [filename: "license", title: "License"]},
         {"examples/README.md", [filename: "examples", title: "Examples"]},
+        # Getting Started
         "docs/guides/getting_started.md",
-        "docs/guides/api_reference.md",
-        "docs/guides/troubleshooting.md",
+        "docs/guides/tokenization.md",
+        "docs/guides/advanced_configuration.md",
+        # Core Features
         "docs/guides/training_loop.md",
-        "docs/guides/tokenization.md"
+        "docs/guides/forward_inference.md",
+        "docs/guides/regularizers.md",
+        "docs/guides/checkpoint_management.md",
+        # Async & Reliability
+        "docs/guides/futures_and_async.md",
+        "docs/guides/retry_and_error_handling.md",
+        # Observability
+        "docs/guides/telemetry.md",
+        "docs/guides/metrics.md",
+        "docs/guides/streaming.md",
+        # Reference
+        "docs/guides/cli_guide.md",
+        "docs/guides/api_reference.md",
+        "docs/guides/troubleshooting.md"
       ],
       groups_for_extras: [
-        Guides: [
+        "Getting Started": [
           "docs/guides/getting_started.md",
-          "docs/guides/api_reference.md",
-          "docs/guides/troubleshooting.md",
+          "docs/guides/tokenization.md",
+          "docs/guides/advanced_configuration.md"
+        ],
+        "Core Features": [
           "docs/guides/training_loop.md",
-          "docs/guides/tokenization.md"
+          "docs/guides/forward_inference.md",
+          "docs/guides/regularizers.md",
+          "docs/guides/checkpoint_management.md"
+        ],
+        "Async & Reliability": [
+          "docs/guides/futures_and_async.md",
+          "docs/guides/retry_and_error_handling.md"
+        ],
+        Observability: [
+          "docs/guides/telemetry.md",
+          "docs/guides/metrics.md",
+          "docs/guides/streaming.md"
+        ],
+        Reference: [
+          "docs/guides/cli_guide.md",
+          "docs/guides/api_reference.md",
+          "docs/guides/troubleshooting.md"
         ]
       ]
     ]
