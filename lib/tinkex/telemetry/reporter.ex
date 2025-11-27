@@ -16,12 +16,29 @@ defmodule Tinkex.Telemetry.Reporter do
     * Supports wait-until-drained semantics for graceful shutdown.
 
   Telemetry can be disabled by setting `TINKER_TELEMETRY=0|false|no`.
+
+  ## Typed Events
+
+  The reporter now uses typed structs for all telemetry events. See
+  `Tinkex.Types.Telemetry` for available types:
+
+    * `Tinkex.Types.Telemetry.GenericEvent` - custom application events
+    * `Tinkex.Types.Telemetry.SessionStartEvent` - session start marker
+    * `Tinkex.Types.Telemetry.SessionEndEvent` - session end marker
+    * `Tinkex.Types.Telemetry.UnhandledExceptionEvent` - exception reports
   """
 
   use GenServer
   require Logger
 
   alias Tinkex.API.Telemetry, as: TelemetryAPI
+
+  alias Tinkex.Types.Telemetry.{
+    GenericEvent,
+    SessionStartEvent,
+    SessionEndEvent,
+    UnhandledExceptionEvent
+  }
 
   @max_queue_size 10_000
   @max_batch_size 100
@@ -440,26 +457,35 @@ defmodule Tinkex.Telemetry.Reporter do
   end
 
   defp build_request(events, state) do
+    # Convert typed structs to wire format maps
+    event_maps = Enum.map(events, &event_to_map/1)
+
     %{
       session_id: state.session_id,
       platform: platform(),
       sdk_version: Tinkex.Version.current(),
-      events: events
+      events: event_maps
     }
   end
+
+  defp event_to_map(%GenericEvent{} = event), do: GenericEvent.to_map(event)
+  defp event_to_map(%SessionStartEvent{} = event), do: SessionStartEvent.to_map(event)
+  defp event_to_map(%SessionEndEvent{} = event), do: SessionEndEvent.to_map(event)
+  defp event_to_map(%UnhandledExceptionEvent{} = event), do: UnhandledExceptionEvent.to_map(event)
+  defp event_to_map(map) when is_map(map), do: map
 
   defp build_generic_event(state, name, data, severity) do
     {index, state} = next_session_index(state)
 
-    event = %{
-      event: "GENERIC_EVENT",
-      event_id: uuid(),
-      event_session_index: index,
-      severity: severity_string(severity),
-      timestamp: iso_timestamp(),
-      event_name: name,
-      event_data: sanitize(data)
-    }
+    event =
+      GenericEvent.new(
+        event_id: uuid(),
+        event_session_index: index,
+        severity: parse_severity(severity),
+        timestamp: iso_timestamp(),
+        event_name: name,
+        event_data: sanitize(data)
+      )
 
     {event, state}
   end
@@ -472,13 +498,13 @@ defmodule Tinkex.Telemetry.Reporter do
   defp build_session_start_event(state) do
     {index, state} = next_session_index(state)
 
-    event = %{
-      event: "SESSION_START",
-      event_id: uuid(),
-      event_session_index: index,
-      severity: "INFO",
-      timestamp: state.session_start_iso
-    }
+    event =
+      SessionStartEvent.new(
+        event_id: uuid(),
+        event_session_index: index,
+        severity: :info,
+        timestamp: state.session_start_iso
+      )
 
     {event, state}
   end
@@ -487,14 +513,14 @@ defmodule Tinkex.Telemetry.Reporter do
     {index, state} = next_session_index(state)
     duration = duration_string(state.session_start_native, System.monotonic_time(:microsecond))
 
-    event = %{
-      event: "SESSION_END",
-      event_id: uuid(),
-      event_session_index: index,
-      severity: "INFO",
-      timestamp: iso_timestamp(),
-      duration: duration
-    }
+    event =
+      SessionEndEvent.new(
+        event_id: uuid(),
+        event_session_index: index,
+        severity: :info,
+        timestamp: iso_timestamp(),
+        duration: duration
+      )
 
     {event, state}
   end
@@ -568,16 +594,16 @@ defmodule Tinkex.Telemetry.Reporter do
     {index, state} = next_session_index(state)
     message = exception_message(exception)
 
-    event = %{
-      event: "UNHANDLED_EXCEPTION",
-      event_id: uuid(),
-      event_session_index: index,
-      severity: severity_string(severity),
-      timestamp: iso_timestamp(),
-      error_type: exception |> Map.get(:__struct__, exception) |> to_string(),
-      error_message: message,
-      traceback: exception_traceback(exception)
-    }
+    event =
+      UnhandledExceptionEvent.new(
+        event_id: uuid(),
+        event_session_index: index,
+        severity: parse_severity(severity),
+        timestamp: iso_timestamp(),
+        error_type: exception |> Map.get(:__struct__, exception) |> to_string(),
+        error_message: message,
+        traceback: exception_traceback(exception)
+      )
 
     {event, state}
   end
@@ -618,14 +644,29 @@ defmodule Tinkex.Telemetry.Reporter do
     %{state | session_ended?: true}
   end
 
-  defp severity_string(severity) when is_atom(severity),
-    do: severity |> Atom.to_string() |> String.upcase()
+  # Parse severity to atom format for typed structs
+  defp parse_severity(severity) when is_atom(severity), do: severity
+  defp parse_severity("DEBUG"), do: :debug
+  defp parse_severity("INFO"), do: :info
+  defp parse_severity("WARNING"), do: :warning
+  defp parse_severity("ERROR"), do: :error
+  defp parse_severity("CRITICAL"), do: :critical
 
-  defp severity_string(severity) when is_binary(severity), do: severity |> String.upcase()
-  defp severity_string(_), do: "INFO"
+  defp parse_severity(str) when is_binary(str) do
+    case String.upcase(str) do
+      "DEBUG" -> :debug
+      "INFO" -> :info
+      "WARNING" -> :warning
+      "ERROR" -> :error
+      "CRITICAL" -> :critical
+      _ -> :info
+    end
+  end
 
-  defp severity_for_event([:tinkex, :http, :request, :exception]), do: "ERROR"
-  defp severity_for_event(_), do: "INFO"
+  defp parse_severity(_), do: :info
+
+  defp severity_for_event([:tinkex, :http, :request, :exception]), do: :error
+  defp severity_for_event(_), do: :info
 
   defp sanitize(%_struct{} = struct), do: struct |> Map.from_struct() |> sanitize()
 

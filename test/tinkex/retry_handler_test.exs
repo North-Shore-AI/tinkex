@@ -101,7 +101,12 @@ defmodule Tinkex.RetryHandlerTest do
   describe "record_progress/1" do
     test "updates last_progress_at" do
       handler = RetryHandler.new()
-      Process.sleep(10)
+      # Wait for time to advance using receive timeout (idiomatic synchronization)
+      receive do
+      after
+        10 -> :ok
+      end
+
       updated = RetryHandler.record_progress(handler)
       assert updated.last_progress_at > handler.last_progress_at
     end
@@ -152,7 +157,12 @@ defmodule Tinkex.RetryHandlerTest do
   describe "elapsed_ms/1" do
     test "returns elapsed time since start" do
       handler = RetryHandler.new()
-      Process.sleep(10)
+      # Wait for time to advance using receive timeout (idiomatic synchronization)
+      receive do
+      after
+        10 -> :ok
+      end
+
       elapsed = RetryHandler.elapsed_ms(handler)
       assert elapsed >= 10
     end

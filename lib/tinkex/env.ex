@@ -25,7 +25,8 @@ defmodule Tinkex.Env do
       log_level: log_level(env),
       cf_access_client_id: cf_access_client_id(env),
       cf_access_client_secret: cf_access_client_secret(env),
-      dump_headers?: dump_headers?(env)
+      dump_headers?: dump_headers?(env),
+      parity_mode: parity_mode(env)
     }
   end
 
@@ -75,6 +76,25 @@ defmodule Tinkex.Env do
       value -> parse_log_level(value)
     end
   end
+
+  @doc """
+  Get parity mode from environment.
+
+  Set `TINKEX_PARITY=python` to use Python SDK defaults for timeout and retries.
+  """
+  @spec parity_mode(env_source()) :: :python | nil
+  def parity_mode(env \\ :system) do
+    env
+    |> fetch("TINKEX_PARITY")
+    |> normalize()
+    |> parse_parity_mode()
+  end
+
+  defp parse_parity_mode(nil), do: nil
+  defp parse_parity_mode("python"), do: :python
+  defp parse_parity_mode("Python"), do: :python
+  defp parse_parity_mode("PYTHON"), do: :python
+  defp parse_parity_mode(_), do: nil
 
   @doc """
   Redact secrets in a snapshot or map using simple replacement.

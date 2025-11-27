@@ -9,7 +9,7 @@ defmodule Tinkex.SamplingRegistryTest do
   end
 
   test "registers ETS entry and cleans up on process exit" do
-    {:ok, pid} = Task.start(fn -> Process.sleep(:infinity) end)
+    {:ok, pid} = Task.start(fn -> receive do: (:stop -> :ok) end)
     config = %{sampling_session_id: "session-1"}
 
     on_exit(fn -> :ets.delete(:tinkex_sampling_clients, {:config, pid}) end)
@@ -25,8 +25,8 @@ defmodule Tinkex.SamplingRegistryTest do
   end
 
   test "handles multiple registrations independently" do
-    {:ok, pid1} = Task.start(fn -> Process.sleep(:infinity) end)
-    {:ok, pid2} = Task.start(fn -> Process.sleep(:infinity) end)
+    {:ok, pid1} = Task.start(fn -> receive do: (:stop -> :ok) end)
+    {:ok, pid2} = Task.start(fn -> receive do: (:stop -> :ok) end)
 
     config1 = %{sampling_session_id: "session-1"}
     config2 = %{sampling_session_id: "session-2"}
@@ -57,17 +57,24 @@ defmodule Tinkex.SamplingRegistryTest do
     wait_for_cleanup({:config, pid2})
   end
 
-  defp wait_for_cleanup(key, attempts \\ 50)
-  defp wait_for_cleanup(key, 0), do: flunk("ETS entry #{inspect(key)} was not cleaned up")
+  defp wait_for_cleanup(key, timeout \\ 1000) do
+    wait_for_cleanup_until(key, System.monotonic_time(:millisecond) + timeout)
+  end
 
-  defp wait_for_cleanup(key, attempts) do
+  defp wait_for_cleanup_until(key, deadline) do
     case :ets.lookup(:tinkex_sampling_clients, key) do
       [] ->
         :ok
 
       _ ->
-        Process.sleep(10)
-        wait_for_cleanup(key, attempts - 1)
+        if System.monotonic_time(:millisecond) < deadline do
+          receive do
+          after
+            1 -> wait_for_cleanup_until(key, deadline)
+          end
+        else
+          flunk("ETS entry #{inspect(key)} was not cleaned up within timeout")
+        end
     end
   end
 end

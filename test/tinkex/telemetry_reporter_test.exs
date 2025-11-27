@@ -1,5 +1,5 @@
 defmodule Tinkex.TelemetryReporterTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   alias Tinkex.Telemetry.Reporter
 
@@ -455,9 +455,22 @@ defmodule Tinkex.TelemetryReporterTest do
 
   describe "flush with wait_drained option" do
     test "waits until events are flushed", %{bypass: bypass, config: config} do
+      parent = self()
+      handler_pid_ref = :atomics.new(1, [])
+
       Bypass.expect(bypass, "POST", "/api/v1/telemetry", fn conn ->
-        # Simulate slow endpoint
-        Process.sleep(100)
+        # Store handler pid so test can send to it
+        :atomics.put(handler_pid_ref, 1, :erlang.phash2(self()))
+
+        # Notify test that request was received
+        send(parent, {:request_received, self()})
+
+        # Wait for test to acknowledge before responding
+        receive do
+          :proceed -> :ok
+        after
+          5_000 -> raise "Test didn't send :proceed signal"
+        end
 
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
@@ -476,8 +489,28 @@ defmodule Tinkex.TelemetryReporterTest do
 
       assert Reporter.log(reporter, "test-event", %{})
 
-      # This should block until all events are flushed
-      :ok = Reporter.flush(reporter, sync?: true, wait_drained?: true)
+      # Start flush in background
+      flush_task =
+        Task.async(fn ->
+          Reporter.flush(reporter, sync?: true, wait_drained?: true)
+        end)
+
+      # Wait for request to reach the mock server and get handler pid
+      handler_pid =
+        receive do
+          {:request_received, pid} -> pid
+        after
+          1_000 -> raise "Request not received"
+        end
+
+      # Verify that flush is still waiting (task not completed yet)
+      refute Task.yield(flush_task, 50)
+
+      # Now allow the server to respond
+      send(handler_pid, :proceed)
+
+      # The flush should now complete
+      assert :ok = Task.await(flush_task, 1_000)
 
       # After flush with wait_drained, wait_until_drained should return immediately
       assert Reporter.wait_until_drained(reporter, 100) == true

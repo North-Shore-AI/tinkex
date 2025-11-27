@@ -59,7 +59,7 @@ defmodule Tinkex.Application do
       read_concurrency: true
     ])
 
-    create_table(:tinkex_sessions, [
+    create_table(Tinkex.SessionManager.sessions_table(), [
       :set,
       :public,
       :named_table,

@@ -146,7 +146,8 @@ defmodule Tinkex.Regularizer.ExecutorTest do
         %RegularizerSpec{
           fn: fn _data, _logprobs ->
             Task.async(fn ->
-              Process.sleep(10)
+              # No sleep needed - just return the result
+              # The test verifies that async tasks are properly awaited
               {Nx.tensor(42.0), %{"async" => true}}
             end)
           end,
@@ -239,8 +240,11 @@ defmodule Tinkex.Regularizer.ExecutorTest do
       regularizers = [
         %RegularizerSpec{
           fn: fn _d, _l ->
-            Process.sleep(10_000)
-            {Nx.tensor(1.0), %{}}
+            # Block indefinitely by waiting for a message that will never come
+            # This simulates a slow/hung regularizer without using Process.sleep
+            receive do
+              :never_sent -> {Nx.tensor(1.0), %{}}
+            end
           end,
           weight: 0.1,
           name: "slow_reg"

@@ -74,4 +74,30 @@ defmodule Tinkex.EnvTest do
     assert redacted.cf_access_client_secret == "[REDACTED]"
     assert redacted.tags == ["a"]
   end
+
+  describe "parity_mode/1" do
+    test "returns :python for TINKEX_PARITY=python" do
+      assert Env.parity_mode(%{"TINKEX_PARITY" => "python"}) == :python
+      assert Env.parity_mode(%{"TINKEX_PARITY" => "Python"}) == :python
+      assert Env.parity_mode(%{"TINKEX_PARITY" => "PYTHON"}) == :python
+    end
+
+    test "returns nil for missing or empty value" do
+      assert Env.parity_mode(%{}) == nil
+      assert Env.parity_mode(%{"TINKEX_PARITY" => ""}) == nil
+      assert Env.parity_mode(%{"TINKEX_PARITY" => " "}) == nil
+    end
+
+    test "returns nil for unknown values" do
+      assert Env.parity_mode(%{"TINKEX_PARITY" => "java"}) == nil
+      assert Env.parity_mode(%{"TINKEX_PARITY" => "rust"}) == nil
+      assert Env.parity_mode(%{"TINKEX_PARITY" => "1"}) == nil
+    end
+
+    test "is included in snapshot" do
+      env = %{"TINKEX_PARITY" => "python"}
+      snapshot = Env.snapshot(env)
+      assert snapshot.parity_mode == :python
+    end
+  end
 end

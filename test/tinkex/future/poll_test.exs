@@ -1,5 +1,5 @@
 defmodule Tinkex.Future.PollTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   alias Tinkex.Future
   alias Tinkex.Error
@@ -78,7 +78,9 @@ defmodule Tinkex.Future.PollTest do
         })
       end)
 
-      sleep_fun = fn _ -> Process.sleep(1) end
+      # Use no-op sleep function to test retry logic without delays
+      # The timeout: 5 ensures test completes quickly while verifying retry behavior
+      sleep_fun = fn _ -> :ok end
 
       task =
         Future.poll("req-server",
@@ -136,11 +138,13 @@ defmodule Tinkex.Future.PollTest do
         resp(conn, 200, %{"status" => "pending"})
       end)
 
+      # Use no-op sleep function to test timeout logic without delays
+      # The timeout: 5 ensures test completes quickly while verifying timeout behavior
       task =
         Future.poll("req-timeout",
           config: config,
           timeout: 5,
-          sleep_fun: fn _ -> Process.sleep(1) end
+          sleep_fun: fn _ -> :ok end
         )
 
       assert {:error, %Error{type: :api_timeout}} = Task.await(task, 1_000)

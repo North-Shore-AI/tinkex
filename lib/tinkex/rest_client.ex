@@ -1,19 +1,29 @@
 defmodule Tinkex.RestClient do
   @moduledoc """
-  REST client for synchronous Tinker API operations.
+  REST client for Tinker API operations.
 
-  Provides checkpoint and session management functionality.
+  Provides checkpoint and session management functionality with both
+  synchronous and asynchronous variants.
 
   ## Usage
 
       {:ok, service_pid} = Tinkex.ServiceClient.start_link(config: config)
       {:ok, rest_client} = Tinkex.ServiceClient.create_rest_client(service_pid)
 
-      # List sessions
+      # Synchronous API
       {:ok, sessions} = Tinkex.RestClient.list_sessions(rest_client)
-
-      # List checkpoints
       {:ok, checkpoints} = Tinkex.RestClient.list_user_checkpoints(rest_client)
+
+      # Asynchronous API - returns Task.t()
+      task = Tinkex.RestClient.list_sessions_async(rest_client)
+      {:ok, sessions} = Task.await(task)
+
+      # Parallel requests
+      tasks = [
+        Tinkex.RestClient.list_sessions_async(rest_client),
+        Tinkex.RestClient.list_user_checkpoints_async(rest_client)
+      ]
+      results = Task.await_many(tasks)
   """
 
   alias Tinkex.API.Rest
@@ -296,5 +306,186 @@ defmodule Tinkex.RestClient do
           {:ok, CheckpointArchiveUrlResponse.t()} | {:error, Tinkex.Error.t()}
   def get_checkpoint_archive_url_by_tinker_path(client, checkpoint_path) do
     get_checkpoint_archive_url(client, checkpoint_path)
+  end
+
+  # ============================================================================
+  # Async API - Task-returning variants for all REST methods
+  # ============================================================================
+
+  @doc """
+  Async variant of `get_session/2`.
+
+  Returns a `Task.t()` that resolves to `{:ok, GetSessionResponse.t()} | {:error, Tinkex.Error.t()}`.
+
+  ## Examples
+
+      task = RestClient.get_session_async(client, "session-123")
+      {:ok, response} = Task.await(task)
+  """
+  @spec get_session_async(t(), String.t()) :: Task.t()
+  def get_session_async(client, session_id) do
+    Task.async(fn -> get_session(client, session_id) end)
+  end
+
+  @doc """
+  Async variant of `list_sessions/2`.
+
+  Returns a `Task.t()` that resolves to `{:ok, ListSessionsResponse.t()} | {:error, Tinkex.Error.t()}`.
+
+  ## Examples
+
+      task = RestClient.list_sessions_async(client)
+      {:ok, response} = Task.await(task)
+
+      task = RestClient.list_sessions_async(client, limit: 50)
+      {:ok, response} = Task.await(task)
+  """
+  @spec list_sessions_async(t(), keyword()) :: Task.t()
+  def list_sessions_async(client, opts \\ []) do
+    Task.async(fn -> list_sessions(client, opts) end)
+  end
+
+  @doc """
+  Async variant of `get_sampler/2`.
+
+  Returns a `Task.t()` that resolves to `{:ok, GetSamplerResponse.t()} | {:error, Tinkex.Error.t()}`.
+  """
+  @spec get_sampler_async(t(), String.t()) :: Task.t()
+  def get_sampler_async(client, sampler_id) do
+    Task.async(fn -> get_sampler(client, sampler_id) end)
+  end
+
+  @doc """
+  Async variant of `get_weights_info_by_tinker_path/2`.
+
+  Returns a `Task.t()` that resolves to `{:ok, WeightsInfoResponse.t()} | {:error, Tinkex.Error.t()}`.
+  """
+  @spec get_weights_info_by_tinker_path_async(t(), String.t()) :: Task.t()
+  def get_weights_info_by_tinker_path_async(client, tinker_path) do
+    Task.async(fn -> get_weights_info_by_tinker_path(client, tinker_path) end)
+  end
+
+  @doc """
+  Async variant of `list_checkpoints/2`.
+
+  Returns a `Task.t()` that resolves to `{:ok, CheckpointsListResponse.t()} | {:error, Tinkex.Error.t()}`.
+  """
+  @spec list_checkpoints_async(t(), String.t()) :: Task.t()
+  def list_checkpoints_async(client, run_id) do
+    Task.async(fn -> list_checkpoints(client, run_id) end)
+  end
+
+  @doc """
+  Async variant of `list_user_checkpoints/2`.
+
+  Returns a `Task.t()` that resolves to `{:ok, CheckpointsListResponse.t()} | {:error, Tinkex.Error.t()}`.
+  """
+  @spec list_user_checkpoints_async(t(), keyword()) :: Task.t()
+  def list_user_checkpoints_async(client, opts \\ []) do
+    Task.async(fn -> list_user_checkpoints(client, opts) end)
+  end
+
+  @doc """
+  Async variant of `get_checkpoint_archive_url/2`.
+
+  Returns a `Task.t()` that resolves to `{:ok, CheckpointArchiveUrlResponse.t()} | {:error, Tinkex.Error.t()}`.
+  """
+  @spec get_checkpoint_archive_url_async(t(), String.t()) :: Task.t()
+  def get_checkpoint_archive_url_async(client, checkpoint_path) do
+    Task.async(fn -> get_checkpoint_archive_url(client, checkpoint_path) end)
+  end
+
+  @doc """
+  Async variant of `delete_checkpoint/2`.
+
+  Returns a `Task.t()` that resolves to `{:ok, map()} | {:error, Tinkex.Error.t()}`.
+  """
+  @spec delete_checkpoint_async(t(), String.t()) :: Task.t()
+  def delete_checkpoint_async(client, checkpoint_path) do
+    Task.async(fn -> delete_checkpoint(client, checkpoint_path) end)
+  end
+
+  @doc """
+  Async variant of `get_training_run/2`.
+
+  Returns a `Task.t()` that resolves to `{:ok, TrainingRun.t()} | {:error, Tinkex.Error.t()}`.
+  """
+  @spec get_training_run_async(t(), String.t()) :: Task.t()
+  def get_training_run_async(client, run_id) do
+    Task.async(fn -> get_training_run(client, run_id) end)
+  end
+
+  @doc """
+  Async variant of `get_training_run_by_tinker_path/2`.
+
+  Returns a `Task.t()` that resolves to `{:ok, TrainingRun.t()} | {:error, Tinkex.Error.t()}`.
+  """
+  @spec get_training_run_by_tinker_path_async(t(), String.t()) :: Task.t()
+  def get_training_run_by_tinker_path_async(client, tinker_path) do
+    Task.async(fn -> get_training_run_by_tinker_path(client, tinker_path) end)
+  end
+
+  @doc """
+  Async variant of `list_training_runs/2`.
+
+  Returns a `Task.t()` that resolves to `{:ok, TrainingRunsResponse.t()} | {:error, Tinkex.Error.t()}`.
+  """
+  @spec list_training_runs_async(t(), keyword()) :: Task.t()
+  def list_training_runs_async(client, opts \\ []) do
+    Task.async(fn -> list_training_runs(client, opts) end)
+  end
+
+  @doc """
+  Async variant of `publish_checkpoint/2`.
+
+  Returns a `Task.t()` that resolves to `{:ok, map()} | {:error, Tinkex.Error.t()}`.
+  """
+  @spec publish_checkpoint_async(t(), String.t()) :: Task.t()
+  def publish_checkpoint_async(client, checkpoint_path) do
+    Task.async(fn -> publish_checkpoint(client, checkpoint_path) end)
+  end
+
+  @doc """
+  Async variant of `unpublish_checkpoint/2`.
+
+  Returns a `Task.t()` that resolves to `{:ok, map()} | {:error, Tinkex.Error.t()}`.
+  """
+  @spec unpublish_checkpoint_async(t(), String.t()) :: Task.t()
+  def unpublish_checkpoint_async(client, checkpoint_path) do
+    Task.async(fn -> unpublish_checkpoint(client, checkpoint_path) end)
+  end
+
+  # Convenience async aliases matching Python naming
+
+  @doc """
+  Async variant of `delete_checkpoint_by_tinker_path/2`.
+  """
+  @spec delete_checkpoint_by_tinker_path_async(t(), String.t()) :: Task.t()
+  def delete_checkpoint_by_tinker_path_async(client, checkpoint_path) do
+    delete_checkpoint_async(client, checkpoint_path)
+  end
+
+  @doc """
+  Async variant of `publish_checkpoint_from_tinker_path/2`.
+  """
+  @spec publish_checkpoint_from_tinker_path_async(t(), String.t()) :: Task.t()
+  def publish_checkpoint_from_tinker_path_async(client, checkpoint_path) do
+    publish_checkpoint_async(client, checkpoint_path)
+  end
+
+  @doc """
+  Async variant of `unpublish_checkpoint_from_tinker_path/2`.
+  """
+  @spec unpublish_checkpoint_from_tinker_path_async(t(), String.t()) :: Task.t()
+  def unpublish_checkpoint_from_tinker_path_async(client, checkpoint_path) do
+    unpublish_checkpoint_async(client, checkpoint_path)
+  end
+
+  @doc """
+  Async variant of `get_checkpoint_archive_url_by_tinker_path/2`.
+  """
+  @spec get_checkpoint_archive_url_by_tinker_path_async(t(), String.t()) :: Task.t()
+  def get_checkpoint_archive_url_by_tinker_path_async(client, checkpoint_path) do
+    get_checkpoint_archive_url_async(client, checkpoint_path)
   end
 end

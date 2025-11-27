@@ -13,14 +13,12 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the Tinker distributed machine learning platform. It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.9 Highlights
+## 0.1.10 Highlights
 
-- **NotGiven/transform layer**: Added omit/not-given sentinels and a transform pipeline for request serialization (aliasing, date formatting, and omission of unset fields) to match the Python SDK.
-- **Response wrappers + SSE**: HTTP responses now expose metadata (status, headers, URL, elapsed, retries) via `Tinkex.API.Response`, with SSE decoding helpers for event-stream endpoints.
-- **Typed gaps closed**: New structs for weight save/load responses, training runs, cursors, server capabilities, and health checks; REST training run endpoints now decode into typed structs.
-- **Service endpoints**: Added `/api/v1/get_server_capabilities` and `/api/v1/healthz` to the Service API.
-- **Sampling compute_logprobs**: Convenience helper added to `SamplingClient` for prompt token logprobs.
-- **CLI management parity**: New `tinkex checkpoint` subcommands (list/info/publish/unpublish/delete/download) and `tinkex run` management subcommands (list/info) with tests; examples include a live capabilities + logprobs demo.
+- **RestClient async API**: All REST methods now have `*_async` variants returning `Task.t()` for parallel requests (e.g., `list_sessions_async/2`, `get_checkpoint_archive_url_async/2`).
+- **TrainingClient tokenizer helpers**: New `get_tokenizer/2`, `encode/3`, and `decode/3` convenience wrappers that resolve tokenizers from model info with caching.
+- **Config parity mode**: Set `parity_mode: :python` (or `TINKEX_PARITY=python`) to use Python SDK defaults for timeout (60s) and max_retries (10).
+- **Typed telemetry events**: Internal refactor - telemetry payloads now use typed structs (`GenericEvent`, `SessionStartEvent`, etc.) instead of ad-hoc maps.
 
 ## Features
 
@@ -55,7 +53,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.9"}
+    {:tinkex, "~> 0.1.10"}
   ]
 end
 ```

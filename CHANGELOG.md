@@ -2,6 +2,57 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.10] - 2025-11-27
+
+### Added
+
+#### RestClient Async API
+- All REST methods now have `*_async` variants returning `Task.t()` for parallel requests:
+  - `get_session_async/2`, `list_sessions_async/2`, `get_sampler_async/2`
+  - `get_weights_info_by_tinker_path_async/2`, `list_checkpoints_async/2`
+  - `list_user_checkpoints_async/2`, `get_checkpoint_archive_url_async/2`
+  - `delete_checkpoint_async/2`, `get_training_run_async/2`
+  - `get_training_run_by_tinker_path_async/2`, `list_training_runs_async/2`
+  - `publish_checkpoint_async/2`, `unpublish_checkpoint_async/2`
+  - Plus convenience aliases (`delete_checkpoint_by_tinker_path_async/2`, `publish_checkpoint_from_tinker_path_async/2`, etc.)
+
+#### TrainingClient Tokenizer Helpers
+- `TrainingClient.get_tokenizer/2` - fetches tokenizer using model info with ETS caching
+- `TrainingClient.encode/3` - convenience wrapper for tokenizer encoding from training client
+- `TrainingClient.decode/3` - convenience wrapper for tokenizer decoding from training client
+
+#### Config Parity Mode
+- New `parity_mode: :python` option to align timeout/retry defaults with Python SDK:
+  - Set via options: `Tinkex.Config.new(parity_mode: :python)`
+  - Set via application config: `config :tinkex, parity_mode: :python`
+  - Set via environment variable: `TINKEX_PARITY=python`
+- Python parity defaults: `timeout: 60_000` (1 min), `max_retries: 10` (11 total attempts)
+- BEAM-conservative defaults (unchanged): `timeout: 120_000` (2 min), `max_retries: 2` (3 total attempts)
+- New helper functions: Tinkex.Config.default_timeout/0, Tinkex.Config.default_max_retries/0, Tinkex.Config.python_timeout/0, Tinkex.Config.python_max_retries/0
+- `Tinkex.Env.parity_mode/1` - reads `TINKEX_PARITY` environment variable
+
+#### Typed Telemetry Events
+- New structs under `Tinkex.Types.Telemetry`:
+  - `EventType` - enum for SESSION_START, SESSION_END, UNHANDLED_EXCEPTION, GENERIC_EVENT
+  - `Severity` - enum for DEBUG, INFO, WARNING, ERROR, CRITICAL
+  - `GenericEvent`, `SessionStartEvent`, `SessionEndEvent`, `UnhandledExceptionEvent` - typed event structs
+  - `TelemetryEvent` - union type with `to_map/1`, `from_map/1`, `event_type/1` dispatch helpers
+  - `TelemetryBatch` - batch grouping with `to_list/1`, `from_list/2`, `size/1`
+  - `TelemetrySendRequest` - request structure for API transmission
+
+### Changed
+
+- `Tinkex.Telemetry.Reporter` now emits typed structs internally and converts to wire format maps on send
+- `Tinkex.Env.snapshot/1` now includes `parity_mode` field
+
+### Tests
+
+- Added `test/tinkex/types/telemetry_types_test.exs` - 53 tests for telemetry type round-trips and conversions
+- Added `test/tinkex/rest_client_async_test.exs` - 14 tests for async REST client with Bypass
+- Added `test/tinkex/training_client_tokenizer_test.exs` - 11 tests for tokenizer helper wiring
+- Added `test/tinkex/config_parity_test.exs` - 10 tests for parity mode configuration
+- Extended `test/tinkex/env_test.exs` - 4 tests for `parity_mode/1`
+
 ## [0.1.9] - 2025-11-26
 
 ### Added

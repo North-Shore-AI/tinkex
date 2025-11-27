@@ -17,7 +17,12 @@ defmodule Tinkex.Future.AwaitTest do
     end
 
     test "converts Task timeouts into api_timeout errors", %{task_supervisor: task_supervisor} do
-      task = Task.Supervisor.async_nolink(task_supervisor, fn -> Process.sleep(:infinity) end)
+      task =
+        Task.Supervisor.async_nolink(task_supervisor, fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
 
       assert {:error, %Error{type: :api_timeout}} = Future.await(task, 10)
 
@@ -29,11 +34,15 @@ defmodule Tinkex.Future.AwaitTest do
     test "preserves order and returns each task result", %{task_supervisor: task_supervisor} do
       slow =
         Task.Supervisor.async_nolink(task_supervisor, fn ->
-          Process.sleep(20)
-          {:ok, :slow}
+          receive do
+            :proceed -> {:ok, :slow}
+          end
         end)
 
       fast = Task.Supervisor.async_nolink(task_supervisor, fn -> {:ok, :fast} end)
+
+      # Ensure fast task completes first by delaying slow task
+      send(slow.pid, :proceed)
 
       assert [{:ok, :slow}, {:ok, :fast}] = Future.await_many([slow, fast], 1_000)
     end
@@ -41,7 +50,13 @@ defmodule Tinkex.Future.AwaitTest do
     test "returns errors instead of raising when tasks exit", %{task_supervisor: task_supervisor} do
       success = Task.Supervisor.async_nolink(task_supervisor, fn -> {:ok, :value} end)
       crashing = Task.Supervisor.async_nolink(task_supervisor, fn -> raise "boom" end)
-      stalled = Task.Supervisor.async_nolink(task_supervisor, fn -> Process.sleep(:infinity) end)
+
+      stalled =
+        Task.Supervisor.async_nolink(task_supervisor, fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
 
       results = Future.await_many([success, crashing, stalled], 10)
 

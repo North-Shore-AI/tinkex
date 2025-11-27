@@ -15,6 +15,11 @@ defmodule Tinkex.SessionManagerTest do
     def heartbeat(_request, config: _config), do: {:ok, %{}}
   end
 
+  defmodule NoopSessionAPI do
+    def create(_request, config: _config), do: {:ok, %{"session_id" => "session-missing"}}
+    def heartbeat(_request, config: _config), do: {:ok, %{}}
+  end
+
   setup do
     bypass = Bypass.open()
     base_url = "http://localhost:#{bypass.port}"
@@ -79,12 +84,19 @@ defmodule Tinkex.SessionManagerTest do
     assert_receive :heartbeat_error, 1_000
     assert Map.has_key?(sessions(manager), "session-2")
 
+    # Wait for warning threshold (50ms) to be exceeded using receive timeout
+    # This is more idiomatic than Process.sleep per Supertester guidelines
+    receive do
+    after
+      60 -> :ok
+    end
+
     log =
       capture_log([level: :warning], fn ->
-        Process.sleep(60)
         send(manager, :heartbeat)
         assert_receive :heartbeat_error, 1_000
-        Process.sleep(20)
+        # Sync with manager state to ensure heartbeat is fully processed
+        _ = :sys.get_state(manager)
       end)
 
     assert log =~ "session-2"
@@ -123,6 +135,52 @@ defmodule Tinkex.SessionManagerTest do
     SessionManager.stop_session("session-3", manager)
   end
 
+  test "heartbeat skips missing pool and retains session", %{config: config} do
+    manager = start_session_manager(heartbeat_interval_ms: 1_000_000, session_api: NoopSessionAPI)
+    config = %{config | http_pool: :missing_pool}
+
+    {:ok, session_id} = SessionManager.start_session(config, manager)
+
+    assert Process.whereis(config.http_pool) == nil
+
+    log =
+      capture_log([level: :warning], fn ->
+        send(manager, :heartbeat)
+        # Sync with manager state to ensure heartbeat is fully processed
+        _ = :sys.get_state(manager)
+      end)
+
+    assert log =~ "Skipping heartbeat"
+    assert Map.has_key?(sessions(manager), session_id)
+  end
+
+  test "removes session after configured failure count", %{bypass: bypass, config: config} do
+    expect_create_session(bypass, "session-removal")
+
+    Bypass.stub(bypass, "POST", "/api/v1/session_heartbeat", fn conn ->
+      Conn.resp(conn, 500, ~s({"error":"fail"}))
+    end)
+
+    manager =
+      start_session_manager(
+        heartbeat_interval_ms: 1_000_000,
+        max_failure_count: 0,
+        heartbeat_warning_after_ms: 0
+      )
+
+    {:ok, session_id} = SessionManager.start_session(config, manager)
+
+    capture_log([level: :warning], fn ->
+      send(manager, :heartbeat)
+      # Sync with manager state to ensure heartbeat is fully processed and session removed
+      _ = :sys.get_state(manager)
+    end)
+
+    refute Map.has_key?(sessions(manager), session_id)
+    table = sessions_table(manager)
+    assert :ets.lookup(table, session_id) == []
+  end
+
   defp expect_create_session(bypass, session_id, delay_ms \\ 0) do
     Bypass.expect_once(bypass, "POST", "/api/v1/create_session", fn conn ->
       Process.sleep(delay_ms)
@@ -132,17 +190,27 @@ defmodule Tinkex.SessionManagerTest do
 
   defp start_session_manager(opts) do
     name = Keyword.get(opts, :name, :"session_manager_#{System.unique_integer([:positive])}")
+    sessions_table = Keyword.get(opts, :sessions_table, unique_sessions_table())
     heartbeat_interval_ms = Keyword.get(opts, :heartbeat_interval_ms, 1_000_000)
     heartbeat_warning_after_ms = Keyword.get(opts, :heartbeat_warning_after_ms, 120_000)
     session_api = Keyword.get(opts, :session_api, Tinkex.API.Session)
+    max_failure_count = Keyword.get(opts, :max_failure_count)
+    max_failure_duration_ms = Keyword.get(opts, :max_failure_duration_ms)
+
+    manager_opts =
+      [
+        name: name,
+        sessions_table: sessions_table,
+        heartbeat_interval_ms: heartbeat_interval_ms,
+        heartbeat_warning_after_ms: heartbeat_warning_after_ms,
+        session_api: session_api
+      ]
+      |> maybe_put(:max_failure_count, max_failure_count)
+      |> maybe_put(:max_failure_duration_ms, max_failure_duration_ms)
 
     spec =
       Supervisor.child_spec(
-        {SessionManager,
-         name: name,
-         heartbeat_interval_ms: heartbeat_interval_ms,
-         heartbeat_warning_after_ms: heartbeat_warning_after_ms,
-         session_api: session_api},
+        {SessionManager, manager_opts},
         id: {SessionManager, name}
       )
 
@@ -169,6 +237,17 @@ defmodule Tinkex.SessionManagerTest do
     :sys.get_state(manager).sessions
   end
 
+  defp sessions_table(manager) do
+    :sys.get_state(manager).sessions_table
+  end
+
+  defp unique_sessions_table do
+    :"tinkex_sessions_#{System.unique_integer([:positive])}"
+  end
+
+  defp maybe_put(opts, _key, nil), do: opts
+  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
+
   test "start_session respects config timeout", %{
     config: config
   } do
@@ -180,6 +259,7 @@ defmodule Tinkex.SessionManagerTest do
         {SessionManager,
          name: :"session_manager_timeout_#{System.unique_integer([:positive])}",
          heartbeat_interval_ms: 1_000_000,
+         sessions_table: unique_sessions_table(),
          session_api: SlowSessionAPI},
         id: {:session_manager_timeout, System.unique_integer([:positive])}
       )

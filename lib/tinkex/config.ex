@@ -46,18 +46,51 @@ defmodule Tinkex.Config do
         }
 
   @default_base_url "https://tinker.thinkingmachines.dev/services/tinker-prod"
+
+  # Elixir/BEAM conservative defaults
   @default_timeout 120_000
   @default_max_retries 2
+
+  # Python SDK parity defaults (tinker/_constants.py)
+  @python_timeout 60_000
+  @python_max_retries 10
 
   @doc """
   Build a config struct using runtime options + application/env defaults.
 
   `max_retries` is the number of additional attempts after the initial request.
   With the default of 2, the SDK will perform up to three total attempts.
+
+  ## Parity Mode
+
+  By default, Tinkex uses BEAM-conservative defaults:
+    * `timeout: 120_000` (2 minutes)
+    * `max_retries: 2` (3 total attempts)
+
+  To match Python SDK defaults, enable parity mode:
+
+      # Via options
+      config = Tinkex.Config.new(parity_mode: :python)
+
+      # Via application config
+      config :tinkex, parity_mode: :python
+
+      # Via environment variable
+      export TINKEX_PARITY=python
+
+  Python parity mode sets:
+    * `timeout: 60_000` (1 minute)
+    * `max_retries: 10` (11 total attempts)
+
+  Explicit timeout/max_retries options always override parity defaults.
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
     env = Env.snapshot()
+
+    # Determine parity mode: opts > app config > env
+    parity_mode = determine_parity_mode(opts, env)
+    {default_timeout, default_max_retries} = defaults_for_parity(parity_mode)
 
     api_key =
       pick([
@@ -79,10 +112,10 @@ defmodule Tinkex.Config do
     http_pool =
       pick([opts[:http_pool], Application.get_env(:tinkex, :http_pool)], Tinkex.HTTP.Pool)
 
-    timeout = pick([opts[:timeout], Application.get_env(:tinkex, :timeout)], @default_timeout)
+    timeout = pick([opts[:timeout], Application.get_env(:tinkex, :timeout)], default_timeout)
 
     max_retries =
-      pick([opts[:max_retries], Application.get_env(:tinkex, :max_retries)], @default_max_retries)
+      pick([opts[:max_retries], Application.get_env(:tinkex, :max_retries)], default_max_retries)
 
     tags =
       pick(
@@ -255,6 +288,46 @@ defmodule Tinkex.Config do
 
   defp default_tags([]), do: ["tinkex-elixir"]
   defp default_tags(tags) when is_list(tags), do: tags
+
+  # Parity mode helpers
+
+  defp determine_parity_mode(opts, env) do
+    pick([
+      opts[:parity_mode],
+      Application.get_env(:tinkex, :parity_mode),
+      parse_parity_env(env)
+    ])
+  end
+
+  defp parse_parity_env(%{parity_mode: mode}) when mode in [:python, "python"], do: :python
+  defp parse_parity_env(_), do: nil
+
+  defp defaults_for_parity(:python), do: {@python_timeout, @python_max_retries}
+  defp defaults_for_parity(_), do: {@default_timeout, @default_max_retries}
+
+  @doc """
+  Return BEAM-conservative default timeout (120s).
+  """
+  @spec default_timeout() :: pos_integer()
+  def default_timeout, do: @default_timeout
+
+  @doc """
+  Return BEAM-conservative default max_retries (2).
+  """
+  @spec default_max_retries() :: non_neg_integer()
+  def default_max_retries, do: @default_max_retries
+
+  @doc """
+  Return Python SDK parity timeout (60s).
+  """
+  @spec python_timeout() :: pos_integer()
+  def python_timeout, do: @python_timeout
+
+  @doc """
+  Return Python SDK parity max_retries (10).
+  """
+  @spec python_max_retries() :: non_neg_integer()
+  def python_max_retries, do: @python_max_retries
 end
 
 defimpl Inspect, for: Tinkex.Config do

@@ -50,6 +50,8 @@ defmodule Tinkex.ServiceClientTest do
 
     heartbeat_stub(bypass)
 
+    on_exit(fn -> Bypass.down(bypass) end)
+
     {:ok, bypass: bypass, config: config, manager: manager}
   end
 
@@ -333,16 +335,29 @@ defmodule Tinkex.ServiceClientTest do
     name
   end
 
-  defp start_session_manager do
-    name = :"session_manager_#{System.unique_integer([:positive])}"
+  defp start_session_manager(opts \\ []) do
+    name = Keyword.get(opts, :name, :"session_manager_#{System.unique_integer([:positive])}")
+    sessions_table = Keyword.get(opts, :sessions_table, unique_sessions_table())
+    heartbeat_interval_ms = Keyword.get(opts, :heartbeat_interval_ms, 1_000_000)
 
     spec = %{
       id: {Tinkex.SessionManager, name},
       start:
-        {Tinkex.SessionManager, :start_link, [[name: name, heartbeat_interval_ms: 1_000_000]]}
+        {Tinkex.SessionManager, :start_link,
+         [
+           [
+             name: name,
+             sessions_table: sessions_table,
+             heartbeat_interval_ms: heartbeat_interval_ms
+           ]
+         ]}
     }
 
     {:ok, _} = start_supervised(spec)
     name
+  end
+
+  defp unique_sessions_table do
+    :"tinkex_sessions_#{System.unique_integer([:positive])}"
   end
 end
