@@ -23,6 +23,7 @@ The examples are organized by functionality and complexity, ranging from simple 
 - `metrics_live.exs` – live sampling + metrics snapshot (counters and latency percentiles)
 - `telemetry_live.exs` – live telemetry with custom events and sampling
 - `telemetry_reporter_demo.exs` – comprehensive telemetry reporter demo with all features
+- `retry_and_capture.exs` – retry helper + capture macros with telemetry events
 - `examples/run_all.sh` – helper script that runs each example sequentially
 
 ## Prerequisites
@@ -377,6 +378,34 @@ Comprehensive demonstration of all Tinkex.Telemetry.Reporter features including 
 - Testing telemetry integration before production deployment
 - Debugging telemetry issues with verbose event logging
 - Learning the reporter API and lifecycle management
+
+### retry_and_capture.exs
+
+Shows how to combine the new retry helper (`Tinkex.Retry.with_retry/3`) with telemetry events and exception capture macros. It emits retry telemetry for each attempt, retries synthetic 500 errors, and logs a fatal exception through the telemetry reporter if retries are exhausted.
+
+**Key Features:**
+- Pure Elixir retry loop with jittered backoff and telemetry emission
+- Console logging of retry telemetry without sleeps
+- Optional telemetry reporter bootstrap via `Tinkex.ServiceClient` (requires `TINKER_API_KEY`; uses live session creation)
+- Exception capture via telemetry capture macros
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (optional, required only if you want backend telemetry)
+- `TINKER_BASE_URL` (optional, used when reporter is started)
+
+**Use Cases:**
+- Learning the retry helper and telemetry event shapes
+- Exercising capture macros with a real telemetry reporter
+- Adding defensive retries to client code paths without external dependencies
+
+**Run it:**
+
+```bash
+# sends telemetry if TINKER_API_KEY is set (auto-creates a live session)
+TINKER_API_KEY=your-key mix run examples/retry_and_capture.exs
+# or run without the env var to stay local/console-only
+mix run examples/retry_and_capture.exs
+```
 
 ## Common Patterns
 

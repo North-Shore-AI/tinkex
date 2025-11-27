@@ -69,4 +69,61 @@ defmodule Tinkex.Telemetry do
       "Unhandled telemetry #{inspect(event)} #{inspect(metadata)}"
     end)
   end
+
+  @doc """
+  Initialize a telemetry reporter for a session.
+
+  Options:
+    * `:session_id` (**required**) - The session ID
+    * `:config` (**required**) - `Tinkex.Config.t()`
+    * `:enabled?` - Override env flag (default: check `TINKER_TELEMETRY`)
+    * `:telemetry_opts` - Options passed to `Reporter.start_link/1`
+
+  Returns `{:ok, pid}` on success, `:ignore` when disabled, or
+  `{:error, reason}` on failure.
+
+  Treats `{:error, {:already_started, pid}}` as success.
+  """
+  @spec init(keyword()) :: {:ok, pid()} | :ignore | {:error, term()}
+  def init(opts) do
+    with {:ok, session_id} <- fetch_required(opts, :session_id),
+         {:ok, config} <- fetch_required(opts, :config) do
+      enabled? = Keyword.get(opts, :enabled?, telemetry_enabled?())
+
+      if enabled? do
+        telemetry_opts = Keyword.get(opts, :telemetry_opts, [])
+
+        reporter_opts =
+          telemetry_opts
+          |> Keyword.put(:session_id, session_id)
+          |> Keyword.put(:config, config)
+          |> Keyword.put(:enabled, true)
+
+        case Tinkex.Telemetry.Reporter.start_link(reporter_opts) do
+          {:ok, pid} -> {:ok, pid}
+          {:error, {:already_started, pid}} -> {:ok, pid}
+          {:error, reason} -> {:error, reason}
+        end
+      else
+        :ignore
+      end
+    end
+  end
+
+  defp fetch_required(opts, key) do
+    case Keyword.fetch(opts, key) do
+      {:ok, value} -> {:ok, value}
+      :error -> {:error, {:missing_required_option, key}}
+    end
+  end
+
+  defp telemetry_enabled? do
+    case System.get_env("TINKER_TELEMETRY", "1") |> String.downcase() do
+      "1" -> true
+      "true" -> true
+      "yes" -> true
+      "on" -> true
+      _ -> false
+    end
+  end
 end

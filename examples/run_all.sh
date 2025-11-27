@@ -20,6 +20,7 @@ EXAMPLES=(
   "metrics_live.exs"
   "telemetry_live.exs"
   "telemetry_reporter_demo.exs"
+  "retry_and_capture.exs"
 )
 
 if [[ -z "${TINKER_API_KEY:-}" ]]; then

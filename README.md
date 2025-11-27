@@ -503,8 +503,32 @@ Run any of the sample scripts with `mix run examples/<name>.exs` (requires `TINK
 - `cli_run_prompt_file.exs` – use a prompt file and JSON output with `tinkex run`
 - `telemetry_live.exs` – live telemetry with custom events and sampling
 - `telemetry_reporter_demo.exs` – comprehensive reporter demo with retry, drain, and shutdown
+- `retry_and_capture.exs` – retry helper demo with telemetry events and capture macros (uses live session creation when `TINKER_API_KEY` is set)
 
 Use `examples/run_all.sh` (requires `TINKER_API_KEY`) to run the curated set in sequence.
+
+## Retry & Telemetry Capture (new)
+
+Use the built-in retry helper with telemetry events, and wrap risky blocks with the capture macros so exceptions get logged to the reporter before being re-raised:
+
+```elixir
+alias Tinkex.{Retry, RetryHandler}
+alias Tinkex.Telemetry.Capture
+
+{:ok, service} = Tinkex.ServiceClient.start_link(config: config)
+{:ok, reporter} = Tinkex.ServiceClient.telemetry_reporter(service)
+
+result =
+  Capture.capture_exceptions reporter: reporter do
+    Retry.with_retry(
+      fn -> maybe_fails() end,
+      handler: RetryHandler.new(max_retries: 2, base_delay_ms: 200),
+      telemetry_metadata: %{operation: "demo"}
+    )
+  end
+```
+
+This emits `[:tinkex, :retry, :attempt, ...]` telemetry for start/stop/retry/failed, and fatal exceptions will be flushed to telemetry. See `examples/retry_and_capture.exs` for a runnable script (requires `TINKER_API_KEY`; auto-creates a session and reporter).
 
 ## Contributing
 

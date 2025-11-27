@@ -13,12 +13,14 @@ defmodule Tinkex.SamplingClient do
   """
 
   use GenServer
+  use Tinkex.Telemetry.Provider
 
   alias Tinkex.API.{Sampling, Service}
   alias Tinkex.Error
   alias Tinkex.Future
   alias Tinkex.RateLimiter
   alias Tinkex.SamplingRegistry
+  alias Tinkex.Telemetry.Reporter
 
   alias Tinkex.Types.{
     CreateSamplingSessionRequest,
@@ -109,6 +111,9 @@ defmodule Tinkex.SamplingClient do
 
         :ok = SamplingRegistry.register(self(), entry)
 
+        telemetry = Keyword.get(opts, :telemetry)
+        put_telemetry(telemetry)
+
         {:ok,
          %{
            sampling_session_id: sampling_session_id,
@@ -117,6 +122,7 @@ defmodule Tinkex.SamplingClient do
            config: config,
            sampling_api: sampling_api,
            telemetry_metadata: telemetry_metadata,
+           telemetry: telemetry,
            session_id: session_id
          }}
 
@@ -126,7 +132,24 @@ defmodule Tinkex.SamplingClient do
   end
 
   @impl true
-  def terminate(_reason, _state), do: :ok
+  def terminate(_reason, state) do
+    Reporter.stop(state[:telemetry])
+    :ok
+  end
+
+  @impl true
+  def get_telemetry do
+    :erlang.get({__MODULE__, :telemetry})
+  end
+
+  def get_telemetry(client) when is_pid(client) do
+    GenServer.call(client, :get_telemetry)
+  end
+
+  @impl true
+  def handle_call(:get_telemetry, _from, state) do
+    {:reply, state.telemetry, state}
+  end
 
   defp do_sample(client, prompt, sampling_params, opts) do
     case :ets.lookup(:tinkex_sampling_clients, {:config, client}) do
@@ -257,4 +280,7 @@ defmodule Tinkex.SamplingClient do
     |> Map.new()
     |> Map.merge(Map.new(override))
   end
+
+  defp put_telemetry(nil), do: :ok
+  defp put_telemetry(pid), do: :erlang.put({__MODULE__, :telemetry}, pid)
 end

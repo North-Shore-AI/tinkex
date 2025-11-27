@@ -12,10 +12,12 @@ defmodule Tinkex.TrainingClient do
   """
 
   use GenServer
+  use Tinkex.Telemetry.Provider
 
   alias Tinkex.API.{Service, Training, Weights}
   alias Tinkex.Error
   alias Tinkex.Future.Combiner
+  alias Tinkex.Telemetry.Reporter
 
   alias Tinkex.Types.{
     CreateModelRequest,
@@ -228,14 +230,30 @@ defmodule Tinkex.TrainingClient do
           weights_api: weights_api,
           future_module: future_module,
           client_supervisor: client_supervisor,
-          telemetry_metadata: telemetry_metadata
+          telemetry_metadata: telemetry_metadata,
+          telemetry: Keyword.get(opts, :telemetry)
         }
 
+        put_telemetry(state.telemetry)
         {:ok, state}
 
       {:error, reason} ->
         {:stop, reason}
     end
+  end
+
+  @impl true
+  def get_telemetry do
+    :erlang.get({__MODULE__, :telemetry})
+  end
+
+  def get_telemetry(client) when is_pid(client) do
+    GenServer.call(client, :get_telemetry)
+  end
+
+  @impl true
+  def handle_call(:get_telemetry, _from, state) do
+    {:reply, state.telemetry, state}
   end
 
   @impl true
@@ -518,6 +536,12 @@ defmodule Tinkex.TrainingClient do
 
   @impl true
   def handle_info(_msg, state), do: {:noreply, state}
+
+  @impl true
+  def terminate(_reason, state) do
+    Reporter.stop(state[:telemetry])
+    :ok
+  end
 
   defp ensure_model(opts, session_id, model_seq_id, config, service_api, telemetry_metadata) do
     case opts[:model_id] do
@@ -802,6 +826,9 @@ defmodule Tinkex.TrainingClient do
   defp base_telemetry_metadata(state, extra) when is_map(extra) do
     Map.merge(state.telemetry_metadata, extra)
   end
+
+  defp put_telemetry(nil), do: :ok
+  defp put_telemetry(pid), do: :erlang.put({__MODULE__, :telemetry}, pid)
 
   defp safe_await(future_module, task, timeout) do
     try do

@@ -131,7 +131,7 @@ defmodule Tinkex.SessionManager do
     # - Silently dropping on user errors (4xx including 404 when session ends)
     # - Keeping session on transient errors (will retry next interval)
     # - Never logging warnings for individual heartbeat failures
-    case session_api.heartbeat(%{session_id: session_id}, config: config) do
+    case safe_heartbeat(session_id, config, session_api) do
       {:ok, _} ->
         :ok
 
@@ -144,11 +144,31 @@ defmodule Tinkex.SessionManager do
           Logger.debug("Heartbeat failed for #{session_id}: #{Error.format(error)}")
           :ok
         end
+
+      {:error, reason} ->
+        Logger.debug("Heartbeat failed for #{session_id}: #{inspect(reason)}")
+        :ok
     end
   end
 
   defp schedule_heartbeat(interval_ms) do
     Process.send_after(self(), :heartbeat, interval_ms)
+  end
+
+  defp safe_heartbeat(session_id, config, session_api) do
+    session_api.heartbeat(%{session_id: session_id}, config: config)
+  rescue
+    exception ->
+      {:error,
+       Error.new(:request_failed, Exception.message(exception),
+         data: %{exception: exception, stacktrace: __STACKTRACE__}
+       )}
+  catch
+    :exit, reason ->
+      {:error,
+       Error.new(:request_failed, "Heartbeat exited: #{inspect(reason)}",
+         data: %{exit_reason: reason}
+       )}
   end
 
   defp sdk_version do

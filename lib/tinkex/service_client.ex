@@ -7,9 +7,14 @@ defmodule Tinkex.ServiceClient do
   """
 
   use GenServer
+  use Tinkex.Telemetry.Provider
+
+  require Logger
 
   alias Tinkex.Config
   alias Tinkex.SessionManager
+  alias Tinkex.Telemetry
+  alias Tinkex.Telemetry.Reporter
 
   @type t :: pid()
 
@@ -99,6 +104,7 @@ defmodule Tinkex.ServiceClient do
     case SessionManager.start_session(config, session_manager) do
       {:ok, session_id} ->
         telemetry_metadata = %{session_id: session_id}
+        telemetry = init_telemetry(session_id, config, opts)
 
         state = %{
           session_id: session_id,
@@ -109,10 +115,11 @@ defmodule Tinkex.ServiceClient do
           sampling_client_module: sampling_module,
           session_manager: session_manager,
           client_supervisor: client_supervisor,
-          telemetry: maybe_start_telemetry_reporter(session_id, config),
+          telemetry: telemetry,
           telemetry_metadata: telemetry_metadata
         }
 
+        put_telemetry(state.telemetry)
         {:ok, state}
 
       {:error, reason} ->
@@ -200,6 +207,7 @@ defmodule Tinkex.ServiceClient do
       |> Keyword.put(:config, state.config)
       |> Keyword.put(:model_seq_id, model_seq_id)
       |> Keyword.put(:client_supervisor, state.client_supervisor)
+      |> Keyword.put(:telemetry, state.telemetry)
       |> Keyword.put(:telemetry_metadata, state.telemetry_metadata)
 
     case DynamicSupervisor.start_child(
@@ -223,6 +231,7 @@ defmodule Tinkex.ServiceClient do
       |> Keyword.put(:session_id, state.session_id)
       |> Keyword.put(:config, state.config)
       |> Keyword.put(:sampling_client_id, sampling_client_id)
+      |> Keyword.put(:telemetry, state.telemetry)
       |> Keyword.put(:telemetry_metadata, state.telemetry_metadata)
 
     case DynamicSupervisor.start_child(
@@ -253,20 +262,57 @@ defmodule Tinkex.ServiceClient do
   end
 
   @impl true
-  def terminate(_reason, %{session_id: session_id, session_manager: session_manager}) do
+  def handle_call(:get_telemetry, _from, state) do
+    {:reply, state.telemetry, state}
+  end
+
+  @impl true
+  def get_telemetry do
+    :erlang.get({__MODULE__, :telemetry})
+  end
+
+  def get_telemetry(server) when is_pid(server) do
+    GenServer.call(server, :get_telemetry)
+  end
+
+  @impl true
+  def terminate(_reason, %{session_id: session_id, session_manager: session_manager} = state) do
+    Reporter.stop(state[:telemetry])
     SessionManager.stop_session(session_id, session_manager)
     :ok
   end
 
-  def terminate(_reason, _state), do: :ok
+  def terminate(_reason, state) do
+    Reporter.stop(state[:telemetry])
+    :ok
+  end
 
-  defp maybe_start_telemetry_reporter(session_id, config) do
-    opts = [session_id: session_id, config: config]
+  defp init_telemetry(session_id, config, opts) do
+    telemetry_opts = Keyword.get(opts, :telemetry_opts, [])
 
-    case Tinkex.Telemetry.Reporter.start_link(opts) do
-      {:ok, pid} -> pid
-      {:error, {:already_started, pid}} -> pid
-      _ -> nil
+    init_opts =
+      [session_id: session_id, config: config, telemetry_opts: telemetry_opts]
+      |> maybe_put_enabled?(Keyword.get(opts, :telemetry_enabled?))
+
+    case Telemetry.init(init_opts) do
+      {:ok, pid} ->
+        pid
+
+      :ignore ->
+        nil
+
+      {:error, reason} ->
+        Logger.debug("Telemetry disabled for session #{session_id}: #{inspect(reason)}")
+        nil
     end
   end
+
+  defp put_telemetry(nil), do: :ok
+
+  defp put_telemetry(pid) do
+    :erlang.put({__MODULE__, :telemetry}, pid)
+  end
+
+  defp maybe_put_enabled?(opts, nil), do: opts
+  defp maybe_put_enabled?(opts, value), do: Keyword.put(opts, :enabled?, value)
 end
