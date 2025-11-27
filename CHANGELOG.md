@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.12] - 2025-11-27
+
+Custom loss training now mirrors the Python SDK while adding multipart uploads, proxy-aware HTTP, streaming checkpoint downloads, queue observers, and richer capabilities metadata.
+
+### Added
+
+- **Custom loss training parity**: `TrainingClient.forward_backward_custom/4` preserves per-datum logprobs as Nx tensors, computes gradients locally, sends them back as synthetic weights so the backend trains, and returns `ForwardBackwardOutput` ready for `optim_step/2`.
+- **Structured capabilities metadata**: Capabilities responses expose `SupportedModel` structs with `model_id`, `model_name`, and `arch`; `model_names/1` offers backward-compatible name extraction and the capabilities example now prints the full metadata.
+- **Multipart uploads**: Tinkex.API.post/3 normalizes file inputs, flattens nested bodies into bracketed form fields, generates multipart boundaries, and sets `Content-Type` automatically when `:files` are present. Added path-based upload helpers and a runnable multipart demo.
+- **Queue observers**: Sampling and training clients register queue state observers that integrate with `Future.poll/2`, emitting debounced warnings with human-readable reasons for rate limiting or capacity throttling, aligned with the Python SDK.
+- **Proxy-aware HTTP**: `Tinkex.Config` now wires proxy settings through Finch pool configuration, supporting tuple proxies plus `TINKEX_PROXY` and `TINKEX_PROXY_HEADERS` while masking credentials in inspect/log output.
+
+### Changed
+
+- **Checkpoint downloads**: Archive downloads stream via Finch instead of loading into memory, maintaining O(1) memory usage while preserving progress callbacks and extraction semantics.
+
+### Documentation
+
+- Guides and examples refreshed for custom loss training, streaming checkpoint downloads, multipart uploads, async client creation, and the richer server capabilities response.
+
 ## [0.1.11] - 2025-11-27
 
 Achieves full behavioral parity with Python SDK (tinker v1.x) across retry semantics, HTTP connection pooling, and missing type definitions.
@@ -49,6 +69,13 @@ Achieves full behavioral parity with Python SDK (tinker v1.x) across retry seman
 - `SessionHeartbeatRequest` / `SessionHeartbeatResponse` - heartbeat wire types
 - `TelemetryResponse` - telemetry send response type
 - `Tinkex.Types.TypeAliases` module for `ModelInputChunk`, `LossFnInputs`, `LossFnOutput` union types
+- `SupportedModel` - structured model metadata with `model_id`, `model_name`, and `arch` fields
+
+#### Server Capabilities Type Improvement
+- `GetServerCapabilitiesResponse.supported_models` now returns `[SupportedModel.t()]` instead of `[String.t()]`
+- Preserves full model metadata (`model_id`, `model_name`, `arch`) from the API response
+- Added `GetServerCapabilitiesResponse.model_names/1` convenience helper for backward-compatible name extraction
+- Backward compatible: parser handles both object and string formats
 
 #### API Helpers
 - `Tinkex.API.Helpers.with_raw_response/1` - Python-style raw response access pattern

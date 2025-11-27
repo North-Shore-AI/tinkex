@@ -1,7 +1,7 @@
 defmodule Tinkex.MixProject do
   use Mix.Project
 
-  @version "0.1.11"
+  @version "0.1.12"
   @source_url "https://github.com/North-Shore-AI/tinkex"
   @docs_url "https://hexdocs.pm/tinkex"
 
@@ -93,10 +93,12 @@ defmodule Tinkex.MixProject do
         "docs/guides/tokenization.md",
         "docs/guides/advanced_configuration.md",
         "docs/guides/environment_configuration.md",
+        "docs/guides/file_uploads.md",
         "docs/guides/model_info_unload.md",
         # Core Features
         "docs/guides/training_loop.md",
         "docs/guides/forward_inference.md",
+        "docs/guides/custom_loss_training.md",
         "docs/guides/regularizers.md",
         "docs/guides/checkpoint_management.md",
         "docs/guides/training_persistence.md",
@@ -118,11 +120,13 @@ defmodule Tinkex.MixProject do
           "docs/guides/tokenization.md",
           "docs/guides/advanced_configuration.md",
           "docs/guides/environment_configuration.md",
+          "docs/guides/file_uploads.md",
           "docs/guides/model_info_unload.md"
         ],
         "Core Features": [
           "docs/guides/training_loop.md",
           "docs/guides/forward_inference.md",
+          "docs/guides/custom_loss_training.md",
           "docs/guides/regularizers.md",
           "docs/guides/checkpoint_management.md",
           "docs/guides/training_persistence.md"

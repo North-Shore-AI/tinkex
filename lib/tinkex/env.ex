@@ -2,6 +2,11 @@ defmodule Tinkex.Env do
   @moduledoc """
   Centralized environment variable access for Tinkex.
 
+  ## Naming Convention
+  - `TINKER_*` variables: Shared with Python SDK for cross-language compatibility
+  - `TINKEX_*` variables: Elixir-specific features (pool config, debug tools)
+  - `CLOUDFLARE_*` variables: Third-party service credentials
+
   Normalizes values, applies defaults, and provides helpers for redaction so
   callers avoid scattered `System.get_env/1` usage.
   """
@@ -28,7 +33,9 @@ defmodule Tinkex.Env do
       dump_headers?: dump_headers?(env),
       parity_mode: parity_mode(env),
       pool_size: pool_size(env),
-      pool_count: pool_count(env)
+      pool_count: pool_count(env),
+      proxy: proxy(env),
+      proxy_headers: proxy_headers(env)
     }
   end
 
@@ -117,6 +124,47 @@ defmodule Tinkex.Env do
     |> fetch("TINKEX_POOL_COUNT")
     |> normalize()
     |> parse_positive_integer()
+  end
+
+  @doc """
+  Get proxy configuration from environment.
+
+  Set `TINKEX_PROXY` to a URL string like "http://proxy.example.com:8080"
+  or "http://user:pass@proxy.example.com:8080".
+  """
+  @spec proxy(env_source()) :: String.t() | nil
+  def proxy(env \\ :system), do: env |> fetch("TINKEX_PROXY") |> normalize()
+
+  @doc """
+  Get proxy headers from environment.
+
+  Set `TINKEX_PROXY_HEADERS` to a JSON array of {name, value} tuples.
+  Example: `TINKEX_PROXY_HEADERS='[["proxy-authorization", "Basic abc123"]]'`
+  """
+  @spec proxy_headers(env_source()) :: [{String.t(), String.t()}]
+  def proxy_headers(env \\ :system) do
+    env
+    |> fetch("TINKEX_PROXY_HEADERS")
+    |> normalize()
+    |> parse_proxy_headers()
+  end
+
+  defp parse_proxy_headers(nil), do: []
+
+  defp parse_proxy_headers(value) when is_binary(value) do
+    case Jason.decode(value) do
+      {:ok, headers} when is_list(headers) ->
+        headers
+        |> Enum.map(fn
+          [name, val] when is_binary(name) and is_binary(val) -> {name, val}
+          {name, val} when is_binary(name) and is_binary(val) -> {name, val}
+          _ -> nil
+        end)
+        |> Enum.reject(&is_nil/1)
+
+      _ ->
+        []
+    end
   end
 
   defp parse_positive_integer(nil), do: nil

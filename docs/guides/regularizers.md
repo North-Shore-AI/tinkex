@@ -2,6 +2,8 @@
 
 This guide covers the structured regularizer composition system in Tinkex, which enables modular loss engineering for training LLMs. You'll learn how to implement custom regularizers, compose multiple regularization strategies, track gradient norms, and integrate with the Tinker API.
 
+> Looking for the live training flow that sends gradients to the backend? See `docs/guides/custom_loss_training.md` for the `forward_backward_custom/4` pipeline that operates on per-datum logprobs and returns `ForwardBackwardOutput`.
+
 ## Overview
 
 Regularizers add penalty terms to the base loss function during training to encourage desired model behaviors such as:

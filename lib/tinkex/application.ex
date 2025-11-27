@@ -128,17 +128,41 @@ defmodule Tinkex.Application do
     # Python SDK parity: max_connections=1000, max_keepalive_connections=20
     # Finch pool config: size=connections per pool, count=number of pools
     # Total connections per destination = size * count
+    pool_config = build_pool_config(pool_size, pool_count)
+
     [
       {Finch,
        name: Tinkex.HTTP.Pool,
        pools: %{
-         default: [
-           protocols: [:http2, :http1],
-           size: pool_size,
-           count: pool_count
-         ]
+         default: pool_config
        }}
     ]
+  end
+
+  defp build_pool_config(pool_size, pool_count) do
+    base_opts = [
+      protocols: [:http2, :http1],
+      size: pool_size,
+      count: pool_count
+    ]
+
+    conn_opts = build_conn_opts()
+
+    if conn_opts == [] do
+      base_opts
+    else
+      Keyword.put(base_opts, :conn_opts, conn_opts)
+    end
+  end
+
+  defp build_conn_opts do
+    proxy = Application.get_env(:tinkex, :proxy)
+    proxy_headers = Application.get_env(:tinkex, :proxy_headers, [])
+
+    opts = []
+    opts = if proxy, do: [{:proxy, proxy} | opts], else: opts
+    opts = if proxy_headers != [], do: [{:proxy_headers, proxy_headers} | opts], else: opts
+    opts
   end
 
   @doc """

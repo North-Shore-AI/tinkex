@@ -217,6 +217,8 @@ end
 
 ## Downloading Checkpoints
 
+Tinkex provides memory-efficient checkpoint downloads using streaming. Downloads use `Finch.stream_while/5` to stream checkpoint archives directly to disk with O(1) memory usage, making it safe to download large checkpoint files (100MB-GBs) without risk of OOM errors.
+
 ### Basic Download
 
 Download and extract a checkpoint archive:
@@ -231,6 +233,12 @@ Download and extract a checkpoint archive:
 
 IO.puts("Downloaded to: #{result.destination}")
 ```
+
+**Key Features:**
+- **Streaming downloads** - O(1) memory usage regardless of file size
+- **Progress callbacks** - Real-time download progress tracking
+- **Automatic extraction** - Downloads and extracts tar archives in one operation
+- **Force overwrite** - Optional overwrite of existing checkpoint directories
 
 **Options:**
 - `:output_dir` - Parent directory for extraction (default: current directory)

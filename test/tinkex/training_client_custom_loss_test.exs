@@ -1,140 +1,156 @@
 defmodule Tinkex.TrainingClientCustomLossTest do
   @moduledoc """
-  Tests for TrainingClient.forward_backward_custom/4.
+  Integration-style test for forward_backward_custom/4.
 
-  These tests verify the custom loss integration without requiring a real
-  backend connection. We test the message passing and error handling.
+  Verifies gradients are sent back as weights and custom metrics are merged.
   """
 
-  use ExUnit.Case, async: true
+  use Tinkex.HTTPCase, async: false
 
-  alias Tinkex.Types.{CustomLossOutput, RegularizerSpec}
+  alias Tinkex.TrainingClient
+  alias Tinkex.Types.{Datum, ForwardBackwardOutput, ModelInput, TensorData}
 
-  # We'll create a minimal mock training client for testing
-  defmodule MockTrainingClient do
-    use GenServer
+  setup :setup_http_client
 
-    def start_link(opts \\ []) do
-      GenServer.start_link(__MODULE__, opts)
-    end
+  setup do
+    {:ok, _} = Application.ensure_all_started(:tinkex)
+    :ok
+  end
 
-    def init(opts) do
-      {:ok,
-       %{
-         model_id: opts[:model_id] || "test-model",
-         logprobs_data: opts[:logprobs_data] || [-1.0, -2.0, -3.0]
-       }}
-    end
+  test "sends gradients as weights and returns ForwardBackwardOutput", %{
+    bypass: bypass,
+    config: config
+  } do
+    {:ok, weight_store} = Agent.start_link(fn -> nil end)
+    {:ok, seq_store} = Agent.start_link(fn -> %{forward: [], backward: []} end)
 
-    def handle_call({:forward_backward_custom, data, base_loss_fn, opts}, from, state) do
-      # Spawn background task like real TrainingClient
-      Task.start(fn ->
-        reply =
-          try do
-            # Simulate forward pass by creating logprobs from state
-            logprobs = Nx.tensor(state.logprobs_data)
+    on_exit(fn ->
+      if Process.alive?(weight_store), do: Agent.stop(weight_store, :normal, 100)
+      if Process.alive?(seq_store), do: Agent.stop(seq_store, :normal, 100)
+    end)
 
-            # Run pipeline
-            alias Tinkex.Regularizer.Pipeline
+    forward_result = %{
+      "loss_fn_output_type" => "cross_entropy",
+      "loss_fn_outputs" => [
+        %{
+          "logprobs" => %{
+            "data" => [-1.0, -2.0],
+            "dtype" => "float32",
+            "shape" => [2]
+          }
+        }
+      ],
+      "metrics" => %{"loss" => 2.0}
+    }
 
-            case Pipeline.compute(data, logprobs, base_loss_fn, opts) do
-              {:ok, output} -> {:ok, output}
-              {:error, _} = error -> error
-            end
-          rescue
-            e ->
-              {:error,
-               %Tinkex.Error{
-                 message: "Custom loss failed: #{Exception.message(e)}",
-                 type: :request_failed,
-                 data: %{exception: e}
-               }}
+    backward_result = %{
+      "loss_fn_output_type" => "cross_entropy",
+      "loss_fn_outputs" => [
+        %{
+          "logprobs" => %{
+            "data" => [-0.5],
+            "dtype" => "float32",
+            "shape" => [1]
+          }
+        }
+      ],
+      "metrics" => %{"loss" => 0.25}
+    }
+
+    Bypass.expect(bypass, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+      case conn.request_path do
+        "/api/v1/create_model" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"model_id":"custom-loss-model"}))
+
+        "/api/v1/forward" ->
+          payload = Jason.decode!(body)
+          seq_id = payload["seq_id"]
+          Agent.update(seq_store, fn m -> %{m | forward: m.forward ++ [seq_id]} end)
+
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, Jason.encode!(%{"request_id" => "forward-#{seq_id}"}))
+
+        "/api/v1/forward_backward" ->
+          payload = Jason.decode!(body)
+          seq_id = payload["seq_id"]
+          Agent.update(seq_store, fn m -> %{m | backward: m.backward ++ [seq_id]} end)
+
+          [datum_payload] = payload["forward_backward_input"]["data"]
+          weights = get_in(datum_payload, ["loss_fn_inputs", "weights"])
+          Agent.update(weight_store, fn _ -> weights end)
+
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, Jason.encode!(%{"request_id" => "backward-#{seq_id}"}))
+
+        "/api/v1/retrieve_future" ->
+          payload = Jason.decode!(body)
+
+          case payload["request_id"] do
+            "forward-1" ->
+              conn
+              |> Plug.Conn.put_resp_content_type("application/json")
+              |> Plug.Conn.resp(
+                200,
+                Jason.encode!(%{status: "completed", result: forward_result})
+              )
+
+            "backward-2" ->
+              conn
+              |> Plug.Conn.put_resp_content_type("application/json")
+              |> Plug.Conn.resp(
+                200,
+                Jason.encode!(%{status: "completed", result: backward_result})
+              )
+
+            other ->
+              raise "Unexpected request_id #{inspect(other)}"
           end
 
-        try do
-          GenServer.reply(from, reply)
-        rescue
-          ArgumentError -> :ok
-        end
-      end)
-
-      {:noreply, state}
-    end
-  end
-
-  describe "forward_backward_custom/4" do
-    setup do
-      {:ok, client} = MockTrainingClient.start_link(logprobs_data: [-1.0, -2.0, -3.0])
-      %{client: client}
-    end
-
-    test "returns task that resolves to CustomLossOutput", %{client: client} do
-      base_loss_fn = fn _data, logprobs ->
-        {Nx.negate(Nx.mean(logprobs)), %{"nll" => Nx.to_number(Nx.negate(Nx.mean(logprobs)))}}
+        other ->
+          raise "Unexpected path #{inspect(other)}"
       end
+    end)
 
-      {:ok, task} = forward_backward_custom_mock(client, [], base_loss_fn)
-      {:ok, output} = Task.await(task, 5000)
+    {:ok, client} =
+      TrainingClient.start_link(
+        session_id: "sess-custom-loss",
+        model_seq_id: 0,
+        base_model: "base",
+        config: config
+      )
 
-      assert %CustomLossOutput{} = output
-      # -mean([-1, -2, -3]) = 2.0
-      assert output.loss_total == 2.0
-      assert output.base_loss.value == 2.0
-    end
-
-    test "handles regularizers", %{client: client} do
-      base_loss_fn = fn _data, _lp -> {Nx.tensor(1.0), %{}} end
-
-      regularizers = [
-        %RegularizerSpec{
-          fn: fn _d, _l -> {Nx.tensor(10.0), %{"test" => true}} end,
-          weight: 0.1,
-          name: "test_reg"
+    data = [
+      %Datum{
+        model_input: ModelInput.from_ints([1, 2]),
+        loss_fn_inputs: %{
+          "target_tokens" => TensorData.from_nx(Nx.tensor([10, 11], type: {:s, 64}))
         }
-      ]
+      }
+    ]
 
-      {:ok, task} =
-        forward_backward_custom_mock(client, [], base_loss_fn, regularizers: regularizers)
-
-      {:ok, output} = Task.await(task, 5000)
-
-      # base: 1.0, reg: 0.1 * 10 = 1.0, total: 2.0
-      assert output.loss_total == 2.0
-      assert output.regularizer_total == 1.0
-      assert Map.has_key?(output.regularizers, "test_reg")
+    loss_fn = fn _data, [logprobs] ->
+      loss = Nx.sum(logprobs)
+      {loss, %{"custom_metric" => 7.0}}
     end
 
-    test "handles gradient tracking", %{client: client} do
-      base_loss_fn = fn _data, logprobs ->
-        {Nx.sum(logprobs), %{}}
-      end
+    {:ok, task} = TrainingClient.forward_backward_custom(client, data, loss_fn)
+    assert {:ok, %ForwardBackwardOutput{} = output} = Task.await(task, 5_000)
 
-      {:ok, task} =
-        forward_backward_custom_mock(client, [], base_loss_fn, track_grad_norms: true)
+    weights = Agent.get(weight_store, & &1)
+    assert get_in(weights, ["data"]) == [-1.0, -1.0]
+    assert get_in(weights, ["dtype"]) == "float32"
 
-      {:ok, output} = Task.await(task, 5000)
+    seqs = Agent.get(seq_store, & &1)
+    assert seqs.forward == [1]
+    assert seqs.backward == [2]
 
-      assert output.base_loss.grad_norm != nil
-    end
-
-    test "handles errors gracefully", %{client: client} do
-      bad_loss_fn = fn _data, _logprobs ->
-        raise "Intentional error"
-      end
-
-      {:ok, task} = forward_backward_custom_mock(client, [], bad_loss_fn)
-      result = Task.await(task, 5000)
-
-      # Pipeline returns {:error, {:pipeline_failed, exception}} for errors
-      assert {:error, {:pipeline_failed, %RuntimeError{}}} = result
-    end
-  end
-
-  # Helper to call our mock client
-  defp forward_backward_custom_mock(client, data, loss_fn, opts \\ []) do
-    {:ok,
-     Task.async(fn ->
-       GenServer.call(client, {:forward_backward_custom, data, loss_fn, opts}, :infinity)
-     end)}
+    assert output.metrics["loss"] == 0.25
+    assert output.metrics["custom_metric"] == 7.0
   end
 end

@@ -4,6 +4,7 @@ defmodule Tinkex.Examples.AsyncClientCreation do
 
   Shows how to:
   - Create multiple sampling clients concurrently
+  - Create training clients asynchronously
   - Use Task.await_many for parallel operations
   """
 
@@ -41,6 +42,7 @@ defmodule Tinkex.Examples.AsyncClientCreation do
       create_multiple_clients(service_pid, checkpoint_paths)
     else
       create_single_client_async(service_pid)
+      create_training_client_async(service_pid)
     end
 
     GenServer.stop(service_pid)
@@ -108,6 +110,54 @@ defmodule Tinkex.Examples.AsyncClientCreation do
       end)
 
     IO.puts("\nSuccess: #{successes}/#{length(results)}")
+  end
+
+  defp create_training_client_async(service_pid) do
+    IO.puts("\nCreating LoRA training client asynchronously...")
+
+    base_model = System.get_env("TINKER_BASE_MODEL") || "meta-llama/Llama-3.2-1B"
+
+    task = ServiceClient.create_lora_training_client_async(service_pid, base_model, rank: 32)
+
+    IO.puts("Task created, awaiting result...")
+
+    case Task.await(task, 60_000) do
+      {:ok, pid} ->
+        IO.puts("✓ LoRA training client created: #{inspect(pid)}")
+
+        # Save training state so we have a checkpoint path to restore from
+        IO.puts("\nSaving training state to create checkpoint...")
+        {:ok, save_task} = Tinkex.TrainingClient.save_state(pid, "async_demo_checkpoint")
+
+        case Task.await(save_task, 60_000) do
+          {:ok, save_resp} ->
+            checkpoint_path = save_resp.path || save_resp[:path] || save_resp["path"]
+            IO.puts("✓ Saved state to: #{checkpoint_path}")
+            GenServer.stop(pid)
+
+            # Now restore from that checkpoint asynchronously
+            IO.puts("\nRestoring training client from checkpoint asynchronously...")
+
+            restore_task =
+              ServiceClient.create_training_client_from_state_async(service_pid, checkpoint_path)
+
+            case Task.await(restore_task, 120_000) do
+              {:ok, restored_pid} ->
+                IO.puts("✓ Training client restored: #{inspect(restored_pid)}")
+                GenServer.stop(restored_pid)
+
+              {:error, reason} ->
+                IO.puts("✗ Failed to restore: #{inspect(reason)}")
+            end
+
+          {:error, reason} ->
+            IO.puts("✗ Failed to save state: #{inspect(reason)}")
+            GenServer.stop(pid)
+        end
+
+      {:error, reason} ->
+        IO.puts("✗ Failed: #{inspect(reason)}")
+    end
   end
 end
 

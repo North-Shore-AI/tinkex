@@ -7,6 +7,7 @@ cd "$ROOT_DIR"
 EXAMPLES=(
   "sampling_basic.exs"
   "training_loop.exs"
+  "custom_loss_training.exs"
   "forward_inference.exs"
   "structured_regularizers.exs"
   "structured_regularizers_live.exs"
@@ -23,8 +24,10 @@ EXAMPLES=(
   "retry_and_capture.exs"
   "model_info_and_unload.exs"
   "live_capabilities_and_logprobs.exs"
+  "file_upload_multipart.exs"
   "training_persistence_live.exs"
   "save_weights_and_sample.exs"
+  "queue_state_observer_demo.exs"
 )
 
 if [[ -z "${TINKER_API_KEY:-}" ]]; then

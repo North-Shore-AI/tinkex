@@ -37,12 +37,33 @@ defmodule Tinkex.ServiceClient do
 
   `base_model` is a required second argument specifying the base model name
   (e.g., "meta-llama/Llama-3.1-8B").
+  Pass `call_timeout: :infinity` (or a larger timeout in ms) via opts if model
+  creation may take longer than the default 5000ms GenServer call timeout.
   """
   @spec create_lora_training_client(t(), String.t(), keyword()) ::
           {:ok, pid()} | {:error, term()}
   def create_lora_training_client(service_client, base_model, opts \\ [])
       when is_binary(base_model) do
-    GenServer.call(service_client, {:create_training_client, base_model, opts})
+    {call_timeout, training_opts} = Keyword.pop(opts, :call_timeout, 5_000)
+
+    GenServer.call(
+      service_client,
+      {:create_training_client, base_model, training_opts},
+      call_timeout
+    )
+  end
+
+  @doc """
+  Create a LoRA training client asynchronously.
+
+  Returns a Task that resolves to `{:ok, pid}` or `{:error, reason}`.
+  """
+  @spec create_lora_training_client_async(t(), String.t(), keyword()) :: Task.t()
+  def create_lora_training_client_async(service_client, base_model, opts \\ [])
+      when is_binary(base_model) do
+    Task.async(fn ->
+      create_lora_training_client(service_client, base_model, opts)
+    end)
   end
 
   @doc """
@@ -55,6 +76,19 @@ defmodule Tinkex.ServiceClient do
           {:ok, pid()} | {:error, term()}
   def create_training_client_from_state(service_client, path, opts \\ []) when is_binary(path) do
     GenServer.call(service_client, {:create_training_client_from_state, path, opts}, :infinity)
+  end
+
+  @doc """
+  Create a training client from checkpoint asynchronously.
+
+  Returns a Task that resolves to `{:ok, pid}` or `{:error, reason}`.
+  """
+  @spec create_training_client_from_state_async(t(), String.t(), keyword()) :: Task.t()
+  def create_training_client_from_state_async(service_client, path, opts \\ [])
+      when is_binary(path) do
+    Task.async(fn ->
+      create_training_client_from_state(service_client, path, opts)
+    end)
   end
 
   @doc """

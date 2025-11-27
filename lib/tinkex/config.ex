@@ -26,8 +26,13 @@ defmodule Tinkex.Config do
     :log_level,
     :cf_access_client_id,
     :cf_access_client_secret,
-    :dump_headers?
+    :dump_headers?,
+    :proxy,
+    proxy_headers: []
   ]
+
+  @type proxy ::
+          {:http | :https, host :: String.t(), port :: 1..65535, opts :: keyword()} | nil
 
   @type t :: %__MODULE__{
           base_url: String.t(),
@@ -42,7 +47,9 @@ defmodule Tinkex.Config do
           log_level: :debug | :info | :warn | :error | nil,
           cf_access_client_id: String.t() | nil,
           cf_access_client_secret: String.t() | nil,
-          dump_headers?: boolean()
+          dump_headers?: boolean(),
+          proxy: proxy(),
+          proxy_headers: [{String.t(), String.t()}]
         }
 
   @default_base_url "https://tinker.thinkingmachines.dev/services/tinker-prod"
@@ -165,6 +172,25 @@ defmodule Tinkex.Config do
         env.dump_headers?
       )
 
+    {proxy, derived_proxy_headers} =
+      pick([
+        opts[:proxy],
+        Application.get_env(:tinkex, :proxy),
+        env.proxy
+      ])
+      |> parse_proxy()
+
+    proxy_headers =
+      pick(
+        [
+          opts[:proxy_headers],
+          Application.get_env(:tinkex, :proxy_headers),
+          env.proxy_headers
+        ],
+        []
+      )
+      |> default_proxy_headers(derived_proxy_headers)
+
     config = %__MODULE__{
       base_url: base_url,
       api_key: api_key,
@@ -178,7 +204,9 @@ defmodule Tinkex.Config do
       log_level: log_level,
       cf_access_client_id: cf_access_client_id,
       cf_access_client_secret: cf_access_client_secret,
-      dump_headers?: dump_headers?
+      dump_headers?: dump_headers?,
+      proxy: proxy,
+      proxy_headers: proxy_headers
     }
 
     # Fail fast on malformed URLs so pool creation does not explode deeper in the stack.
@@ -236,6 +264,9 @@ defmodule Tinkex.Config do
     unless config.log_level in [nil, :debug, :info, :warn, :error] do
       raise ArgumentError, "log_level must be one of :debug | :info | :warn | :error | nil"
     end
+
+    validate_proxy!(config.proxy)
+    validate_proxy_headers!(config.proxy_headers)
 
     maybe_warn_about_base_url(config)
     config
@@ -304,6 +335,92 @@ defmodule Tinkex.Config do
 
   defp defaults_for_parity(:python), do: {@python_timeout, @python_max_retries}
   defp defaults_for_parity(_), do: {@default_timeout, @default_max_retries}
+
+  # Proxy parsing and validation
+
+  defp parse_proxy(nil), do: {nil, []}
+
+  defp parse_proxy({scheme, host, port, opts} = proxy)
+       when scheme in [:http, :https] and is_binary(host) and is_integer(port) and
+              is_list(opts) do
+    {proxy, []}
+  end
+
+  defp parse_proxy(url) when is_binary(url) do
+    uri = URI.parse(url)
+
+    scheme =
+      case uri.scheme do
+        "http" ->
+          :http
+
+        "https" ->
+          :https
+
+        nil ->
+          raise ArgumentError,
+                "proxy must be a URL string or {:http | :https, host, port, opts} tuple, got: #{inspect(url)}"
+
+        other ->
+          raise ArgumentError, "proxy URL scheme must be http or https, got: #{other}"
+      end
+
+    host = uri.host || raise ArgumentError, "proxy URL must have a host"
+    port = uri.port || default_port_for_scheme(scheme)
+
+    # Extract auth from userinfo and convert to proxy-authorization header
+    proxy_headers =
+      case uri.userinfo do
+        nil ->
+          []
+
+        userinfo ->
+          encoded = Base.encode64(userinfo)
+          [{"proxy-authorization", "Basic #{encoded}"}]
+      end
+
+    {{scheme, host, port, []}, proxy_headers}
+  end
+
+  defp parse_proxy(other) do
+    raise ArgumentError,
+          "proxy must be a URL string or {:http | :https, host, port, opts} tuple, got: #{inspect(other)}"
+  end
+
+  defp default_proxy_headers([], derived) when is_list(derived) and derived != [], do: derived
+  defp default_proxy_headers(headers, _derived), do: headers
+
+  defp default_port_for_scheme(:http), do: 80
+  defp default_port_for_scheme(:https), do: 443
+
+  defp validate_proxy!(nil), do: :ok
+
+  defp validate_proxy!({scheme, host, port, opts})
+       when scheme in [:http, :https] and is_binary(host) and is_integer(port) and
+              port in 1..65535 and is_list(opts) do
+    :ok
+  end
+
+  defp validate_proxy!(proxy) do
+    raise ArgumentError,
+          "proxy must be {:http | :https, host, port, opts} with port in 1..65535, got: #{inspect(proxy)}"
+  end
+
+  defp validate_proxy_headers!(headers) when is_list(headers) do
+    unless Enum.all?(headers, &valid_header?/1) do
+      raise ArgumentError,
+            "proxy_headers must be a list of {name, value} tuples with string values"
+    end
+
+    :ok
+  end
+
+  defp validate_proxy_headers!(other) do
+    raise ArgumentError, "proxy_headers must be a list, got: #{inspect(other)}"
+  end
+
+  defp valid_header?({name, value}) when is_binary(name) and is_binary(value), do: true
+  defp valid_header?(_), do: false
 
   @doc """
   Return BEAM-conservative default timeout (120s).

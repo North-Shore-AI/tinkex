@@ -1,161 +1,252 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 500" width="500" height="500">
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 600 600" width="600" height="600">
   <defs>
-    <!-- Gradients for depth and visual interest -->
-    <linearGradient id="hexGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#6E40C9;stop-opacity:1" />
-      <stop offset="50%" style="stop-color:#4B0DAF;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#2E0664;stop-opacity:1" />
+    <linearGradient id="auroraEdge" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0EF3C5"/>
+      <stop offset="40%" stop-color="#7E4AE8"/>
+      <stop offset="70%" stop-color="#FF9A3C"/>
+      <stop offset="100%" stop-color="#0B2F3A"/>
     </linearGradient>
 
-    <linearGradient id="innerGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#9D7CE8;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#6E40C9;stop-opacity:1" />
+    <radialGradient id="nebula" cx="50%" cy="45%" r="80%">
+      <stop offset="0%" stop-color="#0C485B"/>
+      <stop offset="35%" stop-color="#102240"/>
+      <stop offset="70%" stop-color="#240A29"/>
+      <stop offset="100%" stop-color="#0B0D1C"/>
+    </radialGradient>
+
+    <radialGradient id="innerLumen" cx="50%" cy="50%" r="65%">
+      <stop offset="0%" stop-color="#1AF2D0" stop-opacity="0.6"/>
+      <stop offset="55%" stop-color="#7E4AE8" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#FFB25A" stop-opacity="0.25"/>
+    </radialGradient>
+
+    <linearGradient id="rodGradient" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#9FF0FF"/>
+      <stop offset="50%" stop-color="#FFD392"/>
+      <stop offset="100%" stop-color="#7B1F75"/>
     </linearGradient>
 
-    <linearGradient id="accentGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#FFD700;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#FFA500;stop-opacity:1" />
-    </linearGradient>
+    <radialGradient id="nodeHalo" cx="50%" cy="50%" r="55%">
+      <stop offset="0%" stop-color="#F9FFBF" stop-opacity="0.95"/>
+      <stop offset="100%" stop-color="#0EF3C5" stop-opacity="0.15"/>
+    </radialGradient>
 
-    <linearGradient id="neuralGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#00FFFF;stop-opacity:0.8" />
-      <stop offset="100%" style="stop-color:#00CED1;stop-opacity:0.6" />
-    </linearGradient>
+    <radialGradient id="nodeCore" cx="50%" cy="50%" r="70%">
+      <stop offset="0%" stop-color="#FFE07D"/>
+      <stop offset="45%" stop-color="#FF6F3C"/>
+      <stop offset="100%" stop-color="#6A1FAF"/>
+    </radialGradient>
 
-    <!-- Filter for glow effect -->
-    <filter id="glow">
-      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
+    <radialGradient id="sparkGradient" cx="50%" cy="50%" r="60%">
+      <stop offset="0%" stop-color="#9FF0FF"/>
+      <stop offset="100%" stop-color="#FFCE6B" stop-opacity="0.2"/>
+    </radialGradient>
+
+    <filter id="softGlow">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
       <feMerge>
-        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="blur"/>
         <feMergeNode in="SourceGraphic"/>
       </feMerge>
     </filter>
 
-    <!-- Filter for inner shadow -->
     <filter id="innerShadow">
-      <feGaussianBlur in="SourceAlpha" stdDeviation="3"/>
-      <feOffset dx="0" dy="2" result="offsetblur"/>
-      <feComponentTransfer>
-        <feFuncA type="linear" slope="0.5"/>
-      </feComponentTransfer>
-      <feMerge>
-        <feMergeNode/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
+      <feOffset dx="0" dy="3"/>
+      <feGaussianBlur stdDeviation="6" result="offset-blur"/>
+      <feComposite in="SourceGraphic" in2="offset-blur" operator="out" result="inverse"/>
+      <feFlood flood-color="#000" flood-opacity="0.45"/>
+      <feComposite in2="inverse" operator="in"/>
+      <feComposite in2="SourceGraphic" operator="over"/>
     </filter>
+
+    <filter id="lift">
+      <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#0EF3C5" flood-opacity="0.25"/>
+    </filter>
+
+    <clipPath id="hexClip">
+      <polygon points="300 30 530 180 530 420 300 570 70 420 70 180"/>
+    </clipPath>
   </defs>
 
-  <!-- Background circle for visual interest -->
-  <circle cx="250" cy="250" r="235" fill="none" stroke="url(#hexGradient)" stroke-width="0.5" opacity="0.2"/>
+  <g clip-path="url(#hexClip)">
+    <!-- Deep aurora backdrop -->
+    <rect width="600" height="600" fill="url(#nebula)"/>
+    <polygon points="300 30 530 180 530 420 300 570 70 420 70 180" fill="url(#innerLumen)"/>
 
-  <!-- Main hexagon -->
-  <polygon points="250,50 400,125 400,275 250,350 100,275 100,125"
-           fill="url(#hexGradient)"
-           stroke="#9D7CE8"
-           stroke-width="4"
-           filter="url(#innerShadow)"/>
-
-  <!-- Inner hexagon layer -->
-  <polygon points="250,85 370,145 370,255 250,315 130,255 130,145"
-           fill="url(#innerGradient)"
-           opacity="0.6"/>
-
-  <!-- Neural network representation - nodes -->
-  <g id="neuralNodes" opacity="0.9">
-    <!-- Input layer -->
-    <circle cx="170" cy="150" r="8" fill="url(#neuralGradient)" filter="url(#glow)"/>
-    <circle cx="170" cy="200" r="8" fill="url(#neuralGradient)" filter="url(#glow)"/>
-    <circle cx="170" cy="250" r="8" fill="url(#neuralGradient)" filter="url(#glow)"/>
-
-    <!-- Hidden layer -->
-    <circle cx="250" cy="135" r="10" fill="url(#accentGradient)" filter="url(#glow)"/>
-    <circle cx="250" cy="190" r="10" fill="url(#accentGradient)" filter="url(#glow)"/>
-    <circle cx="250" cy="245" r="10" fill="url(#accentGradient)" filter="url(#glow)"/>
-    <circle cx="250" cy="300" r="10" fill="url(#accentGradient)" filter="url(#glow)"/>
-
-    <!-- Output layer -->
-    <circle cx="330" cy="175" r="8" fill="url(#neuralGradient)" filter="url(#glow)"/>
-    <circle cx="330" cy="225" r="8" fill="url(#neuralGradient)" filter="url(#glow)"/>
-  </g>
-
-  <!-- Neural network connections -->
-  <g id="neuralConnections" stroke="#00FFFF" stroke-width="1.5" opacity="0.4">
-    <!-- Input to hidden layer -->
-    <line x1="170" y1="150" x2="250" y2="135"/>
-    <line x1="170" y1="150" x2="250" y2="190"/>
-    <line x1="170" y1="200" x2="250" y2="190"/>
-    <line x1="170" y1="200" x2="250" y2="245"/>
-    <line x1="170" y1="250" x2="250" y2="245"/>
-    <line x1="170" y1="250" x2="250" y2="300"/>
-
-    <!-- Hidden to output layer -->
-    <line x1="250" y1="135" x2="330" y2="175"/>
-    <line x1="250" y1="190" x2="330" y2="175"/>
-    <line x1="250" y1="190" x2="330" y2="225"/>
-    <line x1="250" y1="245" x2="330" y2="225"/>
-    <line x1="250" y1="300" x2="330" y2="225"/>
-  </g>
-
-  <!-- Decorative hex pattern elements -->
-  <g id="hexPattern" opacity="0.15" stroke="#9D7CE8" stroke-width="1" fill="none">
-    <polygon points="250,165 280,182 280,216 250,233 220,216 220,182"/>
-    <polygon points="190,182 205,192 205,208 190,218 175,208 175,192"/>
-    <polygon points="310,182 325,192 325,208 310,218 295,208 295,192"/>
-  </g>
-
-  <!-- Central gear/cog element (representing "tinker" - tinkering with ML models) -->
-  <g id="gear" transform="translate(250, 200)">
-    <!-- Gear teeth -->
-    <g fill="url(#accentGradient)" opacity="0.3">
-      <rect x="-3" y="-45" width="6" height="10" rx="1"/>
-      <rect x="-3" y="35" width="6" height="10" rx="1"/>
-      <rect x="35" y="-3" width="10" height="6" rx="1"/>
-      <rect x="-45" y="-3" width="10" height="6" rx="1"/>
-      <rect x="25" y="-25" width="8" height="8" rx="1" transform="rotate(45 29 -21)"/>
-      <rect x="-33" y="-25" width="8" height="8" rx="1" transform="rotate(-45 -29 -21)"/>
-      <rect x="25" y="17" width="8" height="8" rx="1" transform="rotate(-45 29 21)"/>
-      <rect x="-33" y="17" width="8" height="8" rx="1" transform="rotate(45 -29 21)"/>
+    <!-- Concentric glow rings hinting at energy flow -->
+    <g opacity="0.35">
+      <circle cx="300" cy="300" r="190" fill="none" stroke="url(#auroraEdge)" stroke-width="3" filter="url(#softGlow)"/>
+      <circle cx="300" cy="300" r="120" fill="none" stroke="#0EF3C5" stroke-width="2" stroke-dasharray="6 10" opacity="0.5"/>
+      <circle cx="300" cy="300" r="70" fill="none" stroke="#FF9A3C" stroke-width="1.5" stroke-dasharray="3 5" opacity="0.6"/>
     </g>
 
-    <!-- Gear center -->
-    <circle r="30" fill="none" stroke="url(#accentGradient)" stroke-width="3" opacity="0.5"/>
-    <circle r="15" fill="url(#innerGradient)" opacity="0.7"/>
-    <circle r="8" fill="url(#accentGradient)"/>
+    <!-- Axon-like rods and tinker toy struts -->
+    <g stroke="url(#rodGradient)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" filter="url(#softGlow)" opacity="0.9">
+      <path d="M180 220 C210 200 255 200 285 215" />
+      <path d="M230 200 C260 230 280 260 300 300" />
+      <path d="M370 210 C350 245 330 270 300 300" />
+      <path d="M440 270 C410 280 360 300 320 340" />
+      <path d="M410 350 C360 365 310 370 265 355" />
+      <path d="M180 300 C220 300 255 320 265 355" />
+      <path d="M180 220 C170 280 185 340 230 360" />
+      <path d="M475 330 C440 330 390 330 320 380" />
+      <path d="M130 340 C170 335 210 340 230 360" />
+      <path d="M285 160 C300 200 320 230 350 250" />
+      <path d="M350 150 C360 210 380 250 430 270" />
+      <path d="M265 440 C280 410 300 370 320 340" />
+      <path d="M335 440 C320 410 305 375 265 355" />
+      <path d="M300 235 C320 250 340 275 350 320" />
+      <path d="M300 235 C280 255 260 280 230 320" />
+    </g>
+
+    <!-- Dense neural lattice lines for a sense of efficiency -->
+    <g stroke="#9FF0FF" stroke-width="1.5" stroke-linecap="round" opacity="0.35">
+      <line x1="300" y1="300" x2="230" y2="200"/>
+      <line x1="300" y1="300" x2="370" y2="210"/>
+      <line x1="300" y1="300" x2="180" y2="300"/>
+      <line x1="300" y1="300" x2="410" y2="350"/>
+      <line x1="300" y1="300" x2="320" y2="380"/>
+      <line x1="300" y1="300" x2="230" y2="360"/>
+      <line x1="230" y1="200" x2="285" y2="160"/>
+      <line x1="285" y1="160" x2="350" y2="150"/>
+      <line x1="350" y1="150" x2="370" y2="210"/>
+      <line x1="370" y1="210" x2="440" y2="270"/>
+      <line x1="440" y1="270" x2="410" y2="350"/>
+      <line x1="410" y1="350" x2="475" y2="330"/>
+      <line x1="410" y1="350" x2="320" y2="380"/>
+      <line x1="180" y1="220" x2="180" y2="300"/>
+      <line x1="180" y1="300" x2="130" y2="340"/>
+      <line x1="230" y1="360" x2="265" y2="440"/>
+      <line x1="230" y1="360" x2="335" y2="440"/>
+      <line x1="320" y1="380" x2="335" y2="440"/>
+      <line x1="320" y1="380" x2="265" y2="440"/>
+      <line x1="285" y1="160" x2="300" y2="235"/>
+      <line x1="350" y1="150" x2="300" y2="235"/>
+      <line x1="230" y1="200" x2="180" y2="220"/>
+      <line x1="285" y1="160" x2="180" y2="220"/>
+      <line x1="475" y1="330" x2="440" y2="270"/>
+    </g>
+
+    <!-- Node glyphs (tinker toy discs + neuron glows) -->
+    <g filter="url(#softGlow)">
+      <g transform="translate(300 300)">
+        <circle r="18" fill="url(#nodeHalo)" />
+        <circle r="10" fill="url(#nodeCore)" />
+        <circle r="4" fill="#0EF3C5"/>
+      </g>
+      <g transform="translate(230 200)">
+        <circle r="16" fill="url(#nodeHalo)" />
+        <circle r="9" fill="url(#nodeCore)" />
+        <circle r="3.5" fill="#FF9A3C"/>
+      </g>
+      <g transform="translate(370 210)">
+        <circle r="16" fill="url(#nodeHalo)" />
+        <circle r="9" fill="url(#nodeCore)" />
+        <circle r="3.5" fill="#9FF0FF"/>
+      </g>
+      <g transform="translate(440 270)">
+        <circle r="13" fill="url(#nodeHalo)" />
+        <circle r="8" fill="url(#nodeCore)" />
+        <circle r="3" fill="#FF9A3C"/>
+      </g>
+      <g transform="translate(410 350)">
+        <circle r="15" fill="url(#nodeHalo)" />
+        <circle r="9" fill="url(#nodeCore)" />
+        <circle r="3" fill="#7E4AE8"/>
+      </g>
+      <g transform="translate(320 380)">
+        <circle r="14" fill="url(#nodeHalo)" />
+        <circle r="8" fill="url(#nodeCore)" />
+        <circle r="3" fill="#0EF3C5"/>
+      </g>
+      <g transform="translate(230 360)">
+        <circle r="14" fill="url(#nodeHalo)" />
+        <circle r="8" fill="url(#nodeCore)" />
+        <circle r="3" fill="#FF9A3C"/>
+      </g>
+      <g transform="translate(180 300)">
+        <circle r="13" fill="url(#nodeHalo)" />
+        <circle r="8" fill="url(#nodeCore)" />
+        <circle r="3" fill="#7E4AE8"/>
+      </g>
+      <g transform="translate(180 220)">
+        <circle r="12" fill="url(#nodeHalo)" />
+        <circle r="7" fill="url(#nodeCore)" />
+        <circle r="2.5" fill="#9FF0FF"/>
+      </g>
+      <g transform="translate(285 160)">
+        <circle r="12" fill="url(#nodeHalo)" />
+        <circle r="7" fill="url(#nodeCore)" />
+        <circle r="2.5" fill="#FF9A3C"/>
+      </g>
+      <g transform="translate(350 150)">
+        <circle r="12" fill="url(#nodeHalo)" />
+        <circle r="7" fill="url(#nodeCore)" />
+        <circle r="2.5" fill="#0EF3C5"/>
+      </g>
+      <g transform="translate(475 330)">
+        <circle r="13" fill="url(#nodeHalo)" />
+        <circle r="8" fill="url(#nodeCore)" />
+        <circle r="3" fill="#9FF0FF"/>
+      </g>
+      <g transform="translate(130 340)">
+        <circle r="12" fill="url(#nodeHalo)" />
+        <circle r="7" fill="url(#nodeCore)" />
+        <circle r="2.5" fill="#FF9A3C"/>
+      </g>
+      <g transform="translate(265 440)">
+        <circle r="12" fill="url(#nodeHalo)" />
+        <circle r="7" fill="url(#nodeCore)" />
+        <circle r="2.5" fill="#9FF0FF"/>
+      </g>
+      <g transform="translate(335 440)">
+        <circle r="12" fill="url(#nodeHalo)" />
+        <circle r="7" fill="url(#nodeCore)" />
+        <circle r="2.5" fill="#7E4AE8"/>
+      </g>
+      <g transform="translate(300 235)">
+        <circle r="13" fill="url(#nodeHalo)" />
+        <circle r="8" fill="url(#nodeCore)" />
+        <circle r="3" fill="#FFE07D"/>
+      </g>
+    </g>
+
+    <!-- Mid-rod beads to evoke tinker toy connectors -->
+    <g fill="url(#sparkGradient)" filter="url(#lift)">
+      <circle cx="257" cy="207" r="5"/>
+      <circle cx="340" cy="208" r="5"/>
+      <circle cx="375" cy="260" r="5"/>
+      <circle cx="360" cy="335" r="5"/>
+      <circle cx="295" cy="328" r="5"/>
+      <circle cx="205" cy="320" r="5"/>
+      <circle cx="205" cy="260" r="4.5"/>
+      <circle cx="430" cy="310" r="4.5"/>
+      <circle cx="285" cy="395" r="4.5"/>
+      <circle cx="312" cy="430" r="4.5"/>
+    </g>
+
+    <!-- Faint circuitry overlay -->
+    <g stroke="#6A1FAF" stroke-width="1" opacity="0.15">
+      <path d="M150 250 L120 260 L110 300" />
+      <path d="M470 200 L500 230 L520 280" />
+      <path d="M260 120 L300 90 L340 120" />
+      <path d="M260 500 L300 530 L340 500" />
+    </g>
+
+    <!-- Subtle spark points -->
+    <g>
+      <circle cx="210" cy="150" r="2.5" fill="#9FF0FF" opacity="0.9"/>
+      <circle cx="390" cy="185" r="2.5" fill="#FFE07D" opacity="0.9"/>
+      <circle cx="430" cy="385" r="2" fill="#FF9A3C" opacity="0.9"/>
+      <circle cx="180" cy="380" r="2" fill="#7E4AE8" opacity="0.9"/>
+      <circle cx="320" cy="265" r="2" fill="#0EF3C5" opacity="0.9"/>
+    </g>
   </g>
 
-  <!-- Text elements -->
-  <g id="text">
-    <text x="250" y="390" font-family="Arial, sans-serif" font-size="48" font-weight="bold"
-          fill="url(#hexGradient)" text-anchor="middle">
-      TINKEX
-    </text>
-    <text x="250" y="415" font-family="Arial, sans-serif" font-size="14"
-          fill="#6E40C9" text-anchor="middle" opacity="0.8">
-      ML TRAINING • ELIXIR
-    </text>
-  </g>
-
-  <!-- Corner accent marks - 90° angles at hexagon vertices -->
-  <g id="accents" opacity="0.6">
-    <!-- Top-left vertex (100, 125) -->
-    <path d="M 86 130 L 100 125 L 95 111" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
-    <!-- Top-right vertex (400, 125) -->
-    <path d="M 405 111 L 400 125 L 414 130" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
-    <!-- Bottom-left vertex (100, 275) -->
-    <path d="M 95 289 L 100 275 L 86 270" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
-    <!-- Bottom-right vertex (400, 275) -->
-    <path d="M 414 270 L 400 275 L 405 289" stroke="url(#accentGradient)" stroke-width="2" fill="none"/>
-  </g>
-
-  <!-- Subtle sparkle effects -->
-  <g id="sparkles" opacity="0.7">
-    <circle cx="140" cy="110" r="2" fill="#FFD700"/>
-    <circle cx="360" cy="110" r="2" fill="#FFD700"/>
-    <circle cx="140" cy="290" r="2" fill="#FFD700"/>
-    <circle cx="360" cy="290" r="2" fill="#FFD700"/>
-
-    <!-- Small plus shapes for sparkle -->
-    <path d="M 380 140 L 382 140 M 381 139 L 381 141" stroke="#FFD700" stroke-width="1"/>
-    <path d="M 120 140 L 122 140 M 121 139 L 121 141" stroke="#FFD700" stroke-width="1"/>
-  </g>
+  <!-- Outer hex frame -->
+  <polygon points="300 30 530 180 530 420 300 570 70 420 70 180"
+           fill="none"
+           stroke="url(#auroraEdge)"
+           stroke-width="6"
+           filter="url(#innerShadow)"/>
 </svg>

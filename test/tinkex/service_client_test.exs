@@ -172,7 +172,10 @@ defmodule Tinkex.ServiceClientTest do
     expect_create_session(bypass, "service-session-cap")
 
     expect_get_server_capabilities(bypass, %{
-      "supported_models" => [%{"model_name" => "m1"}, "m2"]
+      "supported_models" => [
+        %{"model_name" => "m1", "model_id" => "m1-id", "arch" => "llama"},
+        %{"model_name" => "m2"}
+      ]
     })
 
     {:ok, svc} =
@@ -183,8 +186,13 @@ defmodule Tinkex.ServiceClientTest do
         session_manager: manager
       )
 
-    assert {:ok, %Tinkex.Types.GetServerCapabilitiesResponse{supported_models: ["m1", "m2"]}} =
+    assert {:ok, %Tinkex.Types.GetServerCapabilitiesResponse{} = resp} =
              ServiceClient.get_server_capabilities(svc)
+
+    assert length(resp.supported_models) == 2
+    [m1, m2] = resp.supported_models
+    assert %Tinkex.Types.SupportedModel{model_name: "m1", model_id: "m1-id", arch: "llama"} = m1
+    assert %Tinkex.Types.SupportedModel{model_name: "m2", model_id: nil, arch: nil} = m2
 
     GenServer.stop(svc)
   end

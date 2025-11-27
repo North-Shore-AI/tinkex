@@ -286,16 +286,22 @@ defmodule Tinkex.Future do
       true ->
         metadata = Map.put(state.metadata, :queue_state, queue_state)
         :telemetry.execute(@queue_state_event, %{}, metadata)
-        notify_observer(state.observer, queue_state)
+        notify_observer(state.observer, queue_state, metadata)
         %{state | prev_queue_state: queue_state}
     end
   end
 
-  defp notify_observer(nil, _queue_state), do: :ok
+  defp notify_observer(nil, _queue_state, _metadata), do: :ok
 
-  defp notify_observer(observer, queue_state) when is_atom(observer) do
+  defp notify_observer(observer, queue_state, metadata) when is_atom(observer) do
     try do
-      observer.on_queue_state_change(queue_state)
+      # Prefer 2-arity callback with metadata for context (session_id, model_id, etc.)
+      # Fall back to 1-arity for backward compatibility with existing observers
+      if function_exported?(observer, :on_queue_state_change, 2) do
+        observer.on_queue_state_change(queue_state, metadata)
+      else
+        observer.on_queue_state_change(queue_state)
+      end
     rescue
       _e in UndefinedFunctionError ->
         :ok
@@ -309,7 +315,7 @@ defmodule Tinkex.Future do
     end
   end
 
-  defp notify_observer(_observer, _queue_state), do: :ok
+  defp notify_observer(_observer, _queue_state, _metadata), do: :ok
 
   defp valid_queue_state?(state) when is_atom(state) do
     state in [:active, :paused_rate_limit, :paused_capacity, :unknown]

@@ -3,7 +3,7 @@ alias Tinkex.Config
 alias Tinkex.Error
 alias Tinkex.ServiceClient
 alias Tinkex.SamplingClient
-alias Tinkex.Types.ModelInput
+alias Tinkex.Types.{GetServerCapabilitiesResponse, ModelInput, SupportedModel}
 
 api_key = System.fetch_env!("TINKER_API_KEY")
 base_url = System.get_env("TINKER_BASE_URL")
@@ -21,14 +21,24 @@ config = Config.new(config_opts)
 IO.puts("== Server capabilities ==")
 
 case Service.get_server_capabilities(config: config) do
-  {:ok, resp} ->
-    models =
-      case resp.supported_models do
-        [] -> "[none reported]"
-        models -> Enum.join(models, ", ")
-      end
+  {:ok, %GetServerCapabilitiesResponse{} = resp} ->
+    case resp.supported_models do
+      [] ->
+        IO.puts("Supported models: [none reported]")
 
-    IO.puts("Supported models: #{models}")
+      models ->
+        IO.puts("Supported models (#{length(models)} available):")
+
+        Enum.each(models, fn %SupportedModel{} = model ->
+          arch_info = if model.arch, do: " [#{model.arch}]", else: ""
+          id_info = if model.model_id, do: " (#{model.model_id})", else: ""
+          IO.puts("  - #{model.model_name}#{id_info}#{arch_info}")
+        end)
+
+        # Convenience helper: get just the model names as a list
+        names = GetServerCapabilitiesResponse.model_names(resp)
+        IO.puts("\nModel names only: #{Enum.join(names, ", ")}")
+    end
 
   {:error, %Error{} = error} ->
     IO.puts("Capabilities error: #{Error.format(error)}")

@@ -1,0 +1,339 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="500" height="500" viewBox="0 0 500 500">
+  <defs>
+    <!-- Unusual color palette: deep teal, coral, warm gold, dusty rose, slate -->
+    
+    <!-- Hexagon clip path -->
+    <clipPath id="hexClip">
+      <polygon points="250,25 425,112.5 425,287.5 250,375 75,287.5 75,112.5"/>
+    </clipPath>
+    
+    <!-- Background gradient - deep cosmic teal to midnight -->
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a2f3a"/>
+      <stop offset="50%" stop-color="#0d3d4a"/>
+      <stop offset="100%" stop-color="#051820"/>
+    </linearGradient>
+    
+    <!-- Node gradients - Tinker Toy style with 3D depth -->
+    <radialGradient id="nodeCoralGrad" cx="35%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#ffb4a2"/>
+      <stop offset="40%" stop-color="#e07860"/>
+      <stop offset="100%" stop-color="#b84a3c"/>
+    </radialGradient>
+    
+    <radialGradient id="nodeGoldGrad" cx="35%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#ffe8b8"/>
+      <stop offset="40%" stop-color="#e5b84a"/>
+      <stop offset="100%" stop-color="#c49520"/>
+    </radialGradient>
+    
+    <radialGradient id="nodeTealGrad" cx="35%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#8ecfd6"/>
+      <stop offset="40%" stop-color="#4a9ca8"/>
+      <stop offset="100%" stop-color="#2a7080"/>
+    </radialGradient>
+    
+    <radialGradient id="nodeRoseGrad" cx="35%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#e8c4d4"/>
+      <stop offset="40%" stop-color="#c48aa0"/>
+      <stop offset="100%" stop-color="#9a5a70"/>
+    </radialGradient>
+    
+    <radialGradient id="nodeSlateGrad" cx="35%" cy="35%" r="60%">
+      <stop offset="0%" stop-color="#c8d4dc"/>
+      <stop offset="40%" stop-color="#7a9aaa"/>
+      <stop offset="100%" stop-color="#4a6a7a"/>
+    </radialGradient>
+    
+    <!-- Central hub gradient -->
+    <radialGradient id="hubGrad" cx="40%" cy="40%" r="65%">
+      <stop offset="0%" stop-color="#fff8e8"/>
+      <stop offset="30%" stop-color="#ffe4a8"/>
+      <stop offset="70%" stop-color="#d4a040"/>
+      <stop offset="100%" stop-color="#8a6020"/>
+    </radialGradient>
+    
+    <!-- Connection rod gradients -->
+    <linearGradient id="rodCoralGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#e07860"/>
+      <stop offset="50%" stop-color="#c45840"/>
+      <stop offset="100%" stop-color="#e07860"/>
+    </linearGradient>
+    
+    <linearGradient id="rodTealGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#4a9ca8"/>
+      <stop offset="50%" stop-color="#2a7a88"/>
+      <stop offset="100%" stop-color="#4a9ca8"/>
+    </linearGradient>
+    
+    <linearGradient id="rodGoldGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#d4a040"/>
+      <stop offset="50%" stop-color="#a87820"/>
+      <stop offset="100%" stop-color="#d4a040"/>
+    </linearGradient>
+    
+    <linearGradient id="rodRoseGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#c48aa0"/>
+      <stop offset="50%" stop-color="#9a5a70"/>
+      <stop offset="100%" stop-color="#c48aa0"/>
+    </linearGradient>
+    
+    <linearGradient id="rodSlateGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#7a9aaa"/>
+      <stop offset="50%" stop-color="#4a6a7a"/>
+      <stop offset="100%" stop-color="#7a9aaa"/>
+    </linearGradient>
+    
+    <!-- Glow effects -->
+    <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+      <feGaussianBlur stdDeviation="3" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    
+    <filter id="softGlow" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    
+    <!-- Inner shadow for depth -->
+    <filter id="innerShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feOffset dx="1" dy="1"/>
+      <feGaussianBlur stdDeviation="1" result="offset-blur"/>
+      <feComposite operator="out" in="SourceGraphic" in2="offset-blur" result="inverse"/>
+      <feFlood flood-color="#000" flood-opacity="0.3"/>
+      <feComposite operator="in" in2="inverse" result="shadow"/>
+      <feComposite operator="over" in2="SourceGraphic"/>
+    </filter>
+    
+    <!-- Hexagon border gradient -->
+    <linearGradient id="hexBorderGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#4a9ca8"/>
+      <stop offset="25%" stop-color="#e5b84a"/>
+      <stop offset="50%" stop-color="#e07860"/>
+      <stop offset="75%" stop-color="#c48aa0"/>
+      <stop offset="100%" stop-color="#4a9ca8"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Outer hexagon frame -->
+  <polygon points="250,20 430,110 430,290 250,380 70,290 70,110" 
+           fill="none" stroke="url(#hexBorderGrad)" stroke-width="4" 
+           stroke-linejoin="round" filter="url(#glow)"/>
+  
+  <!-- Background fill -->
+  <polygon points="250,25 425,112.5 425,287.5 250,375 75,287.5 75,112.5" 
+           fill="url(#bgGrad)"/>
+  
+  <!-- Clipped content -->
+  <g clip-path="url(#hexClip)">
+    
+    <!-- Layer 1: Input layer connections (left side) -->
+    <line x1="95" y1="140" x2="165" y2="170" stroke="url(#rodTealGrad)" stroke-width="4" stroke-linecap="round"/>
+    <line x1="95" y1="200" x2="165" y2="200" stroke="url(#rodCoralGrad)" stroke-width="4" stroke-linecap="round"/>
+    <line x1="95" y1="260" x2="165" y2="230" stroke="url(#rodGoldGrad)" stroke-width="4" stroke-linecap="round"/>
+    
+    <!-- Input to hidden layer 1 -->
+    <line x1="165" y1="170" x2="220" y2="145" stroke="url(#rodRoseGrad)" stroke-width="3" stroke-linecap="round"/>
+    <line x1="165" y1="170" x2="220" y2="200" stroke="url(#rodSlateGrad)" stroke-width="3" stroke-linecap="round"/>
+    <line x1="165" y1="170" x2="220" y2="255" stroke="url(#rodTealGrad)" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+    
+    <line x1="165" y1="200" x2="220" y2="145" stroke="url(#rodGoldGrad)" stroke-width="3" stroke-linecap="round"/>
+    <line x1="165" y1="200" x2="220" y2="200" stroke="url(#rodCoralGrad)" stroke-width="3" stroke-linecap="round"/>
+    <line x1="165" y1="200" x2="220" y2="255" stroke="url(#rodRoseGrad)" stroke-width="3" stroke-linecap="round"/>
+    
+    <line x1="165" y1="230" x2="220" y2="145" stroke="url(#rodSlateGrad)" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+    <line x1="165" y1="230" x2="220" y2="200" stroke="url(#rodTealGrad)" stroke-width="3" stroke-linecap="round"/>
+    <line x1="165" y1="230" x2="220" y2="255" stroke="url(#rodGoldGrad)" stroke-width="3" stroke-linecap="round"/>
+    
+    <!-- Hidden layer 1 to central hub -->
+    <line x1="220" y1="145" x2="250" y2="200" stroke="url(#rodCoralGrad)" stroke-width="4" stroke-linecap="round" filter="url(#softGlow)"/>
+    <line x1="220" y1="200" x2="250" y2="200" stroke="url(#rodGoldGrad)" stroke-width="4" stroke-linecap="round" filter="url(#softGlow)"/>
+    <line x1="220" y1="255" x2="250" y2="200" stroke="url(#rodTealGrad)" stroke-width="4" stroke-linecap="round" filter="url(#softGlow)"/>
+    
+    <!-- Central hub to hidden layer 2 -->
+    <line x1="250" y1="200" x2="280" y2="145" stroke="url(#rodRoseGrad)" stroke-width="4" stroke-linecap="round" filter="url(#softGlow)"/>
+    <line x1="250" y1="200" x2="280" y2="200" stroke="url(#rodSlateGrad)" stroke-width="4" stroke-linecap="round" filter="url(#softGlow)"/>
+    <line x1="250" y1="200" x2="280" y2="255" stroke="url(#rodCoralGrad)" stroke-width="4" stroke-linecap="round" filter="url(#softGlow)"/>
+    
+    <!-- Hidden layer 2 to output layer -->
+    <line x1="280" y1="145" x2="335" y2="170" stroke="url(#rodGoldGrad)" stroke-width="3" stroke-linecap="round"/>
+    <line x1="280" y1="145" x2="335" y2="200" stroke="url(#rodTealGrad)" stroke-width="3" stroke-linecap="round"/>
+    <line x1="280" y1="145" x2="335" y2="230" stroke="url(#rodRoseGrad)" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+    
+    <line x1="280" y1="200" x2="335" y2="170" stroke="url(#rodSlateGrad)" stroke-width="3" stroke-linecap="round"/>
+    <line x1="280" y1="200" x2="335" y2="200" stroke="url(#rodCoralGrad)" stroke-width="3" stroke-linecap="round"/>
+    <line x1="280" y1="200" x2="335" y2="230" stroke="url(#rodGoldGrad)" stroke-width="3" stroke-linecap="round"/>
+    
+    <line x1="280" y1="255" x2="335" y2="170" stroke="url(#rodTealGrad)" stroke-width="3" stroke-linecap="round" opacity="0.6"/>
+    <line x1="280" y1="255" x2="335" y2="200" stroke="url(#rodRoseGrad)" stroke-width="3" stroke-linecap="round"/>
+    <line x1="280" y1="255" x2="335" y2="230" stroke="url(#rodSlateGrad)" stroke-width="3" stroke-linecap="round"/>
+    
+    <!-- Output layer connections (right side) -->
+    <line x1="335" y1="170" x2="405" y2="140" stroke="url(#rodCoralGrad)" stroke-width="4" stroke-linecap="round"/>
+    <line x1="335" y1="200" x2="405" y2="200" stroke="url(#rodGoldGrad)" stroke-width="4" stroke-linecap="round"/>
+    <line x1="335" y1="230" x2="405" y2="260" stroke="url(#rodTealGrad)" stroke-width="4" stroke-linecap="round"/>
+    
+    <!-- Additional decorative connections (skip connections for efficiency feel) -->
+    <line x1="165" y1="170" x2="335" y2="170" stroke="url(#rodRoseGrad)" stroke-width="2" stroke-linecap="round" opacity="0.3" stroke-dasharray="8,4"/>
+    <line x1="165" y1="230" x2="335" y2="230" stroke="url(#rodSlateGrad)" stroke-width="2" stroke-linecap="round" opacity="0.3" stroke-dasharray="8,4"/>
+    
+    <!-- Vertical organizational lines -->
+    <line x1="95" y1="140" x2="95" y2="260" stroke="url(#rodSlateGrad)" stroke-width="3" stroke-linecap="round"/>
+    <line x1="405" y1="140" x2="405" y2="260" stroke="url(#rodSlateGrad)" stroke-width="3" stroke-linecap="round"/>
+    
+    <!-- INPUT LAYER NODES (left edge) -->
+    <!-- Node 1 -->
+    <circle cx="95" cy="140" r="12" fill="url(#nodeTealGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="93" cy="138" r="3" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="95" cy="140" r="2" fill="#1a4a55" fill-opacity="0.4"/>
+    
+    <!-- Node 2 -->
+    <circle cx="95" cy="200" r="12" fill="url(#nodeCoralGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="93" cy="198" r="3" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="95" cy="200" r="2" fill="#6a2a20" fill-opacity="0.4"/>
+    
+    <!-- Node 3 -->
+    <circle cx="95" cy="260" r="12" fill="url(#nodeGoldGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="93" cy="258" r="3" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="95" cy="260" r="2" fill="#6a5010" fill-opacity="0.4"/>
+    
+    <!-- HIDDEN LAYER 1 NODES -->
+    <!-- Node 1 -->
+    <circle cx="165" cy="170" r="11" fill="url(#nodeRoseGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="163" cy="168" r="2.5" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="165" cy="170" r="1.5" fill="#5a3040" fill-opacity="0.4"/>
+    
+    <!-- Node 2 -->
+    <circle cx="165" cy="200" r="11" fill="url(#nodeSlateGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="163" cy="198" r="2.5" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="165" cy="200" r="1.5" fill="#2a3a44" fill-opacity="0.4"/>
+    
+    <!-- Node 3 -->
+    <circle cx="165" cy="230" r="11" fill="url(#nodeTealGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="163" cy="228" r="2.5" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="165" cy="230" r="1.5" fill="#1a4a55" fill-opacity="0.4"/>
+    
+    <!-- HIDDEN LAYER 2 (close to center) -->
+    <!-- Node 1 -->
+    <circle cx="220" cy="145" r="10" fill="url(#nodeGoldGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="218" cy="143" r="2" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="220" cy="145" r="1.5" fill="#6a5010" fill-opacity="0.4"/>
+    
+    <!-- Node 2 -->
+    <circle cx="220" cy="200" r="10" fill="url(#nodeCoralGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="218" cy="198" r="2" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="220" cy="200" r="1.5" fill="#6a2a20" fill-opacity="0.4"/>
+    
+    <!-- Node 3 -->
+    <circle cx="220" cy="255" r="10" fill="url(#nodeRoseGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="218" cy="253" r="2" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="220" cy="255" r="1.5" fill="#5a3040" fill-opacity="0.4"/>
+    
+    <!-- CENTRAL HUB NODE (largest, most prominent) -->
+    <circle cx="250" cy="200" r="18" fill="url(#hubGrad)" stroke="#fff" stroke-width="3" filter="url(#glow)"/>
+    <circle cx="246" cy="195" r="5" fill="#fff" fill-opacity="0.6"/>
+    <circle cx="250" cy="200" r="3" fill="#5a4010" fill-opacity="0.4"/>
+    
+    <!-- HIDDEN LAYER 3 (close to center, right side) -->
+    <!-- Node 1 -->
+    <circle cx="280" cy="145" r="10" fill="url(#nodeSlateGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="278" cy="143" r="2" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="280" cy="145" r="1.5" fill="#2a3a44" fill-opacity="0.4"/>
+    
+    <!-- Node 2 -->
+    <circle cx="280" cy="200" r="10" fill="url(#nodeTealGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="278" cy="198" r="2" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="280" cy="200" r="1.5" fill="#1a4a55" fill-opacity="0.4"/>
+    
+    <!-- Node 3 -->
+    <circle cx="280" cy="255" r="10" fill="url(#nodeGoldGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="278" cy="253" r="2" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="280" cy="255" r="1.5" fill="#6a5010" fill-opacity="0.4"/>
+    
+    <!-- HIDDEN LAYER 4 NODES -->
+    <!-- Node 1 -->
+    <circle cx="335" cy="170" r="11" fill="url(#nodeCoralGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="333" cy="168" r="2.5" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="335" cy="170" r="1.5" fill="#6a2a20" fill-opacity="0.4"/>
+    
+    <!-- Node 2 -->
+    <circle cx="335" cy="200" r="11" fill="url(#nodeRoseGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="333" cy="198" r="2.5" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="335" cy="200" r="1.5" fill="#5a3040" fill-opacity="0.4"/>
+    
+    <!-- Node 3 -->
+    <circle cx="335" cy="230" r="11" fill="url(#nodeSlateGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="333" cy="228" r="2.5" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="335" cy="230" r="1.5" fill="#2a3a44" fill-opacity="0.4"/>
+    
+    <!-- OUTPUT LAYER NODES (right edge) -->
+    <!-- Node 1 -->
+    <circle cx="405" cy="140" r="12" fill="url(#nodeRoseGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="403" cy="138" r="3" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="405" cy="140" r="2" fill="#5a3040" fill-opacity="0.4"/>
+    
+    <!-- Node 2 -->
+    <circle cx="405" cy="200" r="12" fill="url(#nodeGoldGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="403" cy="198" r="3" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="405" cy="200" r="2" fill="#6a5010" fill-opacity="0.4"/>
+    
+    <!-- Node 3 -->
+    <circle cx="405" cy="260" r="12" fill="url(#nodeTealGrad)" stroke="#fff" stroke-width="2" filter="url(#innerShadow)"/>
+    <circle cx="403" cy="258" r="3" fill="#fff" fill-opacity="0.5"/>
+    <circle cx="405" cy="260" r="2" fill="#1a4a55" fill-opacity="0.4"/>
+    
+    <!-- Top decorative nodes (corner accents) -->
+    <circle cx="180" cy="90" r="8" fill="url(#nodeSlateGrad)" stroke="#fff" stroke-width="1.5"/>
+    <circle cx="178" cy="88" r="2" fill="#fff" fill-opacity="0.5"/>
+    
+    <circle cx="250" cy="70" r="9" fill="url(#nodeGoldGrad)" stroke="#fff" stroke-width="1.5"/>
+    <circle cx="248" cy="68" r="2.5" fill="#fff" fill-opacity="0.5"/>
+    
+    <circle cx="320" cy="90" r="8" fill="url(#nodeCoralGrad)" stroke="#fff" stroke-width="1.5"/>
+    <circle cx="318" cy="88" r="2" fill="#fff" fill-opacity="0.5"/>
+    
+    <!-- Bottom decorative nodes -->
+    <circle cx="180" cy="310" r="8" fill="url(#nodeCoralGrad)" stroke="#fff" stroke-width="1.5"/>
+    <circle cx="178" cy="308" r="2" fill="#fff" fill-opacity="0.5"/>
+    
+    <circle cx="250" cy="330" r="9" fill="url(#nodeTealGrad)" stroke="#fff" stroke-width="1.5"/>
+    <circle cx="248" cy="328" r="2.5" fill="#fff" fill-opacity="0.5"/>
+    
+    <circle cx="320" cy="310" r="8" fill="url(#nodeRoseGrad)" stroke="#fff" stroke-width="1.5"/>
+    <circle cx="318" cy="308" r="2" fill="#fff" fill-opacity="0.5"/>
+    
+    <!-- Connecting decorative rods to corners -->
+    <line x1="180" y1="90" x2="165" y2="170" stroke="url(#rodSlateGrad)" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+    <line x1="250" y1="70" x2="250" y2="182" stroke="url(#rodGoldGrad)" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+    <line x1="320" y1="90" x2="335" y2="170" stroke="url(#rodCoralGrad)" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+    
+    <line x1="180" y1="310" x2="165" y2="230" stroke="url(#rodCoralGrad)" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+    <line x1="250" y1="330" x2="250" y2="218" stroke="url(#rodTealGrad)" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+    <line x1="320" y1="310" x2="335" y2="230" stroke="url(#rodRoseGrad)" stroke-width="2" stroke-linecap="round" opacity="0.7"/>
+    
+    <!-- Tiny accent nodes for detail -->
+    <circle cx="130" cy="155" r="5" fill="url(#nodeGoldGrad)" stroke="#fff" stroke-width="1"/>
+    <circle cx="130" cy="245" r="5" fill="url(#nodeTealGrad)" stroke="#fff" stroke-width="1"/>
+    <circle cx="370" cy="155" r="5" fill="url(#nodeRoseGrad)" stroke="#fff" stroke-width="1"/>
+    <circle cx="370" cy="245" r="5" fill="url(#nodeSlateGrad)" stroke="#fff" stroke-width="1"/>
+    
+    <!-- Mini connecting rods for these accent nodes -->
+    <line x1="130" y1="155" x2="165" y2="170" stroke="url(#rodGoldGrad)" stroke-width="2" stroke-linecap="round"/>
+    <line x1="130" y1="245" x2="165" y2="230" stroke="url(#rodTealGrad)" stroke-width="2" stroke-linecap="round"/>
+    <line x1="370" y1="155" x2="335" y2="170" stroke="url(#rodRoseGrad)" stroke-width="2" stroke-linecap="round"/>
+    <line x1="370" y1="245" x2="335" y2="230" stroke="url(#rodSlateGrad)" stroke-width="2" stroke-linecap="round"/>
+    
+  </g>
+  
+  <!-- Outer glow ring for polish -->
+  <polygon points="250,20 430,110 430,290 250,380 70,290 70,110" 
+           fill="none" stroke="url(#hexBorderGrad)" stroke-width="1.5" 
+           stroke-linejoin="round" opacity="0.5" transform="scale(1.02) translate(-5,-4)"/>
+  
+</svg>

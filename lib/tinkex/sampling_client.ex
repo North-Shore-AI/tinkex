@@ -10,12 +10,27 @@ defmodule Tinkex.SamplingClient do
   For plain-text prompts, build a `Tinkex.Types.ModelInput` via
   `Tinkex.Types.ModelInput.from_text/2` with the target model name. Chat
   templates are not applied automatically.
+
+  ## Queue State Observer
+
+  This client implements `Tinkex.QueueStateObserver` and automatically logs
+  human-readable warnings when queue state changes indicate rate limiting
+  or capacity issues:
+
+      [warning] Sampling is paused for session-123. Reason: concurrent LoRA rate limit hit
+
+  Logs are debounced to once per 60 seconds per session to avoid spam.
   """
 
   use GenServer
   use Tinkex.Telemetry.Provider
 
+  @behaviour Tinkex.QueueStateObserver
+
+  require Logger
+
   alias Tinkex.API.{Sampling, Service}
+  alias Tinkex.QueueStateLogger
 
   alias Tinkex.{
     Error,
@@ -154,7 +169,8 @@ defmodule Tinkex.SamplingClient do
         retry_config: retry_config,
         sampling_api: sampling_api,
         telemetry_metadata: telemetry_metadata,
-        session_id: session_id
+        session_id: session_id,
+        last_queue_state_logged: nil
       }
 
       :ok = SamplingRegistry.register(self(), entry)
@@ -197,6 +213,33 @@ defmodule Tinkex.SamplingClient do
   @impl true
   def handle_call(:get_telemetry, _from, state) do
     {:reply, state.telemetry, state}
+  end
+
+  # QueueStateObserver implementation
+  # This callback is invoked by Future.poll when queue state changes (e.g., rate limit hit).
+  # We use metadata to identify the session and ETS to track debouncing per session.
+  @impl Tinkex.QueueStateObserver
+  def on_queue_state_change(queue_state, metadata \\ %{}) do
+    session_id = metadata[:sampling_session_id] || metadata[:session_id] || "unknown"
+
+    # Look up the last logged timestamp from ETS registry
+    # Use :persistent_term for debounce tracking keyed by session_id
+    debounce_key = {:sampling_queue_state_debounce, session_id}
+
+    last_logged =
+      case :persistent_term.get(debounce_key, nil) do
+        nil -> nil
+        ts -> ts
+      end
+
+    new_timestamp = QueueStateLogger.maybe_log(queue_state, :sampling, session_id, last_logged)
+
+    # Update the debounce timestamp if it changed
+    if new_timestamp != last_logged do
+      :persistent_term.put(debounce_key, new_timestamp)
+    end
+
+    :ok
   end
 
   defp do_sample(client, prompt, sampling_params, opts) do
@@ -306,13 +349,17 @@ defmodule Tinkex.SamplingClient do
   end
 
   defp poll_sample_future(future, entry, seq_id, opts) do
+    # Use __MODULE__ as observer by default for automatic queue state logging
+    # Users can override with their own observer via opts[:queue_state_observer]
+    observer = Keyword.get(opts, :queue_state_observer, __MODULE__)
+
     poll_task =
       Future.poll(future,
         config: entry.config,
         timeout: Keyword.get(opts, :timeout, :infinity),
         http_timeout: Keyword.get(opts, :http_timeout, entry.config.timeout),
         telemetry_metadata: merge_metadata(entry.telemetry_metadata, opts[:telemetry_metadata]),
-        queue_state_observer: opts[:queue_state_observer],
+        queue_state_observer: observer,
         sleep_fun: opts[:sleep_fun],
         tinker_request_type: "Sample",
         tinker_request_iteration: seq_id

@@ -9,18 +9,34 @@ defmodule Tinkex.TrainingClient do
   Use `Tinkex.Types.ModelInput.from_text/2` to turn raw strings into
   tokenized `ModelInput` structs before constructing training data. Chat
   templates are not applied automatically; provide fully formatted text.
+
+  ## Queue State Observer
+
+  This client implements `Tinkex.QueueStateObserver` and automatically logs
+  human-readable warnings when queue state changes indicate rate limiting
+  or capacity issues:
+
+      [warning] Training is paused for model-xyz. Reason: concurrent models rate limit hit
+
+  Logs are debounced to once per 60 seconds per model to avoid spam.
   """
 
   use GenServer
   use Tinkex.Telemetry.Provider
+
+  @behaviour Tinkex.QueueStateObserver
+
   require Logger
 
   alias Tinkex.API.{Models, Service, Training, Weights}
   alias Tinkex.Error
   alias Tinkex.Future.Combiner
+  alias Tinkex.QueueStateLogger
   alias Tinkex.Telemetry.Reporter
+  alias Tinkex.Training.CustomLoss
 
   alias Tinkex.Types.{
+    Datum,
     CreateModelRequest,
     CreateModelResponse,
     ForwardBackwardInput,
@@ -34,6 +50,7 @@ defmodule Tinkex.TrainingClient do
     LoadWeightsResponse,
     OptimStepRequest,
     OptimStepResponse,
+    TensorData,
     SaveWeightsForSamplerRequest,
     SaveWeightsForSamplerResponse,
     SaveWeightsRequest,
@@ -358,58 +375,35 @@ defmodule Tinkex.TrainingClient do
   end
 
   @doc """
-  Compute forward/backward pass with custom loss function and optional regularizers.
+  Compute forward/backward pass with a custom loss function.
 
-  The base loss function is required and computes the primary training objective.
-  Optional regularizers add weighted loss terms. Total loss is computed as:
-
-      loss_total = base_loss + Σ(weight_i × regularizer_i_loss)
+  This mirrors the Python SDK: performs a forward pass to obtain per-datum
+  logprobs, computes a custom loss, turns gradients into synthetic weights,
+  and sends them back via `forward_backward/4`. The returned
+  `ForwardBackwardOutput` is compatible with `optim_step/2`.
 
   ## Parameters
   - client: TrainingClient pid
   - data: List of training data (Datum structs)
-  - loss_fn: Base loss function - `(data, logprobs) -> {loss_tensor, metrics_map}`
-  - opts: Options including:
-    - `:regularizers` - List of RegularizerSpec (optional)
-    - `:track_grad_norms` - Compute per-regularizer gradient L2 norms (default: false)
-    - `:parallel` - Run regularizers in parallel Tasks (default: true)
-    - `:timeout` - Timeout for regularizer execution (default: 30_000ms)
+  - loss_fn: `(data, logprobs_list) -> {loss_tensor, metrics_map}`
+    * `logprobs_list` is a list of Nx tensors, one per datum
+  - opts: Options forwarded to the underlying forward/forward_backward requests
 
   ## Returns
-  `{:ok, Task.t()}` that yields `{:ok, CustomLossOutput.t()}` or `{:error, Error.t()}`
+  `{:ok, Task.t()}` that yields `{:ok, ForwardBackwardOutput.t()}` or `{:error, Error.t()}`
 
   ## Examples
 
-      # Base loss only
       {:ok, task} = TrainingClient.forward_backward_custom(
         client, data, &my_loss_fn/2
       )
-      {:ok, output} = Task.await(task)
-
-      # With regularizers
-      regularizers = [
-        %RegularizerSpec{fn: &sparsity/2, weight: 0.01, name: "sparsity"},
-        %RegularizerSpec{fn: &entropy/2, weight: 0.001, name: "entropy"}
-      ]
-
-      {:ok, task} = TrainingClient.forward_backward_custom(
-        client, data, &base_loss/2,
-        regularizers: regularizers,
-        track_grad_norms: true
-      )
-
-  ## Telemetry Events
-
-  - `[:tinkex, :custom_loss, :start]` - Emitted when computation begins
-  - `[:tinkex, :regularizer, :compute, :start]` - Emitted per regularizer
-  - `[:tinkex, :regularizer, :compute, :stop]` - Emitted per regularizer with duration
-  - `[:tinkex, :custom_loss, :stop]` - Emitted when computation completes
+      {:ok, %ForwardBackwardOutput{} = output} = Task.await(task)
   """
   @spec forward_backward_custom(
           t(),
           list(Tinkex.Types.Datum.t()),
           loss_fn ::
-            (list(Tinkex.Types.Datum.t()), Nx.Tensor.t() ->
+            (list(Tinkex.Types.Datum.t()), [Nx.Tensor.t()] ->
                {Nx.Tensor.t(), map()}),
           keyword()
         ) :: {:ok, Task.t()} | {:error, Error.t()}
@@ -879,38 +873,84 @@ defmodule Tinkex.TrainingClient do
 
   @impl true
   def handle_call({:forward_backward_custom, data, loss_fn, opts}, from, state) do
-    # Spawn background Task for custom loss computation
-    # This mirrors the pattern used for other long-running operations
-    start_background_task(
-      fn ->
-        reply =
-          try do
-            # Execute forward pass to get logprobs
-            case do_forward_for_custom_loss(data, opts, state) do
-              {:ok, logprobs} ->
-                # Run the regularizer pipeline
-                alias Tinkex.Regularizer.Pipeline
-                Pipeline.compute(data, logprobs, loss_fn, opts)
+    with {:ok, placeholder_gradients} <- build_placeholder_gradients(data) do
+      placeholder_linear_data = CustomLoss.build_linear_loss_data(data, placeholder_gradients)
+      linear_chunks = chunk_data(placeholder_linear_data)
+      chunks = chunk_data(data)
 
-              {:error, _} = error ->
-                error
-            end
-          rescue
-            e ->
-              {:error,
-               %Error{
-                 message: "Custom loss failed: #{Exception.message(e)}",
-                 type: :request_failed,
-                 data: %{exception: e, stacktrace: __STACKTRACE__}
-               }}
+      forward_count = length(chunks)
+      backward_count = length(linear_chunks)
+
+      {seq_ids, new_counter} =
+        allocate_request_ids(forward_count + backward_count, state.request_id_counter)
+
+      {forward_seq_ids, backward_seq_ids} = Enum.split(seq_ids, forward_count)
+
+      send_result =
+        Enum.reduce_while(Enum.zip(forward_seq_ids, chunks), {:ok, []}, fn {seq_id, chunk},
+                                                                           {:ok, acc} ->
+          case send_forward_request(chunk, :cross_entropy, seq_id, opts, state) do
+            {:ok, future} -> {:cont, {:ok, [future | acc]}}
+            {:error, reason} -> {:halt, {:error, reason}}
           end
+        end)
 
-        safe_reply(from, reply)
-      end,
-      from
-    )
+      case send_result do
+        {:error, reason} ->
+          {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
 
-    {:noreply, state}
+        {:ok, forward_futures_rev} ->
+          forward_futures = Enum.reverse(forward_futures_rev)
+
+          start_background_task(
+            fn ->
+              reply =
+                try do
+                  with {:ok, forward_outputs} <-
+                         poll_forward_custom_loss(forward_futures, opts, state),
+                       {:ok, logprobs} <-
+                         CustomLoss.extract_per_datum_logprobs(forward_outputs),
+                       {:ok, {gradients, metrics}} <-
+                         CustomLoss.compute_gradients(data, logprobs, loss_fn),
+                       {:ok, linear_data} <- build_linear_loss_data_safe(data, gradients),
+                       {:ok, backward_outputs} <-
+                         send_backward_for_custom_loss(
+                           linear_data,
+                           backward_seq_ids,
+                           opts,
+                           state
+                         ) do
+                    combined = Combiner.combine_forward_backward_results(backward_outputs)
+                    {:ok, merge_custom_metrics(combined, metrics)}
+                  else
+                    {:error, %Error{} = error} ->
+                      {:error, error}
+
+                    {:error, reason} ->
+                      {:error,
+                       Error.new(:request_failed, "Custom loss failed: #{inspect(reason)}")}
+                  end
+                rescue
+                  e ->
+                    {:error,
+                     %Error{
+                       message: "Custom loss failed: #{Exception.message(e)}",
+                       type: :request_failed,
+                       data: %{exception: e, stacktrace: __STACKTRACE__}
+                     }}
+                end
+
+              safe_reply(from, reply)
+            end,
+            from
+          )
+
+          {:noreply, %{state | request_id_counter: new_counter}}
+      end
+    else
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   @impl true
@@ -922,6 +962,32 @@ defmodule Tinkex.TrainingClient do
   @impl true
   def terminate(_reason, state) do
     Reporter.stop(state[:telemetry])
+    :ok
+  end
+
+  # QueueStateObserver implementation
+  # This callback is invoked by Future.poll when queue state changes (e.g., rate limit hit).
+  # We use metadata to identify the model and :persistent_term to track debouncing per model.
+  @impl Tinkex.QueueStateObserver
+  def on_queue_state_change(queue_state, metadata \\ %{}) do
+    model_id = metadata[:model_id] || "unknown"
+
+    # Use :persistent_term for debounce tracking keyed by model_id
+    debounce_key = {:training_queue_state_debounce, model_id}
+
+    last_logged =
+      case :persistent_term.get(debounce_key, nil) do
+        nil -> nil
+        ts -> ts
+      end
+
+    new_timestamp = QueueStateLogger.maybe_log(queue_state, :training, model_id, last_logged)
+
+    # Update the debounce timestamp if it changed
+    if new_timestamp != last_logged do
+      :persistent_term.put(debounce_key, new_timestamp)
+    end
+
     :ok
   end
 
@@ -1426,17 +1492,22 @@ defmodule Tinkex.TrainingClient do
     telemetry_metadata =
       state.telemetry_metadata
       |> Map.merge(Map.new(Keyword.get(opts, :telemetry_metadata, %{})))
+      |> Map.put(:model_id, state.model_id)
+
+    # Use __MODULE__ as observer by default for automatic queue state logging
+    # Users can override with their own observer via opts[:queue_state_observer]
+    observer = Keyword.get(opts, :queue_state_observer, __MODULE__)
 
     opts
     |> Keyword.take([
       :timeout,
       :http_timeout,
       :telemetry_metadata,
-      :queue_state_observer,
       :sleep_fun
     ])
     |> Keyword.put(:config, state.config)
     |> Keyword.put(:telemetry_metadata, telemetry_metadata)
+    |> Keyword.put(:queue_state_observer, observer)
   end
 
   defp poll_opts_with_type(state, opts, request_type) do
@@ -1471,52 +1542,132 @@ defmodule Tinkex.TrainingClient do
 
   defp await_timeout(opts), do: Keyword.get(opts, :await_timeout, :infinity)
 
-  # Execute forward pass for custom loss computation
-  # Returns {:ok, logprobs_tensor} or {:error, Error.t()}
-  defp do_forward_for_custom_loss(data, opts, state) do
-    chunks = chunk_data(data)
-    {seq_ids, _} = allocate_request_ids(length(chunks), state.request_id_counter)
+  defp build_placeholder_gradients(data) do
+    data
+    |> Enum.reduce_while({:ok, []}, fn datum, {:ok, acc} ->
+      case fetch_target_tokens_tensor(datum) do
+        {:ok, target_tensor} ->
+          zero =
+            Nx.broadcast(
+              Nx.tensor(0.0, type: {:f, 32}),
+              Nx.shape(target_tensor)
+            )
 
-    # Send forward requests for all chunks
-    send_result =
-      Enum.reduce_while(Enum.zip(seq_ids, chunks), {:ok, []}, fn {seq_id, chunk}, {:ok, acc} ->
-        case send_forward_request(chunk, :cross_entropy, seq_id, opts, state) do
-          {:ok, future} -> {:cont, {:ok, [future | acc]}}
-          {:error, reason} -> {:halt, {:error, reason}}
-        end
-      end)
+          {:cont, {:ok, [zero | acc]}}
 
-    case send_result do
-      {:error, reason} ->
-        {:error, reason}
-
-      {:ok, futures_rev} ->
-        futures = Enum.reverse(futures_rev)
-
-        # Poll all futures and collect results
-        polling_tasks =
-          Enum.map(futures, fn future ->
-            task =
-              state.future_module.poll(
-                future,
-                poll_opts_with_type(state, opts, "ForwardCustomLoss")
-              )
-
-            unlink_task(task)
-            task
-          end)
-
-        # Await results and extract logprobs
-        case await_forward_results_for_custom_loss(polling_tasks, state.future_module) do
-          {:ok, outputs} ->
-            # Combine logprobs from all chunks
-            extract_logprobs_from_outputs(outputs)
-
-          {:error, _} = error ->
-            error
-        end
+        {:error, reason} ->
+          {:halt, {:error, reason}}
+      end
+    end)
+    |> case do
+      {:ok, grads_rev} -> {:ok, Enum.reverse(grads_rev)}
+      {:error, _} = error -> error
     end
   end
+
+  defp fetch_target_tokens_tensor(%Datum{loss_fn_inputs: inputs}) do
+    case inputs["target_tokens"] || inputs[:target_tokens] do
+      %TensorData{} = td ->
+        {:ok, TensorData.to_nx(td)}
+
+      %Nx.Tensor{} = tensor ->
+        {:ok, tensor}
+
+      nil ->
+        {:error, Error.new(:validation, "target_tokens missing from loss_fn_inputs")}
+
+      other ->
+        {:error,
+         Error.new(
+           :validation,
+           "Invalid target_tokens in loss_fn_inputs: #{inspect(other)}"
+         )}
+    end
+  end
+
+  defp poll_forward_custom_loss(futures, opts, state) do
+    polling_tasks =
+      Enum.map(futures, fn future ->
+        task =
+          state.future_module.poll(
+            future,
+            poll_opts_with_type(state, opts, "ForwardCustomLoss")
+          )
+
+        unlink_task(task)
+        task
+      end)
+
+    await_forward_results_for_custom_loss(polling_tasks, state.future_module)
+  end
+
+  defp build_linear_loss_data_safe(data, gradients) do
+    if length(data) != length(gradients) do
+      {:error, Error.new(:validation, "Gradient count does not match data count")}
+    else
+      {:ok, CustomLoss.build_linear_loss_data(data, gradients)}
+    end
+  rescue
+    e ->
+      {:error,
+       Error.new(:request_failed, "Failed to build linear loss data: #{Exception.message(e)}",
+         data: %{exception: e, stacktrace: __STACKTRACE__}
+       )}
+  end
+
+  defp send_backward_for_custom_loss(linear_data, seq_ids, opts, state) do
+    chunks = chunk_data(linear_data)
+
+    if length(chunks) != length(seq_ids) do
+      {:error,
+       Error.new(
+         :validation,
+         "Chunk count mismatch for custom loss backward: expected #{length(seq_ids)}, got #{length(chunks)}"
+       )}
+    else
+      send_result =
+        Enum.reduce_while(Enum.zip(seq_ids, chunks), {:ok, []}, fn {seq_id, chunk}, {:ok, acc} ->
+          case send_forward_backward_request(chunk, :cross_entropy, seq_id, opts, state) do
+            {:ok, future} -> {:cont, {:ok, [future | acc]}}
+            {:error, reason} -> {:halt, {:error, reason}}
+          end
+        end)
+
+      case send_result do
+        {:error, _} = error ->
+          error
+
+        {:ok, futures_rev} ->
+          futures = Enum.reverse(futures_rev)
+
+          polling_tasks =
+            Enum.map(futures, fn future ->
+              task =
+                state.future_module.poll(
+                  future,
+                  poll_opts_with_type(state, opts, "ForwardBackwardCustomLoss")
+                )
+
+              unlink_task(task)
+              task
+            end)
+
+          await_forward_backward_results(polling_tasks, state.future_module)
+      end
+    end
+  end
+
+  defp merge_custom_metrics(%ForwardBackwardOutput{} = output, metrics) when is_map(metrics) do
+    normalized =
+      metrics
+      |> Enum.map(fn {k, v} -> {to_string(k), normalize_metric_value(v)} end)
+      |> Map.new()
+
+    %ForwardBackwardOutput{output | metrics: Map.merge(output.metrics, normalized)}
+  end
+
+  defp normalize_metric_value(%Nx.Tensor{} = tensor), do: Nx.to_number(tensor)
+  defp normalize_metric_value(other), do: other
 
   defp await_forward_results_for_custom_loss([], _future_module), do: {:ok, []}
 
@@ -1530,27 +1681,6 @@ defmodule Tinkex.TrainingClient do
       {:error, %Error{} = error} ->
         Enum.each(rest, &Task.shutdown(&1, :brutal_kill))
         {:error, error}
-    end
-  end
-
-  defp extract_logprobs_from_outputs(outputs) do
-    # Extract logprobs from loss_fn_outputs and convert to Nx tensor
-    logprobs_lists =
-      outputs
-      |> Enum.flat_map(fn output ->
-        Enum.map(output.loss_fn_outputs, fn
-          %{"logprobs" => logprobs} when is_list(logprobs) -> logprobs
-          %{"logprobs" => %{"data" => data}} when is_list(data) -> data
-          _ -> []
-        end)
-      end)
-      |> List.flatten()
-
-    if logprobs_lists == [] do
-      # Return a dummy tensor if no logprobs available (for testing)
-      {:ok, Nx.tensor([0.0])}
-    else
-      {:ok, Nx.tensor(logprobs_lists)}
     end
   end
 end

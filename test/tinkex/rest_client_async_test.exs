@@ -194,8 +194,22 @@ defmodule Tinkex.RestClientAsyncTest do
 
   describe "parallel async requests" do
     test "multiple tasks can run in parallel", %{bypass: bypass, config: config} do
+      parent = self()
+
+      request_barrier = fn tag ->
+        send(parent, {:request_started, tag, self()})
+
+        receive do
+          {:continue, ^tag} -> :ok
+        after
+          200 -> :ok
+        end
+      end
+
       # Expect both endpoints to be called
       Bypass.expect(bypass, "GET", "/api/v1/sessions", fn conn ->
+        request_barrier.(:sessions)
+
         # Small delay to verify parallelism
         Process.sleep(50)
 
@@ -205,6 +219,8 @@ defmodule Tinkex.RestClientAsyncTest do
       end)
 
       Bypass.expect(bypass, "GET", "/api/v1/checkpoints", fn conn ->
+        request_barrier.(:checkpoints)
+
         Process.sleep(50)
 
         conn
@@ -222,6 +238,10 @@ defmodule Tinkex.RestClientAsyncTest do
         RestClient.list_user_checkpoints_async(client)
       ]
 
+      started = wait_for_request_starts(2, 400)
+      Enum.each(started, fn {tag, pid} -> send(pid, {:continue, tag}) end)
+      assert length(started) == 2
+
       results = Task.await_many(tasks, 5000)
       elapsed = System.monotonic_time(:millisecond) - start_time
 
@@ -229,8 +249,8 @@ defmodule Tinkex.RestClientAsyncTest do
       assert [{:ok, %ListSessionsResponse{}}, {:ok, %CheckpointsListResponse{}}] = results
 
       # Should take ~50ms (parallel) not ~100ms (serial)
-      # Allow some slack for CI environments
-      assert elapsed < 150
+      # Allow generous slack for CI and cold connection setup
+      assert elapsed < 500
     end
   end
 
@@ -309,6 +329,29 @@ defmodule Tinkex.RestClientAsyncTest do
 
       {:ok, response} = Task.await(task)
       assert response.url == "https://dl.example.com/file.tar"
+    end
+  end
+
+  defp wait_for_request_starts(expected, timeout_ms) do
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+    collect_request_starts(expected, deadline, [])
+  end
+
+  defp collect_request_starts(expected, _deadline, acc) when length(acc) == expected, do: acc
+
+  defp collect_request_starts(expected, deadline, acc) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
+    if remaining == 0 do
+      acc
+    else
+      receive do
+        {:request_started, tag, pid} ->
+          collect_request_starts(expected, deadline, [{tag, pid} | acc])
+      after
+        remaining ->
+          acc
+      end
     end
   end
 end

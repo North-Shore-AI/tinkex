@@ -13,24 +13,25 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the Tinker distributed machine learning platform. It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.11 Highlights
+## 0.1.12 Highlights
 
-- **Full Python SDK parity**: Retry logic now matches `_base_client.py` (408/409/429/5xx, 0.75–1.0 jitter range, 10s delay cap). HTTP pool defaults align with `httpx.Limits` (50×20=1000 connections).
-- **API changes (breaking)**: `create_lora_training_client/3` and `save_weights_for_sampler/3` now take required positional arguments instead of opts.
-- **Missing types**: Added `FutureRetrieveRequest`, `RequestFailedResponse`, `SessionHeartbeatRequest/Response`, `TelemetryResponse`, and `TypeAliases` module.
-- **New helpers**: `Tinkex.API.Helpers` for `with_raw_response/1` and `with_streaming_response/1`; `Tinkex.Env` pool config via `TINKEX_POOL_SIZE`/`TINKEX_POOL_COUNT`.
-- **Bug fixes**: SampleRequest omits nil fields (fixes 422), tokenizer strips `/variant` suffix, CLI checkpoint generates default names.
+- **Custom loss training parity**: `forward_backward_custom/4` keeps per-datum logprobs as Nx tensors, computes gradients locally, sends them back as weights so the backend trains, and returns `ForwardBackwardOutput` compatible with `optim_step/2`.
+- **Structured capabilities metadata**: Capabilities responses return `SupportedModel` structs with `model_id`/`model_name`/`arch`; `model_names/1` stays backward compatible and the example now prints the richer metadata.
+- **Multipart uploads**: Tinkex.API.post/3 normalizes file inputs, flattens nested bodies into bracketed fields, generates boundaries, and sets `Content-Type` automatically when `:files` are present (with path-based helpers and a runnable demo).
+- **Streaming checkpoint downloads**: Checkpoint archives stream via Finch with O(1) memory usage while preserving progress callbacks and extraction semantics.
+- **Queue backpressure visibility**: Sampling and training clients hook queue observers into `Future.poll/2`, emitting debounced warnings for rate limiting or capacity throttling with human-readable reasons in line with the Python SDK.
+- **Proxy-aware HTTP**: Finch pools honor proxies from `Tinkex.Config` (including `TINKEX_PROXY`/`TINKEX_PROXY_HEADERS` and tuple proxies) and mask credentials in logs and inspect output.
 
 ## Features
 
 - **TrainingClient**: Fine-tune models with forward/backward passes and gradient-based optimization
-- **Custom Loss Composition**: `TrainingClient.forward_backward_custom/4` with regularizer pipelines and gradient tracking
-- **Forward-Only Inference**: `TrainingClient.forward/4` returns logprobs without backward pass for custom loss computation
+- **Custom Loss Training**: `TrainingClient.forward_backward_custom/4` computes gradients from per-datum logprobs, sends them to the backend, and returns `ForwardBackwardOutput` (regularizer terms can be folded into your loss_fn)
+- **Forward-Only Inference**: `TrainingClient.forward/4` returns logprobs without backward pass for evaluation or for custom loss functions you run locally
 - **EXLA Backend**: Nx tensors use EXLA for GPU/CPU-accelerated operations out of the box
 - **SamplingClient**: Generate text completions with customizable sampling parameters
 - **ServiceClient**: Manage models, sessions, and service operations
 - **RestClient**: List sessions, enumerate user checkpoints, fetch archive URLs, and delete checkpoints
-- **CheckpointDownload**: Download and extract checkpoints with optional progress reporting
+- **CheckpointDownload**: Memory-efficient streaming downloads with O(1) memory usage and optional progress reporting
 - **Async/Concurrent**: Built on Elixir's actor model for efficient concurrent operations
 - **Type Safety**: Leverages Elixir typespecs and pattern matching
 - **HTTP/2**: Modern HTTP client with connection pooling and streaming support
@@ -38,14 +39,19 @@ Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-
 - **Telemetry**: Comprehensive observability through Elixir's telemetry ecosystem
 - **Metrics Aggregation**: Built-in `Tinkex.Metrics` for counters, gauges, and latency percentiles with snapshot/export helpers
 - **Session lifecycle resilience**: `SessionManager.stop_session/2` waits for heartbeat cleanup, heartbeats use the canonical `/api/v1/session_heartbeat` path, and sustained heartbeat failures now surface as warnings (after ~2 minutes by default) instead of silently dropping sessions.
+- **Queue observability**: Sampling and training clients expose queue observers that feed `Future.poll/2`, emitting debounced warnings with human-readable rate limit or capacity reasons.
 - **REST metadata & inspection APIs**: New endpoints surface samplers, weights metadata, and training runs while the SDK exposes `GetSamplerResponse`, `WeightsInfoResponse`, `ImageChunk.expected_tokens`, `LoadWeightsRequest.optimizer`, and the `:cispo`/`:dro` `LossFnType` tags for richer load/save tooling.
 - **Checkpoint persistence**: `TrainingClient.save_state/3`, `TrainingClient.load_state/3`, `TrainingClient.load_state_with_optimizer/3`, and `ServiceClient.create_training_client_from_state/3` enable saving checkpoints and resuming training with optimizer state.
+- **Multipart uploads**: The `:files` option builds multipart/form-data bodies automatically (path and tuple normalization, bracketed form fields, boundary generation, and tuple metadata) while preserving JSON requests when no files are present; includes a runnable multipart example and path-based helpers.
+- **Proxy-aware HTTP**: Finch pools pick up proxies from `Tinkex.Config` (or `TINKEX_PROXY`/`TINKEX_PROXY_HEADERS`) while masking credentials in logs and inspect output.
 
 ## Guides
 
-- Training persistence: `docs/guides/training_persistence.md`
-- Live training persistence example: `mix run examples/training_persistence_live.exs` (requires `TINKER_API_KEY` only)
+- Getting started & configuration: `docs/guides/getting_started.md`, `docs/guides/environment_configuration.md`
+- Custom loss training (per-datum logprobs, backend gradients): `docs/guides/custom_loss_training.md` and `mix run examples/custom_loss_training.exs`
+- Training persistence: `docs/guides/training_persistence.md` (live example: `examples/training_persistence_live.exs`)
 - Save-and-sample convenience: `mix run examples/save_weights_and_sample.exs` demonstrates `TrainingClient.save_weights_and_get_sampling_client_sync/2` (requires `TINKER_API_KEY`)
+- Multipart uploads: `docs/guides/file_uploads.md` (live helper: `mix run examples/file_upload_multipart.exs`; uploads `examples/uploads/sample_upload.bin` by default, override via `TINKER_UPLOAD_FILE`)
 
 ## Installation
 
@@ -54,7 +60,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.11"}
+    {:tinkex, "~> 0.1.12"}
   ]
 end
 ```
@@ -97,6 +103,20 @@ datum = %Tinkex.Types.Datum{
 )
 {:ok, result} = Task.await(task)
 
+# Custom loss training (per-datum logprobs list)
+loss_fn = fn _data, [logprobs] ->
+  loss = Nx.negate(Nx.mean(logprobs))
+  {loss, %{"custom_perplexity" => Nx.to_number(Nx.exp(loss))}}
+end
+
+{:ok, custom_task} =
+  Tinkex.TrainingClient.forward_backward_custom(
+    training_client,
+    [datum],
+    loss_fn
+  )
+{:ok, _custom_output} = Task.await(custom_task)
+
 # Optimize model parameters
 {:ok, optim_task} = Tinkex.TrainingClient.optim_step(
   training_client,
@@ -123,6 +143,30 @@ params = %Tinkex.Types.SamplingParams{
 )
 {:ok, response} = Task.await(sample_task)
 ```
+
+## Multipart file uploads
+
+Use the `:files` option on Tinkex.API.post/3 to build multipart/form-data bodies automatically. File paths are read into memory, filenames are inferred from the path (or tuple), and nested maps/lists are flattened with bracket notation.
+
+```elixir
+config = Tinkex.Config.new(api_key: System.fetch_env!("TINKER_API_KEY"))
+
+files = %{
+  "upload" => "/tmp/data.bin",
+  "extra" => {"notes.txt", "hello", "text/plain"}
+}
+
+body = %{note: "multipart demo"}
+
+path = "/"
+
+case Tinkex.API.post(path, body, config: config, files: files) do
+  {:ok, response} -> IO.inspect(response, label: "upload response")
+  {:error, error} -> IO.puts("Upload failed: #{inspect(error)}")
+end
+```
+
+For a runnable walkthrough, see `docs/guides/file_uploads.md` and `examples/file_upload_multipart.exs` (the example uploads the bundled `examples/uploads/sample_upload.bin` by default; override via `TINKER_UPLOAD_FILE`).
 
 ### Sampling retries & backpressure
 
@@ -161,6 +205,7 @@ Defaults mirror the Python SDK (0.5s base, 10s cap, 25% jitter, 30m progress tim
 - `TINKER_API_KEY` (required) and `TINKER_BASE_URL` (defaults to `https://tinker.thinkingmachines.dev/services/tinker-prod`).
 - `TINKER_TAGS`, `TINKER_FEATURE_GATES` (comma-separated lists), `TINKER_TELEMETRY` (on by default), and `TINKER_LOG` (`debug`/`info`/`warn`/`error`).
 - `TINKEX_DUMP_HEADERS` (debug logging; secrets redacted) and Cloudflare Access tokens `CLOUDFLARE_ACCESS_CLIENT_ID` / `CLOUDFLARE_ACCESS_CLIENT_SECRET` per ADR-002 (added to every request when set).
+- `TINKEX_PROXY` (proxy URL like `http://proxy.company.com:8080` or `http://user:pass@proxy.company.com:8080`) and `TINKEX_PROXY_HEADERS` (JSON array of headers).
 
 App config defaults are also honored:
 
@@ -171,10 +216,12 @@ config :tinkex,
   cf_access_client_id: System.get_env("CLOUDFLARE_ACCESS_CLIENT_ID"),
   cf_access_client_secret: System.get_env("CLOUDFLARE_ACCESS_CLIENT_SECRET"),
   telemetry_enabled?: true,
-  log_level: :info
+  log_level: :info,
+  proxy: {:http, "proxy.company.com", 8080, []},
+  proxy_headers: [{"proxy-authorization", "Basic " <> Base.encode64("user:pass")}]
 ```
 
-See `docs/guides/environment_configuration.md` for the full matrix and precedence rules.
+See `docs/guides/environment_configuration.md` for the full matrix and precedence rules (including detailed proxy configuration).
 
 ### Metrics snapshot
 
@@ -222,13 +269,18 @@ IO.inspect(sessions.sessions, label: "sessions")
 {:ok, checkpoints} = Tinkex.RestClient.list_user_checkpoints(rest, limit: 20)
 IO.inspect(Enum.map(checkpoints.checkpoints, & &1.tinker_path), label: "checkpoints")
 
+# Download with streaming (O(1) memory usage)
 {:ok, download} =
   Tinkex.CheckpointDownload.download(rest, "tinker://run-123/weights/0001",
     output_dir: "./models",
-    force: true
+    force: true,
+    progress: fn downloaded, total ->
+      percent = if total > 0, do: Float.round(downloaded / total * 100, 1), else: 0
+      IO.write("\rProgress: #{percent}%")
+    end
   )
 
-IO.puts("Extracted to #{download.destination}")
+IO.puts("\nExtracted to #{download.destination}")
 ```
 
 ## Sampling Workflow
@@ -252,7 +304,7 @@ params = %Tinkex.Types.SamplingParams{max_tokens: 64, temperature: 0.7}
 - Rate limits are enforced per `{base_url, api_key}` bucket using a shared `Tinkex.RateLimiter`; a `429` sets a backoff window that later sampling calls will wait through before hitting the server again.
 - Sampling uses `max_retries: 0` at the HTTP layer: server/user errors (e.g., 5xx, 400) surface immediately so callers can decide how to retry.
 - Multi-tenant safety: different API keys or base URLs use separate rate limiters and stay isolated even when one tenant is backing off.
-- Prefer asynchronous client creation for fan-out workflows: `Tinkex.ServiceClient.create_sampling_client_async/2`, `Tinkex.SamplingClient.create_async/2`, and `Tinkex.TrainingClient.create_sampling_client_async/3` return Tasks you can await or `Task.await_many/2`.
+- Prefer asynchronous client creation for fan-out workflows: `Tinkex.ServiceClient.create_sampling_client_async/2`, `Tinkex.ServiceClient.create_lora_training_client_async/3`, `Tinkex.ServiceClient.create_training_client_from_state_async/3`, `Tinkex.SamplingClient.create_async/2`, and `Tinkex.TrainingClient.create_sampling_client_async/3` return Tasks you can await or `Task.await_many/2`.
 
 ## Telemetry Quickstart
 
@@ -342,104 +394,40 @@ Sampling and training clients automatically tag HTTP telemetry with `session_id`
   )
 ```
 
-## Structured Regularizers
+## Custom Loss Training
 
-Tinkex supports custom loss computation with composable regularizers using `TrainingClient.forward_backward_custom/4`. This API enables research workflows where loss functions are computed in Elixir/Nx with full gradient tracking.
+`TrainingClient.forward_backward_custom/4` now mirrors the Python SDK: it runs a forward pass, hands **per-datum logprobs** to your loss function, computes gradients in Nx, sends them back to the backend as synthetic weights, and returns a `ForwardBackwardOutput` ready for `optim_step/2`.
 
 ### Basic Usage
 
 ```elixir
-alias Tinkex.Types.RegularizerSpec
+# loss_fn receives the original data and a list of logprob tensors (one per datum)
+loss_fn = fn _data, [logprobs] ->
+  base = Nx.negate(Nx.mean(logprobs))
+  l1 = Nx.multiply(0.01, Nx.sum(Nx.abs(logprobs)))
+  total = base + l1
 
-# Define your base loss function
-base_loss_fn = fn _data, logprobs ->
-  loss = Nx.negate(Nx.mean(logprobs))
-  {loss, %{"nll" => Nx.to_number(loss)}}
-end
-
-# Define regularizers with weights
-regularizers = [
-  %RegularizerSpec{
-    fn: fn _data, logprobs ->
-      l1 = Nx.sum(Nx.abs(logprobs))
-      {l1, %{"l1_sum" => Nx.to_number(l1)}}
-    end,
-    weight: 0.01,
-    name: "l1_sparsity"
-  },
-  %RegularizerSpec{
-    fn: fn _data, logprobs ->
-      entropy = Nx.negate(Nx.sum(Nx.multiply(Nx.exp(logprobs), logprobs)))
-      {entropy, %{}}
-    end,
-    weight: 0.001,
-    name: "entropy"
+  metrics = %{
+    "base_nll" => Nx.to_number(base),
+    "l1" => Nx.to_number(l1),
+    "custom_perplexity" => Nx.to_number(Nx.exp(base))
   }
-]
 
-# Compute composed loss with gradient tracking
-{:ok, task} = Tinkex.TrainingClient.forward_backward_custom(
-  training_client,
-  data,
-  base_loss_fn,
-  regularizers: regularizers,
-  track_grad_norms: true,
-  parallel: true
-)
-
-{:ok, output} = Task.await(task)
-
-# Access structured metrics
-IO.puts("Total loss: #{output.loss_total}")
-IO.puts("Base loss: #{output.base_loss.value}")
-IO.puts("Regularizer total: #{output.regularizer_total}")
-
-# Per-regularizer metrics
-for {name, reg} <- output.regularizers do
-  IO.puts("#{name}: value=#{reg.value} contribution=#{reg.contribution} grad_norm=#{reg.grad_norm}")
+  {total, metrics}
 end
+
+{:ok, task} = Tinkex.TrainingClient.forward_backward_custom(training_client, data, loss_fn)
+{:ok, %Tinkex.Types.ForwardBackwardOutput{} = output} = Task.await(task)
+
+IO.inspect(output.metrics, label: "metrics (merged with server loss)")
+
+# Apply gradients
+{:ok, adam} = Tinkex.Types.AdamParams.new(learning_rate: 1.0e-4)
+{:ok, optim_task} = Tinkex.TrainingClient.optim_step(training_client, adam)
+{:ok, _resp} = Task.await(optim_task)
 ```
 
-### Loss Composition Formula
-
-The total loss is computed as:
-
-```
-loss_total = base_loss + Σ(weight_i × regularizer_i_loss)
-```
-
-### Telemetry Events
-
-The regularizer pipeline emits telemetry for monitoring:
-
-- `[:tinkex, :custom_loss, :start]` - When computation begins
-- `[:tinkex, :custom_loss, :stop]` - With duration, loss_total, regularizer_total
-- `[:tinkex, :regularizer, :compute, :start]` - Per regularizer
-- `[:tinkex, :regularizer, :compute, :stop]` - With value, contribution, grad_norm
-
-```elixir
-handler = Tinkex.Regularizer.Telemetry.attach_logger(level: :debug)
-# ... run computations ...
-Tinkex.Regularizer.Telemetry.detach(handler)
-```
-
-### Async Regularizers
-
-For I/O-bound operations (external APIs, database queries), regularizers can return Tasks:
-
-```elixir
-%RegularizerSpec{
-  fn: fn data, _logprobs ->
-    Task.async(fn ->
-      result = external_validation_api(data)
-      {Nx.tensor(result.penalty), %{"validated" => true}}
-    end)
-  end,
-  weight: 0.1,
-  name: "external_validation",
-  async: true
-}
-```
+Regularizer-style terms can be folded directly into your loss function (as shown with `l1`). For a full script that hits the live API, see `examples/custom_loss_training.exs`.
 
 ## HTTP Connection Pools
 
@@ -577,9 +565,10 @@ Packaging options:
 Run any of the sample scripts with `mix run examples/<name>.exs` (requires `TINKER_API_KEY`):
 
 - `training_loop.exs` – minimal forward/backward + optim + save flow
-- `forward_inference.exs` – forward-only pass with Nx/EXLA tensor conversion for custom loss
+- `custom_loss_training.exs` – live custom loss training that sends gradients via `forward_backward_custom/4`
+- `forward_inference.exs` – forward-only pass with Nx/EXLA tensor conversion for custom loss or evaluation
 - `structured_regularizers.exs` – composable regularizer pipeline demo with mock data (runs offline)
-- `structured_regularizers_live.exs` – custom loss with regularizers via live Tinker API
+- `structured_regularizers_live.exs` – custom loss with inline regularizer terms via live Tinker API
 - `sampling_basic.exs` – create a sampling client and decode completions
 - `sessions_management.exs` – explore REST-based session listing and lookup
 - `checkpoints_management.exs` – list user checkpoints and inspect metadata

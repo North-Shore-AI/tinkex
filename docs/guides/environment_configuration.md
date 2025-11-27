@@ -20,6 +20,8 @@ Centralized environment handling is provided by `Tinkex.Env` and fed into `Tinke
 - `TINKER_TELEMETRY`: Telemetry toggle (truthy: `1/true/yes/on`, falsey: `0/false/no/off`). Default: `true`.
 - `TINKER_LOG`: Log level (`debug` | `info` | `warn` | `warning` | `error`). Default: unset.
 - `TINKEX_DUMP_HEADERS`: HTTP dump toggle (same truthy/falsey parsing). Default: `false`; sensitive headers are redacted.
+- `TINKEX_PROXY`: Proxy URL for HTTP/HTTPS connections (e.g., `http://proxy.company.com:8080` or `http://user:pass@proxy.company.com:8080`). Default: none.
+- `TINKEX_PROXY_HEADERS`: JSON array of proxy headers (e.g., `[["proxy-authorization", "Basic abc123"]]`). Default: `[]`.
 - `CLOUDFLARE_ACCESS_CLIENT_ID` / `CLOUDFLARE_ACCESS_CLIENT_SECRET`: Forwarded on every request per ADR-002; secret is redacted in logs/inspect.
 
 `Tinkex.Env.snapshot/0` returns all parsed values; booleans are normalized using the truthy/falsey lists above, and lists are split on commas with trimming.
@@ -40,7 +42,9 @@ config :tinkex,
   log_level: :info,
   dump_headers?: false,
   cf_access_client_id: System.get_env("CLOUDFLARE_ACCESS_CLIENT_ID"),
-  cf_access_client_secret: System.get_env("CLOUDFLARE_ACCESS_CLIENT_SECRET")
+  cf_access_client_secret: System.get_env("CLOUDFLARE_ACCESS_CLIENT_SECRET"),
+  proxy: {:http, "proxy.company.com", 8080, []},
+  proxy_headers: [{"proxy-authorization", "Basic " <> Base.encode64("user:pass")}]
 ```
 
 ## Runtime overrides
@@ -54,9 +58,88 @@ config = Tinkex.Config.new(
   telemetry_enabled?: false,
   dump_headers?: true,
   log_level: :debug,
-  tags: ["staging", "canary"]
+  tags: ["staging", "canary"],
+  proxy: "http://user:pass@proxy.example.com:8080"
 )
 ```
+
+## Proxy configuration
+
+Tinkex supports HTTP/HTTPS proxies for all network connections. Proxy configuration can be provided through environment variables, application config, or runtime options.
+
+### Environment variable configuration
+
+Set the `TINKEX_PROXY` environment variable to a proxy URL:
+
+```bash
+# Without authentication
+export TINKEX_PROXY="http://proxy.company.com:8080"
+
+# With authentication (credentials will be converted to proxy-authorization header)
+export TINKEX_PROXY="http://user:pass@proxy.company.com:8080"
+
+# HTTPS proxy
+export TINKEX_PROXY="https://secure-proxy.company.com:443"
+```
+
+For custom proxy headers (e.g., non-Basic authentication):
+
+```bash
+export TINKEX_PROXY_HEADERS='[["proxy-authorization", "Bearer token123"], ["custom-header", "value"]]'
+```
+
+### Application config
+
+Configure proxy settings in your application config:
+
+```elixir
+# config/config.exs
+config :tinkex,
+  proxy: {:http, "proxy.company.com", 8080, []},
+  proxy_headers: [{"proxy-authorization", "Basic " <> Base.encode64("user:pass")}]
+```
+
+### Runtime configuration
+
+Override proxy settings at runtime when creating a config:
+
+```elixir
+# String URL format (recommended for simplicity)
+config = Tinkex.Config.new(
+  api_key: "your-key",
+  proxy: "http://user:pass@proxy.example.com:8080"
+)
+
+# Tuple format (for advanced use cases)
+config = Tinkex.Config.new(
+  api_key: "your-key",
+  proxy: {:http, "proxy.example.com", 8080, []},
+  proxy_headers: [{"proxy-authorization", "Basic abc123"}]
+)
+```
+
+### Proxy format
+
+Proxy can be specified in two formats:
+
+1. **URL string**: `"http://proxy.example.com:8080"` or `"http://user:pass@proxy.example.com:8080"`
+   - Scheme must be `http` or `https`
+   - Port is optional (defaults to 80 for http, 443 for https)
+   - Credentials in URL are automatically converted to `proxy-authorization` header
+
+2. **Tuple format**: `{:http | :https, host :: String.t(), port :: 1..65535, opts :: keyword()}`
+   - More control over connection options
+   - Use with `proxy_headers` for custom authentication
+
+### How it works
+
+Proxy configuration is passed to Finch's connection pool via the `:conn_opts` option. The proxy settings apply to all HTTP connections made through the Tinkex SDK, including:
+
+- Sampling requests
+- Training operations
+- Checkpoint downloads
+- Session management
+- Telemetry and metrics
 
 ## Redaction and logging
 

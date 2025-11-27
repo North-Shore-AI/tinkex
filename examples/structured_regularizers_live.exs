@@ -16,7 +16,7 @@ defmodule Tinkex.Examples.StructuredRegularizersLive do
   @await_timeout 120_000
 
   alias Tinkex.Error
-  alias Tinkex.Types.{RegularizerSpec, TensorData}
+  alias Tinkex.Types.TensorData
 
   def run do
     {:ok, _} = Application.ensure_all_started(:tinkex)
@@ -86,55 +86,34 @@ defmodule Tinkex.Examples.StructuredRegularizersLive do
   end
 
   defp run_custom_loss_with_regularizers(training, datum) do
-    IO.puts("\n--- Defining Regularizers ---\n")
+    IO.puts("\n--- Defining Custom Loss + Regularizers ---\n")
 
-    # L1 Sparsity - encourages sparse activations
-    l1_regularizer =
-      RegularizerSpec.new(%{
-        fn: fn _data, logprobs ->
-          l1_loss = Nx.sum(Nx.abs(logprobs))
-          {l1_loss, %{}}
-        end,
-        weight: 0.01,
-        name: "l1_sparsity"
-      })
+    loss_fn = fn _data, [logprobs] ->
+      base = Nx.negate(Nx.mean(logprobs))
+      l1 = Nx.multiply(0.01, Nx.sum(Nx.abs(logprobs)))
+      probs = Nx.exp(logprobs)
+      entropy = Nx.sum(Nx.multiply(probs, logprobs))
+      entropy_term = Nx.multiply(0.001, entropy)
 
-    IO.puts("L1 Sparsity: weight=#{l1_regularizer.weight}")
+      total =
+        base
+        |> Nx.add(l1)
+        |> Nx.add(entropy_term)
 
-    # Entropy - encourages diversity
-    entropy_regularizer =
-      RegularizerSpec.new(%{
-        fn: fn _data, logprobs ->
-          probs = Nx.exp(logprobs)
-          neg_entropy = Nx.sum(Nx.multiply(probs, logprobs))
-          {neg_entropy, %{}}
-        end,
-        weight: 0.001,
-        name: "entropy"
-      })
+      metrics = %{
+        "base_nll" => base,
+        "l1" => l1,
+        "entropy" => entropy_term,
+        "custom_perplexity" => Nx.exp(base)
+      }
 
-    IO.puts("Entropy: weight=#{entropy_regularizer.weight}")
-
-    regularizers = [l1_regularizer, entropy_regularizer]
-
-    # Base loss function
-    base_loss_fn = fn _data, logprobs ->
-      nll = Nx.negate(Nx.mean(logprobs))
-      {nll, %{}}
+      {total, metrics}
     end
 
     IO.puts("\n--- Running forward_backward_custom (Live API) ---\n")
     start_time = System.monotonic_time(:millisecond)
 
-    # This hits the real Tinker API!
-    {:ok, task} =
-      Tinkex.TrainingClient.forward_backward_custom(
-        training,
-        [datum],
-        base_loss_fn,
-        regularizers: regularizers,
-        track_grad_norms: true
-      )
+    {:ok, task} = Tinkex.TrainingClient.forward_backward_custom(training, [datum], loss_fn)
 
     case Task.await(task, @await_timeout) do
       {:ok, output} ->
@@ -152,31 +131,11 @@ defmodule Tinkex.Examples.StructuredRegularizersLive do
   defp display_results(output, duration_ms) do
     IO.puts("Completed in #{duration_ms}ms\n")
 
-    IO.puts("=== Results ===")
-    IO.puts("Total Loss: #{Float.round(output.loss_total, 6)}")
-    IO.puts("Base Loss: #{Float.round(output.base_loss.value, 6)}")
-    IO.puts("Regularizer Total: #{Float.round(output.regularizer_total, 6)}")
-
-    if output.total_grad_norm do
-      IO.puts("Total Grad Norm: #{Float.round(output.total_grad_norm, 6)}")
-    end
-
-    IO.puts("\n--- Per-Regularizer Breakdown ---")
-
-    for {name, reg} <- output.regularizers do
-      IO.puts("\n#{name}:")
-      IO.puts("  value: #{Float.round(reg.value, 6)}")
-      IO.puts("  weight: #{reg.weight}")
-      IO.puts("  contribution: #{Float.round(reg.contribution, 6)}")
-      if reg.grad_norm, do: IO.puts("  grad_norm: #{Float.round(reg.grad_norm, 6)}")
-    end
-
-    IO.puts("\n--- JSON Output ---")
-    json = Jason.encode!(output, pretty: true)
-    IO.puts(String.slice(json, 0, 800) <> "\n...")
+    IO.puts("=== Metrics ===")
+    Enum.each(output.metrics, fn {k, v} -> IO.puts("#{k}: #{Float.round(v, 6)}") end)
 
     IO.puts("\n================================================================================")
-    IO.puts("Success! Custom loss with regularizers computed via live Tinker API.")
+    IO.puts("Success! Custom loss with regularizer terms computed via live Tinker API.")
     IO.puts("================================================================================")
   end
 

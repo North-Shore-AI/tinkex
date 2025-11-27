@@ -165,6 +165,28 @@ clients =
   |> Enum.reject(&is_nil/1)
 ```
 
+**Training client async creation:**
+
+```elixir
+# Create training clients asynchronously
+{:ok, service} = Tinkex.ServiceClient.start_link(config: config)
+
+# Async LoRA training client
+task = Tinkex.ServiceClient.create_lora_training_client_async(
+  service,
+  "meta-llama/Llama-3.1-8B",
+  rank: 32
+)
+{:ok, training_client} = Task.await(task, 30_000)
+
+# Async training client from checkpoint
+task = Tinkex.ServiceClient.create_training_client_from_state_async(
+  service,
+  "tinker://run-123/weights/0001"
+)
+{:ok, restored_client} = Task.await(task, 60_000)
+```
+
 See `examples/async_client_creation.exs` for a complete runnable example.
 
 ## Queue State Telemetry
