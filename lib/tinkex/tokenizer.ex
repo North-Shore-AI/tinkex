@@ -14,6 +14,8 @@ defmodule Tinkex.Tokenizer do
 
   @tokenizer_table :tinkex_tokenizers
   @llama3_tokenizer "baseten/Meta-Llama-3-tokenizer"
+  @kimi_tokenizer "moonshotai/Kimi-K2-Thinking"
+  @kimi_revision "612681931a8c906ddb349f8ad0f582cb552189cd"
 
   @typedoc "Identifier for a tokenizer (e.g., HuggingFace repo name)."
   @type tokenizer_id :: String.t()
@@ -64,9 +66,10 @@ defmodule Tinkex.Tokenizer do
         {:ok, tokenizer}
 
       [] ->
-        load_fun = Keyword.get(opts, :load_fun, &Tokenizer.from_pretrained/1)
+        load_fun = Keyword.get(opts, :load_fun, &default_load_fun/2)
+        load_opts = tokenizer_load_opts(tokenizer_id)
 
-        with {:ok, tokenizer} <- load_tokenizer(load_fun, tokenizer_id),
+        with {:ok, tokenizer} <- load_tokenizer(load_fun, tokenizer_id, load_opts),
              {:ok, cached} <- cache_tokenizer(tokenizer_id, tokenizer) do
           {:ok, cached}
         else
@@ -78,6 +81,11 @@ defmodule Tinkex.Tokenizer do
         end
     end
   end
+
+  defp default_load_fun(id, opts), do: Tokenizer.from_pretrained(id, opts)
+
+  defp tokenizer_load_opts(@kimi_tokenizer), do: [revision: @kimi_revision]
+  defp tokenizer_load_opts(_), do: []
 
   @doc """
   Encode text into token IDs using a cached tokenizer.
@@ -180,16 +188,24 @@ defmodule Tinkex.Tokenizer do
   end
 
   defp apply_tokenizer_heuristics(model_name) do
-    if String.contains?(model_name, "Llama-3") do
-      @llama3_tokenizer
-    else
-      model_name
+    cond do
+      String.starts_with?(model_name, "meta-llama/Llama-3") ->
+        @llama3_tokenizer
+
+      count_slashes(model_name) == 2 ->
+        [org, model | _variant] = String.split(model_name, "/", parts: 3)
+        "#{org}/#{model}"
+
+      true ->
+        model_name
     end
   end
 
-  defp load_tokenizer(load_fun, tokenizer_id) do
+  defp count_slashes(s), do: s |> String.graphemes() |> Enum.count(&(&1 == "/"))
+
+  defp load_tokenizer(load_fun, tokenizer_id, load_opts) do
     try do
-      case load_fun.(tokenizer_id) do
+      case load_fun.(tokenizer_id, load_opts) do
         {:ok, tokenizer} -> {:ok, tokenizer}
         {:error, reason} -> {:error, reason}
         other -> {:error, {:unexpected_load_result, other}}

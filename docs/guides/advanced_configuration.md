@@ -674,7 +674,7 @@ case Tinkex.SamplingClient.sample(sampler, prompt, params) do
   {:ok, task} ->
     case Task.await(task, 120_000) do
       {:ok, response} ->
-        process_samples(response.samples)
+        process_sequences(response.sequences)
 
       {:error, %Tinkex.Error{code: :timeout}} ->
         Logger.error("Request timed out")

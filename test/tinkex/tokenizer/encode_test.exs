@@ -41,7 +41,7 @@ defmodule Tinkex.Tokenizer.EncodeTest do
 
   test "get_tokenizer_id applies Llama-3 hack" do
     assert "baseten/Meta-Llama-3-tokenizer" ==
-             Tokenizer.get_tokenizer_id("Llama-3-8B-Instruct")
+             Tokenizer.get_tokenizer_id("meta-llama/Llama-3-8B-Instruct")
   end
 
   @tag :network
@@ -54,9 +54,9 @@ defmodule Tinkex.Tokenizer.EncodeTest do
       end
     end)
 
-    load_fun = fn id ->
+    load_fun = fn id, opts ->
       Agent.update(counter, &(&1 + 1))
-      HFTokenizer.from_pretrained(id)
+      HFTokenizer.from_pretrained(id, opts)
     end
 
     model_name = "gpt2"

@@ -35,8 +35,7 @@ config = Tinkex.Config.new(
 )
 
 {:ok, service} = Tinkex.ServiceClient.start_link(config: config)
-{:ok, training} = Tinkex.ServiceClient.create_lora_training_client(service,
-  base_model: "meta-llama/Llama-3.1-8B",
+{:ok, training} = Tinkex.ServiceClient.create_lora_training_client(service, "meta-llama/Llama-3.1-8B",
   lora_config: %Tinkex.Types.LoraConfig{rank: 16}
 )
 
@@ -88,8 +87,7 @@ config = Tinkex.Config.new(
 ### 2. Create a Training Client
 
 ```elixir
-{:ok, training} = Tinkex.ServiceClient.create_lora_training_client(service,
-  base_model: "meta-llama/Llama-3.1-8B",
+{:ok, training} = Tinkex.ServiceClient.create_lora_training_client(service, "meta-llama/Llama-3.1-8B",
   lora_config: %Tinkex.Types.LoraConfig{rank: 16}
 )
 ```
@@ -732,7 +730,7 @@ defmodule ForwardInferenceExample do
 
     {:ok, training} = Tinkex.ServiceClient.create_lora_training_client(
       service,
-      base_model: "meta-llama/Llama-3.1-8B",
+      "meta-llama/Llama-3.1-8B",
       lora_config: %Tinkex.Types.LoraConfig{rank: 16}
     )
 

@@ -6,13 +6,42 @@ defmodule Tinkex.Application do
   the default base URL, and supervises client-facing processes. Additional pools
   can be started in the host application if multiple tenants need isolated pool
   sizing.
+
+  ## Pool Configuration (Python Parity)
+
+  Python SDK uses `httpx.Limits(max_connections=1000, max_keepalive_connections=20)`.
+  Tinkex configures Finch pools to approximate these limits:
+
+  - `pool_size` - connections per pool (default: 50, env: `TINKEX_POOL_SIZE`)
+  - `pool_count` - number of pools (default: 20, env: `TINKEX_POOL_COUNT`)
+  - Total connections = pool_size * pool_count = 1000 (matching Python's max_connections)
+
+  Override via application config or environment variables:
+
+      # config.exs
+      config :tinkex,
+        pool_size: 100,
+        pool_count: 10
+
+      # Environment variables
+      export TINKEX_POOL_SIZE=100
+      export TINKEX_POOL_COUNT=10
   """
 
   use Application
 
+  alias Tinkex.Env
+
+  # Python SDK parity: max_connections=1000, max_keepalive_connections=20
+  # Finch: size=50, count=20 gives 50*20=1000 total connections per destination
+  @default_pool_size 50
+  @default_pool_count 20
+
   @impl true
   def start(_type, _args) do
     ensure_ets_tables()
+
+    env = Env.snapshot()
 
     enable_http_pools? = Application.get_env(:tinkex, :enable_http_pools, true)
     heartbeat_interval_ms = Application.get_env(:tinkex, :heartbeat_interval_ms, 10_000)
@@ -27,10 +56,14 @@ defmodule Tinkex.Application do
         "https://tinker.thinkingmachines.dev/services/tinker-prod"
       )
 
+    # Pool configuration: env > app config > defaults (Python parity defaults)
+    pool_size = env.pool_size || Application.get_env(:tinkex, :pool_size, @default_pool_size)
+    pool_count = env.pool_count || Application.get_env(:tinkex, :pool_count, @default_pool_count)
+
     destination = Tinkex.PoolKey.destination(base_url)
 
     children =
-      maybe_add_http_pool(enable_http_pools?, destination) ++
+      maybe_add_http_pool(enable_http_pools?, destination, pool_size, pool_count) ++
         base_children(heartbeat_interval_ms, heartbeat_warning_after_ms)
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Tinkex.Supervisor)
@@ -89,15 +122,34 @@ defmodule Tinkex.Application do
     ]
   end
 
-  defp maybe_add_http_pool(false, _destination), do: []
+  defp maybe_add_http_pool(false, _destination, _pool_size, _pool_count), do: []
 
-  defp maybe_add_http_pool(true, _destination) do
+  defp maybe_add_http_pool(true, _destination, pool_size, pool_count) do
+    # Python SDK parity: max_connections=1000, max_keepalive_connections=20
+    # Finch pool config: size=connections per pool, count=number of pools
+    # Total connections per destination = size * count
     [
       {Finch,
        name: Tinkex.HTTP.Pool,
        pools: %{
-         default: [protocols: [:http2, :http1]]
+         default: [
+           protocols: [:http2, :http1],
+           size: pool_size,
+           count: pool_count
+         ]
        }}
     ]
   end
+
+  @doc """
+  Returns the default pool size.
+  """
+  @spec default_pool_size() :: pos_integer()
+  def default_pool_size, do: @default_pool_size
+
+  @doc """
+  Returns the default pool count.
+  """
+  @spec default_pool_count() :: pos_integer()
+  def default_pool_count, do: @default_pool_count
 end

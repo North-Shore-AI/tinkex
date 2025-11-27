@@ -4,7 +4,7 @@ defmodule Tinkex.Types.SampleRequestTest do
   alias Tinkex.Types.{SampleRequest, ModelInput, SamplingParams}
 
   describe "JSON encoding" do
-    test "encodes prompt_logprobs nil as null" do
+    test "omits prompt_logprobs when nil" do
       req = %SampleRequest{
         num_samples: 1,
         prompt: ModelInput.from_ints([1, 2, 3]),
@@ -16,9 +16,9 @@ defmodule Tinkex.Types.SampleRequestTest do
       json = Jason.encode!(req)
       decoded = Jason.decode!(json)
 
-      # nil should become null in JSON, not be omitted
-      assert Map.has_key?(decoded, "prompt_logprobs")
-      assert decoded["prompt_logprobs"] == nil
+      # nil should be omitted from JSON, not encoded as null
+      # (server rejects null values for prompt_logprobs)
+      refute Map.has_key?(decoded, "prompt_logprobs")
     end
 
     test "encodes prompt_logprobs false correctly" do

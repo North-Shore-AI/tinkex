@@ -685,8 +685,7 @@ alias Tinkex.Types.{Datum, ModelInput, RegularizerSpec}
 # 1. Create training client
 config = Tinkex.Config.new(api_key: System.fetch_env!("TINKER_API_KEY"))
 {:ok, service} = Tinkex.ServiceClient.start_link(config: config)
-{:ok, training} = Tinkex.ServiceClient.create_lora_training_client(service,
-  base_model: "meta-llama/Llama-3.1-8B",
+{:ok, training} = Tinkex.ServiceClient.create_lora_training_client(service, "meta-llama/Llama-3.1-8B",
   lora_config: %Tinkex.Types.LoraConfig{rank: 16}
 )
 

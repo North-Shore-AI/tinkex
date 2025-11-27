@@ -2,6 +2,91 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.11] - 2025-11-27
+
+Achieves full behavioral parity with Python SDK (tinker v1.x) across retry semantics, HTTP connection pooling, and missing type definitions.
+
+### Breaking Changes
+
+- **`ServiceClient.create_lora_training_client/2` → `/3`**: `base_model` is now a required second argument instead of being passed in opts:
+  ```elixir
+  # Before (0.1.10)
+  create_lora_training_client(service, base_model: "meta-llama/Llama-3.1-8B")
+
+  # After (0.1.11)
+  create_lora_training_client(service, "meta-llama/Llama-3.1-8B", opts)
+  ```
+
+- **`TrainingClient.save_weights_for_sampler/2` → `/3`**: `name` is now a required second argument mapping to the server `path` field:
+  ```elixir
+  # Before (0.1.10)
+  save_weights_for_sampler(training, name: "checkpoint-001")
+
+  # After (0.1.11)
+  save_weights_for_sampler(training, "checkpoint-001", opts)
+  ```
+
+### Added
+
+#### Python SDK Retry Parity
+- HTTP retry now matches Python `_base_client.py` behavior:
+  - Retries on 408/409/429/5xx (added 409 Conflict support)
+  - Uses Python jitter formula (0.75–1.0 range) instead of ±25%
+  - Caps delay at 10s instead of 8s
+  - Removes 30s wall-clock timeout; `max_retries` governs retry attempts
+- New `Tinkex.API.RetryConfig` module with Python parity formulas
+
+#### HTTP Pool Parity
+- Pool defaults now align with Python's `httpx.Limits`:
+  - `pool_size: 50`, `pool_count: 20` for 1000 total connections
+  - Matches Python `max_connections=1000`
+- `Tinkex.Env.pool_size/1` and `pool_count/1` for `TINKEX_POOL_SIZE`/`TINKEX_POOL_COUNT` env vars
+- `Tinkex.Application.default_pool_size/0` and `default_pool_count/0` exposed; `Application.start/2` respects pool config from env or app config
+
+#### Missing Type Structs
+- `FutureRetrieveRequest` - request type for future polling
+- `RequestFailedResponse` - structured error response type
+- `SessionHeartbeatRequest` / `SessionHeartbeatResponse` - heartbeat wire types
+- `TelemetryResponse` - telemetry send response type
+- `Tinkex.Types.TypeAliases` module for `ModelInputChunk`, `LossFnInputs`, `LossFnOutput` union types
+
+#### API Helpers
+- `Tinkex.API.Helpers.with_raw_response/1` - Python-style raw response access pattern
+- `Tinkex.API.Helpers.with_streaming_response/1` - Python-style streaming response access pattern
+
+#### TensorDtype Helpers
+- `TensorDtype.from_nx_type/1` now emits warnings for float64→float32 downcast and u64→int64 overflow
+- `TensorDtype.from_nx_type_quiet/1` - silent conversion without warnings
+- `TensorDtype.check_precision_loss/1` - explicit precision loss checking
+
+### Fixed
+
+- **Sampling nil-field fix**: `SampleRequest` JSON encoder now omits `nil` for optional fields like `prompt_logprobs` instead of encoding as `null` (server rejects null). Uses `drop_nil?: true` in Transform layer.
+- **Tokenizer resolution**: Now strips `/variant` suffix from three-part model names; added Kimi K2 tokenizer with pinned revision
+- **CLI checkpoint command**: Generates default checkpoint names from `base_model` when `--name` not provided
+- **Example bug fixes**:
+  - Fixed `.samples` → `.sequences` in examples and docs (field was renamed in response type)
+  - Fixed `prompt.tokens` → `prompt.chunks[0].tokens` access pattern in `telemetry_live.exs`
+
+### Changed
+
+- Training loop example adds detailed step timing and clearer output formatting
+
+### Documentation
+
+- Updated all guides to use new `create_lora_training_client/3` and `save_weights_for_sampler/3` signatures
+- Added `docs/20251126/gaps_05/gap-analysis-python-to-elixir.md`: comprehensive gap analysis showing feature-complete parity with Python SDK
+- Added `docs/20251126/gaps_05/remaining_gaps_fix_plan.md`: concrete remaining gaps and fixes to reach 100% parity
+- Updated version references from 0.1.10 to 0.1.11 in README and mix.exs
+
+### Tests
+
+- Added `test/tinkex/api/retry_parity_test.exs`: validates Python retry formula, jitter range (0.75–1.0), 10s delay cap, and 409 retry support
+- Added `test/tinkex/pool_config_parity_test.exs`: verifies `pool_size × pool_count = 1000` matching Python `max_connections`
+- Added `test/tinkex/types/missing_types_parity_test.exs`: round-trip tests for new type structs
+- Added `test/tinkex/api/helpers_test.exs`: `with_raw_response` and `with_streaming_response` helpers
+- Updated integration tests for new TrainingClient API signatures
+
 ## [0.1.10] - 2025-11-27
 
 ### Added

@@ -32,7 +32,7 @@ defmodule Tinkex.Examples.TelemetryLive do
 
     logger_id = Tinkex.Telemetry.attach_logger(level: :info)
 
-    :ok =
+    true =
       Tinkex.Telemetry.Reporter.log(reporter, "example.start", %{
         "base_model" => base_model,
         "prompt" => prompt_text
@@ -50,10 +50,13 @@ defmodule Tinkex.Examples.TelemetryLive do
 
     IO.inspect(response.sequences, label: "Sampled sequences")
 
-    :ok =
+    [first_chunk | _] = prompt.chunks
+    token_count = length(first_chunk.tokens)
+
+    true =
       Tinkex.Telemetry.Reporter.log(reporter, "example.complete", %{
         "model" => base_model,
-        "tokens" => length(prompt.tokens)
+        "tokens" => token_count
       })
 
     :ok = Tinkex.Telemetry.Reporter.flush(reporter, sync?: true)

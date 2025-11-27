@@ -3,6 +3,7 @@ defmodule Tinkex.Examples.TrainingLoop do
 
   @default_base_url "https://tinker.thinkingmachines.dev/services/tinker-prod"
   @default_model "meta-llama/Llama-3.1-8B"
+  @default_prompt "Fine-tuning sample prompt"
   @await_timeout 60_000
 
   alias Tinkex.Error
@@ -14,18 +15,32 @@ defmodule Tinkex.Examples.TrainingLoop do
     api_key = fetch_env!("TINKER_API_KEY")
     base_url = System.get_env("TINKER_BASE_URL", @default_base_url)
     base_model = System.get_env("TINKER_BASE_MODEL", @default_model)
-    prompt = System.get_env("TINKER_PROMPT", "Fine-tuning sample prompt")
+    prompt = System.get_env("TINKER_PROMPT", @default_prompt)
     sample_after? = System.get_env("TINKER_SAMPLE_AFTER_TRAIN", "0") not in ["0", "false", nil]
     sample_prompt = System.get_env("TINKER_SAMPLE_PROMPT", "Hello from fine-tuned weights!")
 
+    IO.puts("----------------------------------------")
     IO.puts("Base URL: #{base_url}")
     IO.puts("Base model: #{base_model}")
+    IO.puts("Prompt: '#{prompt}'")
+    IO.puts("Sample after training: #{sample_after?}")
+    IO.puts("")
 
     config = Tinkex.Config.new(api_key: api_key, base_url: base_url)
 
-    with {:ok, service} <- Tinkex.ServiceClient.start_link(config: config),
-         {:ok, training} <- create_training_client(service, base_model),
-         {:ok, model_input} <- build_model_input(prompt, base_model, training) do
+    with {:ok, service} <-
+           timed_step("creating ServiceClient", fn ->
+             Tinkex.ServiceClient.start_link(config: config)
+           end),
+         {:ok, training} <-
+           timed_step("creating TrainingClient (LoRA rank=16)", fn ->
+             IO.puts("[note] this may take 30-120s on first run (model loading)...")
+             create_training_client(service, base_model)
+           end),
+         {:ok, model_input} <-
+           timed_step("building model input", fn ->
+             build_model_input(prompt, base_model, training)
+           end) do
       run_training_steps(service, training, model_input, base_model, sample_after?, sample_prompt)
     else
       {:error, %Error{} = error} ->
@@ -36,15 +51,37 @@ defmodule Tinkex.Examples.TrainingLoop do
     end
   end
 
+  defp timed_step(label, fun) do
+    IO.puts("[step] #{label}...")
+    start = System.monotonic_time(:millisecond)
+    result = fun.()
+    duration = System.monotonic_time(:millisecond) - start
+    IO.puts("[step] #{label} completed in #{format_duration(duration)}")
+    result
+  end
+
+  defp format_duration(ms) when ms < 1000, do: "#{ms}ms"
+  defp format_duration(ms), do: "#{Float.round(ms / 1000, 2)}s"
+
   defp create_training_client(service, base_model) do
-    Tinkex.ServiceClient.create_lora_training_client(service,
-      base_model: base_model,
+    Tinkex.ServiceClient.create_lora_training_client(service, base_model,
       lora_config: %Tinkex.Types.LoraConfig{rank: 16}
     )
   end
 
   defp build_model_input(prompt, base_model, training) do
-    Tinkex.Types.ModelInput.from_text(prompt, model_name: base_model, training_client: training)
+    case Tinkex.Types.ModelInput.from_text(prompt,
+           model_name: base_model,
+           training_client: training
+         ) do
+      {:ok, model_input} ->
+        tokens = first_chunk_tokens(model_input)
+        IO.puts("[step] got #{length(tokens)} tokens: #{inspect(tokens)}")
+        {:ok, model_input}
+
+      error ->
+        error
+    end
   end
 
   defp run_training_steps(
@@ -60,7 +97,6 @@ defmodule Tinkex.Examples.TrainingLoop do
     datum =
       Tinkex.Types.Datum.new(%{
         model_input: model_input,
-        # Server expects loss_fn_inputs values as tensors with dtype/shape.
         loss_fn_inputs: %{
           target_tokens: to_tensor(target_tokens, :int64),
           weights: to_tensor(List.duplicate(1.0, length(target_tokens)), :float32)
@@ -69,6 +105,10 @@ defmodule Tinkex.Examples.TrainingLoop do
 
     loop_start = System.monotonic_time(:millisecond)
 
+    # Forward-backward
+    IO.puts("[step] running forward_backward...")
+    fb_start = System.monotonic_time(:millisecond)
+
     fb_task =
       start_task(
         Tinkex.TrainingClient.forward_backward(training, [datum], :cross_entropy),
@@ -76,7 +116,13 @@ defmodule Tinkex.Examples.TrainingLoop do
       )
 
     fb_output = await_task(fb_task, "forward_backward")
-    IO.inspect(fb_output.metrics, label: "forward_backward metrics")
+    fb_duration = System.monotonic_time(:millisecond) - fb_start
+    IO.puts("[step] forward_backward completed in #{format_duration(fb_duration)}")
+    IO.puts("[metrics] forward_backward: #{inspect(fb_output.metrics)}")
+
+    # Optim step
+    IO.puts("[step] running optim_step...")
+    optim_start = System.monotonic_time(:millisecond)
 
     optim_task =
       start_task(
@@ -85,23 +131,38 @@ defmodule Tinkex.Examples.TrainingLoop do
       )
 
     optim_output = await_task(optim_task, "optim_step")
-    IO.inspect(optim_output.metrics, label: "optim_step metrics")
+    optim_duration = System.monotonic_time(:millisecond) - optim_start
+    IO.puts("[step] optim_step completed in #{format_duration(optim_duration)}")
+    # Note: optim_step doesn't return metrics - it just applies gradients to weights
+    optim_metrics_str =
+      if optim_output.metrics,
+        do: inspect(optim_output.metrics),
+        else: "(none - optimizer doesn't compute metrics)"
+
+    IO.puts("[metrics] optim_step: #{optim_metrics_str}")
+
+    # Save weights for sampler
+    IO.puts("[step] saving weights for sampler...")
+    save_start = System.monotonic_time(:millisecond)
 
     save_task =
       start_task(
-        Tinkex.TrainingClient.save_weights_for_sampler(training),
+        Tinkex.TrainingClient.save_weights_for_sampler(training, "sampler-weights"),
         "save_weights_for_sampler"
       )
 
     save_result = await_task(save_task, "save_weights_for_sampler")
-    IO.inspect(save_result, label: "save_weights_for_sampler response")
+    save_duration = System.monotonic_time(:millisecond) - save_start
+    IO.puts("[step] save_weights_for_sampler completed in #{format_duration(save_duration)}")
+    IO.puts("[result] save_weights: #{inspect(save_result)}")
+
+    loop_duration = System.monotonic_time(:millisecond) - loop_start
+    IO.puts("")
+    IO.puts("[done] Training loop finished in #{format_duration(loop_duration)}")
 
     if sample_after? do
       sample_with_saved_weights(service, save_result, base_model, sample_prompt)
     end
-
-    duration_ms = System.monotonic_time(:millisecond) - loop_start
-    IO.puts("Training loop finished in #{duration_ms} ms")
   end
 
   defp start_task(result, label) do
@@ -143,13 +204,15 @@ defmodule Tinkex.Examples.TrainingLoop do
   end
 
   defp halt_with_error(prefix, %Error{} = error) do
-    IO.puts(:stderr, "#{prefix}: #{Error.format(error)}")
+    IO.puts(:stderr, "")
+    IO.puts(:stderr, "[error] #{prefix}: #{Error.format(error)}")
     if error.data, do: IO.puts(:stderr, "Error data: #{inspect(error.data)}")
     System.halt(1)
   end
 
   defp halt(message) do
-    IO.puts(:stderr, message)
+    IO.puts(:stderr, "")
+    IO.puts(:stderr, "[error] #{message}")
     System.halt(1)
   end
 
@@ -176,7 +239,7 @@ defmodule Tinkex.Examples.TrainingLoop do
         do_sample(sampler, base_model, sample_prompt)
 
       {:error, reason} ->
-        IO.puts(:stderr, "Skipping sampling; failed to create sampler: #{inspect(reason)}")
+        IO.puts(:stderr, "[warn] Skipping sampling; failed to create sampler: #{inspect(reason)}")
     end
   end
 
@@ -187,7 +250,6 @@ defmodule Tinkex.Examples.TrainingLoop do
       if model_path do
         [model_path: model_path, base_model: base_model]
       else
-        # Fall back to base_model-only sampler if no path returned.
         [base_model: base_model]
       end
       |> maybe_put_sampling_session_seq_id()
@@ -199,11 +261,11 @@ defmodule Tinkex.Examples.TrainingLoop do
   end
 
   defp maybe_put_sampling_session_seq_id(opts) do
-    # Use first sampler seq_id for simplicity.
     Keyword.put_new(opts, :sampling_session_seq_id, 0)
   end
 
   defp do_sample(sampler, base_model, prompt) do
+    IO.puts("[step] sampling from saved weights...")
     {:ok, model_input} = Tinkex.Types.ModelInput.from_text(prompt, model_name: base_model)
     params = %Tinkex.Types.SamplingParams{max_tokens: 32, temperature: 0.7}
 
@@ -215,10 +277,10 @@ defmodule Tinkex.Examples.TrainingLoop do
          {:ok, response} <- Task.await(task, 30_000) do
       [seq | _] = response.sequences
       text = decode(seq.tokens, base_model)
-      IO.puts("Sample from saved weights: #{text}")
+      IO.puts("[sample] #{text}")
     else
       {:error, error} ->
-        IO.puts(:stderr, "Sampling after train failed: #{inspect(error)}")
+        IO.puts(:stderr, "[warn] Sampling after train failed: #{inspect(error)}")
     end
   end
 

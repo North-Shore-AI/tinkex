@@ -18,8 +18,8 @@ defmodule Tinkex.TrainingClientTokenizerTest do
     end
   end
 
-  # Mock load function that returns our test tokenizer
-  defp mock_load_fun(tokenizer_id) do
+  # Mock load function that returns our test tokenizer (arity 2 for opts)
+  defp mock_load_fun(tokenizer_id, _opts) do
     {:ok, %MockTokenizer{id: tokenizer_id}}
   end
 
@@ -49,7 +49,7 @@ defmodule Tinkex.TrainingClientTokenizerTest do
       result =
         TrainingClient.get_tokenizer(client,
           info_fun: info_fun,
-          load_fun: &mock_load_fun/1
+          load_fun: &mock_load_fun/2
         )
 
       assert {:ok, %MockTokenizer{id: ^unique_model}} = result
@@ -67,7 +67,7 @@ defmodule Tinkex.TrainingClientTokenizerTest do
       result =
         TrainingClient.get_tokenizer(client,
           info_fun: info_fun,
-          load_fun: &mock_load_fun/1
+          load_fun: &mock_load_fun/2
         )
 
       assert {:ok, %MockTokenizer{id: ^unique_tokenizer}} = result
@@ -76,7 +76,7 @@ defmodule Tinkex.TrainingClientTokenizerTest do
     test "applies Llama-3 heuristic" do
       # Llama-3 model names should use the workaround tokenizer
       info_fun = fn _client ->
-        {:ok, mock_info_response("Meta-Llama-3-8B-Test")}
+        {:ok, mock_info_response("meta-llama/Llama-3-8B-Test")}
       end
 
       client = self()
@@ -84,7 +84,7 @@ defmodule Tinkex.TrainingClientTokenizerTest do
       result =
         TrainingClient.get_tokenizer(client,
           info_fun: info_fun,
-          load_fun: &mock_load_fun/1
+          load_fun: &mock_load_fun/2
         )
 
       # Should use the Llama-3 workaround tokenizer
@@ -110,7 +110,7 @@ defmodule Tinkex.TrainingClientTokenizerTest do
         {:ok, mock_info_response(unique_model)}
       end
 
-      load_fun = fn _id ->
+      load_fun = fn _id, _opts ->
         {:error, %Tinkex.Error{type: :validation, message: "Tokenizer not found"}}
       end
 
@@ -150,7 +150,7 @@ defmodule Tinkex.TrainingClientTokenizerTest do
       end
 
       # Create a load function that returns an error we can detect
-      load_fun = fn tokenizer_id ->
+      load_fun = fn tokenizer_id, _opts ->
         send(self(), {:load_called, tokenizer_id})
         {:error, %Tinkex.Error{type: :validation, message: "Test tokenizer not found"}}
       end
@@ -202,7 +202,7 @@ defmodule Tinkex.TrainingClientTokenizerTest do
       result =
         TrainingClient.get_tokenizer(client,
           info_fun: info_fun,
-          load_fun: &mock_load_fun/1
+          load_fun: &mock_load_fun/2
         )
 
       assert {:ok, %MockTokenizer{id: ^unique_model}} = result
@@ -224,7 +224,7 @@ defmodule Tinkex.TrainingClientTokenizerTest do
       result =
         TrainingClient.get_tokenizer(client,
           info_fun: info_fun,
-          load_fun: &mock_load_fun/1
+          load_fun: &mock_load_fun/2
         )
 
       assert {:ok, %MockTokenizer{id: ^unique_model}} = result
@@ -246,7 +246,7 @@ defmodule Tinkex.TrainingClientTokenizerTest do
       result =
         TrainingClient.get_tokenizer(client,
           info_fun: info_fun,
-          load_fun: &mock_load_fun/1
+          load_fun: &mock_load_fun/2
         )
 
       assert {:ok, %MockTokenizer{id: ^unique_model}} = result
@@ -262,7 +262,7 @@ defmodule Tinkex.TrainingClientTokenizerTest do
       result =
         TrainingClient.get_tokenizer(client,
           info_fun: info_fun,
-          load_fun: &mock_load_fun/1
+          load_fun: &mock_load_fun/2
         )
 
       assert {:ok, %MockTokenizer{id: "unknown"}} = result

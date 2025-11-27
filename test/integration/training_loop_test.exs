@@ -119,7 +119,7 @@ defmodule Tinkex.Integration.TrainingLoopTest do
     {:ok, service} = ServiceClient.start_link(config: config)
 
     {:ok, training} =
-      ServiceClient.create_lora_training_client(service, base_model: "integration-base")
+      ServiceClient.create_lora_training_client(service, "integration-base")
 
     data =
       Enum.map(1..130, fn idx ->
@@ -142,7 +142,7 @@ defmodule Tinkex.Integration.TrainingLoopTest do
     assert {:ok, %OptimStepResponse{} = optim_result} = Task.await(optim_task, 5_000)
     assert optim_result.metrics["lr"] == 0.02
 
-    {:ok, save_task} = TrainingClient.save_weights_for_sampler(training, path: "/tmp/mock.bin")
+    {:ok, save_task} = TrainingClient.save_weights_for_sampler(training, "/tmp/mock.bin")
 
     assert {:ok, %{"path" => "/weights/mock.bin", "status" => "saved"}} =
              Task.await(save_task, 5_000)

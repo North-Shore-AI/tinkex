@@ -331,7 +331,7 @@ defmodule Tinkex.TrainingClientTest do
              Task.await(task, 5_000)
   end
 
-  test "save_weights_for_sampler sets sampling_session_seq_id when not provided", %{
+  test "save_weights_for_sampler sends path from name argument", %{
     bypass: bypass,
     config: config
   } do
@@ -345,7 +345,8 @@ defmodule Tinkex.TrainingClientTest do
       {:ok, body, conn} = Plug.Conn.read_body(conn)
       payload = Jason.decode!(body)
 
-      assert payload["sampling_session_seq_id"] == 0
+      # Name argument should be sent as path in the request
+      assert payload["path"] == "sampler-weights"
 
       conn
       |> Plug.Conn.put_resp_content_type("application/json")
@@ -360,7 +361,7 @@ defmodule Tinkex.TrainingClientTest do
         config: config
       )
 
-    {:ok, task} = TrainingClient.save_weights_for_sampler(client)
+    {:ok, task} = TrainingClient.save_weights_for_sampler(client, "sampler-weights")
 
     assert {:ok, %SaveWeightsForSamplerResponse{path: "tinker://samplers/ckpt-1"}} =
              Task.await(task, 5_000)

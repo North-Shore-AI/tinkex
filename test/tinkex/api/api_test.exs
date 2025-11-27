@@ -11,7 +11,22 @@ defmodule Tinkex.APITest do
 
   setup :setup_http_client
 
-  describe "post/3 retry logic" do
+  # Python parity: _base_client.py `_should_retry` retries on 408/409/429/5xx
+  describe "post/3 retry logic (Python parity)" do
+    @tag slow: true
+    test "retries on 409 conflict (Python parity)", %{bypass: bypass, config: config} do
+      # Python SDK retries on 409 (lock timeout) - _base_client.py line 725-727
+      counter =
+        stub_sequence(bypass, [
+          {409, %{error: "Conflict/lock timeout"}, []},
+          {200, %{result: "success"}, []}
+        ])
+
+      {:ok, result} = API.post("/test", %{}, config: config)
+      assert result["result"] == "success"
+      assert Agent.get(counter, & &1) == 2
+    end
+
     @tag slow: true
     test "retries on 5xx errors", %{bypass: bypass, config: config} do
       counter =

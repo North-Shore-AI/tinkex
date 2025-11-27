@@ -12,15 +12,15 @@ defmodule Tinkex.CLICheckpointTest do
       {:ok, {:service_stub, opts}}
     end
 
-    def create_lora_training_client(service, opts) do
-      send(self(), {:training_client_created, service, opts})
-      {:ok, {:training_stub, service, opts}}
+    def create_lora_training_client(service, base_model, opts \\ []) do
+      send(self(), {:training_client_created, service, base_model, opts})
+      {:ok, {:training_stub, service, base_model, opts}}
     end
   end
 
   defmodule TrainingStub do
-    def save_weights_for_sampler(training, opts) do
-      send(self(), {:save_weights_called, training, opts})
+    def save_weights_for_sampler(training, name, opts \\ []) do
+      send(self(), {:save_weights_called, training, name, opts})
 
       task =
         Task.async(fn ->
@@ -33,7 +33,7 @@ defmodule Tinkex.CLICheckpointTest do
   end
 
   defmodule ErrorTrainingStub do
-    def save_weights_for_sampler(_training, _opts) do
+    def save_weights_for_sampler(_training, _name, _opts \\ []) do
       task =
         Task.async(fn ->
           {:error,
@@ -108,12 +108,14 @@ defmodule Tinkex.CLICheckpointTest do
     refute output =~ "Saving weights"
 
     assert_receive {:service_started, _opts}
-    assert_receive {:training_client_created, {:service_stub, _}, training_opts}
+    assert_receive {:training_client_created, {:service_stub, _}, base_model, training_opts}
+
+    assert base_model == "Qwen/Qwen2.5-7B"
 
     assert %LoraConfig{rank: 8, train_mlp: true, train_attn: true, train_unembed: true} =
              training_opts[:lora_config]
 
-    assert_receive {:save_weights_called, {:training_stub, _, _}, save_opts}
+    assert_receive {:save_weights_called, {:training_stub, _, _, _}, _name, save_opts}
     assert Keyword.get(save_opts, :timeout) == 1000
   end
 

@@ -554,7 +554,7 @@ defmodule MyApp.AsyncSampling do
       |> Enum.map(fn {prompt, result} ->
         case result do
           {:ok, response} ->
-            text = hd(response.samples).text
+            text = hd(response.sequences).tokens
             Logger.info("Prompt: #{prompt}\nResponse: #{text}")
             {:ok, text}
 

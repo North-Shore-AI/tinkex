@@ -27,10 +27,7 @@ defmodule Tinkex.Examples.SaveWeightsAndSample do
     {:ok, service} = ServiceClient.start_link(config: config)
 
     {:ok, training} =
-      ServiceClient.create_lora_training_client(service,
-        base_model: base_model,
-        rank: lora_rank
-      )
+      ServiceClient.create_lora_training_client(service, base_model, rank: lora_rank)
 
     IO.puts("[save] saving weights and creating a SamplingClient (sync helper)...")
 
@@ -53,10 +50,10 @@ defmodule Tinkex.Examples.SaveWeightsAndSample do
          params <- %SamplingParams{max_tokens: max_tokens},
          {:ok, future} <- Tinkex.SamplingClient.sample(sampler, prompt, params),
          {:ok, resp} <- Task.await(future, 120_000) do
-      Enum.each(resp.samples, fn sample ->
+      Enum.each(resp.sequences, fn seq ->
         IO.puts("== SAMPLE ==")
 
-        case Tokenizer.decode(sample.tokens, base_model) do
+        case Tokenizer.decode(seq.tokens, base_model) do
           {:ok, text} -> IO.puts(text)
           {:error, err} -> IO.puts("decode error: #{inspect(err)}")
         end
