@@ -23,7 +23,9 @@ defmodule Tinkex.RestClient do
     CheckpointsListResponse,
     CheckpointArchiveUrlResponse,
     GetSessionResponse,
-    ListSessionsResponse
+    ListSessionsResponse,
+    TrainingRun,
+    TrainingRunsResponse
   }
 
   @type t :: %__MODULE__{
@@ -162,5 +164,44 @@ defmodule Tinkex.RestClient do
   @spec delete_checkpoint(t(), String.t()) :: {:ok, map()} | {:error, Tinkex.Error.t()}
   def delete_checkpoint(%__MODULE__{config: config}, checkpoint_path) do
     Rest.delete_checkpoint(config, checkpoint_path)
+  end
+
+  # Training run APIs
+
+  @doc """
+  Get a training run by ID.
+  """
+  @spec get_training_run(t(), String.t()) ::
+          {:ok, TrainingRun.t()} | {:error, Tinkex.Error.t()}
+  def get_training_run(%__MODULE__{config: config}, run_id) do
+    Rest.get_training_run(config, run_id)
+  end
+
+  @doc """
+  List training runs with pagination.
+  """
+  @spec list_training_runs(t(), keyword()) ::
+          {:ok, TrainingRunsResponse.t()} | {:error, Tinkex.Error.t()}
+  def list_training_runs(%__MODULE__{config: config}, opts \\ []) do
+    limit = Keyword.get(opts, :limit, 20)
+    offset = Keyword.get(opts, :offset, 0)
+
+    Rest.list_training_runs(config, limit, offset)
+  end
+
+  @doc """
+  Publish a checkpoint (make it public).
+  """
+  @spec publish_checkpoint(t(), String.t()) :: {:ok, map()} | {:error, Tinkex.Error.t()}
+  def publish_checkpoint(%__MODULE__{config: config}, checkpoint_path) do
+    Rest.publish_checkpoint(config, checkpoint_path)
+  end
+
+  @doc """
+  Unpublish a checkpoint (make it private).
+  """
+  @spec unpublish_checkpoint(t(), String.t()) :: {:ok, map()} | {:error, Tinkex.Error.t()}
+  def unpublish_checkpoint(%__MODULE__{config: config}, checkpoint_path) do
+    Rest.unpublish_checkpoint(config, checkpoint_path)
   end
 end

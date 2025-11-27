@@ -157,4 +157,45 @@ defmodule Tinkex.SamplingClientTest do
 
     assert entry1.rate_limiter == entry2.rate_limiter
   end
+
+  test "compute_logprobs requests prompt logprobs and returns values",
+       %{bypass: bypass, config: config} do
+    Bypass.expect(bypass, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+      case conn.request_path do
+        "/api/v1/create_sampling_session" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"sampling_session_id":"sample-logprobs"}))
+
+        "/api/v1/asample" ->
+          payload = Jason.decode!(body)
+          assert payload["prompt_logprobs"] == true
+          assert payload["sampling_params"]["max_tokens"] == 1
+          assert payload["num_samples"] == 1
+
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(
+            200,
+            ~s({"prompt_logprobs":[-0.5, null],"sequences":[{"tokens":[1]}],"type":"sample"})
+          )
+      end
+    end)
+
+    {:ok, client} =
+      SamplingClient.start_link(
+        session_id: "sess-logprobs",
+        sampling_client_id: 0,
+        base_model: "base",
+        config: config
+      )
+
+    prompt = ModelInput.from_ints([1, 2])
+
+    {:ok, task} = SamplingClient.compute_logprobs(client, prompt)
+
+    assert {:ok, [-0.5, nil]} = Task.await(task, 5_000)
+  end
 end

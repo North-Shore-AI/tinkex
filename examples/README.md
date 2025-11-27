@@ -13,6 +13,7 @@ The examples are organized by functionality and complexity, ranging from simple 
 - `forward_inference.exs` – forward-only pass returning logprobs for custom loss computation with Nx/EXLA
 - `structured_regularizers.exs` – composable regularizer pipeline demo with mock data (runs offline)
 - `structured_regularizers_live.exs` – custom loss with regularizers via live Tinker API
+- `live_capabilities_and_logprobs.exs` – live health/capabilities check plus prompt logprobs (requires API key)
 - `sessions_management.exs` – REST session listing and detail queries
 - `checkpoints_management.exs` – user checkpoint listing with metadata inspection
 - `checkpoint_download.exs` – archive discovery, download, and extraction with progress callbacks
@@ -144,6 +145,36 @@ This example demonstrates the forward-only API introduced in SDK version 0.1.4 f
 - Inference-only workflows that need logprobs
 - Building structured regularizer pipelines
 - Gradient computation in Elixir rather than on the server
+
+### live_capabilities_and_logprobs.exs
+
+This live demo probes server capabilities, checks health, and computes prompt logprobs via the new `SamplingClient.compute_logprobs/3` helper. It uses real network calls and therefore requires a valid API key.
+
+**Key Features:**
+- Retrieves supported models from `/api/v1/get_server_capabilities`
+- Performs a `/api/v1/healthz` readiness check
+- Spawns a ServiceClient + SamplingClient to compute prompt logprobs
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional)
+- `TINKER_BASE_MODEL` (optional, defaults to Llama-3.1-8B)
+- `TINKER_PROMPT` (optional, defaults to "Hello from Tinkex!")
+
+**Quickstart:**
+
+```bash
+export TINKER_API_KEY="your-api-key-here"
+# Optional:
+# export TINKER_BASE_URL="https://custom-endpoint"
+# export TINKER_BASE_MODEL="meta-llama/Llama-3.1-8B"
+# export TINKER_PROMPT="Hello world"
+mix run examples/live_capabilities_and_logprobs.exs
+# Or run the full suite (includes this demo last):
+examples/run_all.sh
+```
+
+Expected output includes supported models, `status: ok` for health, and a list of prompt logprobs.
 
 ### structured_regularizers.exs
 

@@ -245,14 +245,16 @@ defmodule Tinkex.API.RestTest do
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(
           200,
-          ~s({"id": "run-abc", "status": "completed", "base_model": "Qwen/Qwen2.5-7B"})
+          ~s({"training_run_id": "run-abc", "base_model": "Qwen/Qwen2.5-7B", "model_owner": "owner", "is_lora": true, "lora_rank": 8, "corrupted": false, "last_request_time": "2025-11-26T00:00:00Z"})
         )
       end)
 
       {:ok, data} = Rest.get_training_run(config, "run-abc")
 
-      assert data["id"] == "run-abc"
-      assert data["status"] == "completed"
+      assert %Tinkex.Types.TrainingRun{} = data
+      assert data.training_run_id == "run-abc"
+      assert data.base_model == "Qwen/Qwen2.5-7B"
+      assert data.model_owner == "owner"
     end
 
     test "returns error on failure", %{bypass: bypass, config: config} do
@@ -276,13 +278,16 @@ defmodule Tinkex.API.RestTest do
       Bypass.expect_once(bypass, "GET", "/api/v1/training_runs/run-xyz", fn conn ->
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, ~s({"id": "run-xyz", "status": "running"}))
+        |> Plug.Conn.resp(
+          200,
+          ~s({"training_run_id": "run-xyz", "base_model": "m", "model_owner": "owner", "is_lora": false, "corrupted": false, "last_request_time": "2025-11-26T00:00:00Z"})
+        )
       end)
 
       {:ok, data} =
         Rest.get_training_run_by_tinker_path(config, "tinker://run-xyz/weights/checkpoint-001")
 
-      assert data["id"] == "run-xyz"
+      assert %Tinkex.Types.TrainingRun{training_run_id: "run-xyz"} = data
     end
 
     test "returns error for invalid tinker path", %{config: config} do
@@ -299,12 +304,16 @@ defmodule Tinkex.API.RestTest do
 
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, ~s({"training_runs": [{"id": "run-1"}, {"id": "run-2"}]}))
+        |> Plug.Conn.resp(
+          200,
+          ~s({"training_runs": [{"training_run_id": "run-1", "base_model": "m", "model_owner": "owner", "is_lora": false, "corrupted": false, "last_request_time": "2025-11-26T00:00:00Z"}, {"training_run_id": "run-2", "base_model": "m2", "model_owner": "owner", "is_lora": true, "lora_rank": 4, "corrupted": false, "last_request_time": "2025-11-26T00:00:00Z"}]})
+        )
       end)
 
       {:ok, data} = Rest.list_training_runs(config, 10, 5)
 
-      assert length(data["training_runs"]) == 2
+      assert %Tinkex.Types.TrainingRunsResponse{} = data
+      assert length(data.training_runs) == 2
     end
 
     test "uses default pagination", %{bypass: bypass, config: config} do
@@ -313,7 +322,10 @@ defmodule Tinkex.API.RestTest do
 
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
-        |> Plug.Conn.resp(200, ~s({"training_runs": []}))
+        |> Plug.Conn.resp(
+          200,
+          ~s({"training_runs": [], "cursor": {"offset": 0, "limit": 20, "total_count": 0}})
+        )
       end)
 
       {:ok, _} = Rest.list_training_runs(config)

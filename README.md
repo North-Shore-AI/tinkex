@@ -13,11 +13,14 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the Tinker distributed machine learning platform. It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.7 Highlights
+## 0.1.8 Highlights
 
-- **Telemetry reporter to Tinker**: New `Tinkex.Telemetry.Reporter` batches client-side events (session start/end, HTTP telemetry, custom events, exceptions) with backoff, wait-until-drained semantics, fatal-exception flushing, and a `TINKER_TELEMETRY` kill switch. `ServiceClient` now boots one automatically and exposes it via `telemetry_reporter/1`.
-- **End-to-end telemetry examples**: Added `examples/telemetry_live.exs` and `examples/telemetry_reporter_demo.exs` covering reporter lifecycle, custom events, retries, drain/wait, and graceful shutdown; both are runnable via `examples/run_all.sh`.
-- **Telemetry attribution across APIs**: Sampling and training clients now propagate `session_id`, `sampling_session_id`, and `model_seq_id` metadata into HTTP telemetry so backend events are tagged with the active session and request identifiers; HTTP telemetry requests respect configurable timeouts.
+- **NotGiven/transform layer**: Added omit/not-given sentinels and a transform pipeline for request serialization (aliasing, date formatting, and omission of unset fields) to match the Python SDK.
+- **Response wrappers + SSE**: HTTP responses now expose metadata (status, headers, URL, elapsed, retries) via `Tinkex.API.Response`, with SSE decoding helpers for event-stream endpoints.
+- **Typed gaps closed**: New structs for weight save/load responses, training runs, cursors, server capabilities, and health checks; REST training run endpoints now decode into typed structs.
+- **Service endpoints**: Added `/api/v1/get_server_capabilities` and `/api/v1/healthz` to the Service API.
+- **Sampling compute_logprobs**: Convenience helper added to `SamplingClient` for prompt token logprobs.
+- **CLI management parity**: New `tinkex checkpoint` subcommands (list/info/publish/unpublish/delete/download) and `tinkex run` management subcommands (list/info) with tests; examples include a live capabilities + logprobs demo.
 
 ## Features
 
@@ -45,7 +48,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.7"}
+    {:tinkex, "~> 0.1.8"}
   ]
 end
 ```
@@ -128,9 +131,23 @@ See `examples/metrics_live.exs` for an end-to-end live sampling + metrics printo
 
 Self-contained workflows live in the `examples/` directory. Browse `examples/README.md` for per-script docs or export `TINKER_API_KEY` and run `examples/run_all.sh` to execute the curated collection sequentially.
 
+### Live example
+
+To verify connectivity against a real Tinker deployment, export `TINKER_API_KEY` (and optionally `TINKER_BASE_URL`, `TINKER_BASE_MODEL`, `TINKER_PROMPT`) and run:
+
+```bash
+mix run examples/live_capabilities_and_logprobs.exs
+# Or run all curated examples (includes the live demo last):
+examples/run_all.sh
+```
+
+The demo performs a capabilities + health probe and computes prompt logprobs via a live sampling client.
+
 ## Sessions & checkpoints (REST)
 
 Use the `RestClient` for synchronous session and checkpoint management, and `CheckpointDownload` to pull artifacts locally:
+
+> Note: the heartbeat endpoint is `/api/v1/heartbeat` in this SDK (Python uses `/api/v1/session_heartbeat`), but behavior is equivalent.
 
 ```elixir
 {:ok, service} = Tinkex.ServiceClient.start_link(config: config)

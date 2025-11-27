@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.8] - 2025-11-26
+
+### Added
+
+- **NotGiven + transform layer**: Introduced omit/not-given sentinels and request transformation with aliasing/formatting to mirror Python serialization semantics.
+- **Response wrappers & SSE**: Added `Tinkex.API.Response` with metadata (headers, status, URL, elapsed, retries) plus SSE decoding helpers and streaming response support for event-stream endpoints.
+- **Typed responses**: New structs for weight save/load responses, training runs, cursors, server capabilities, and health checks; REST training run endpoints now decode into typed structs.
+- **Service endpoints**: Implemented `/api/v1/get_server_capabilities` and `/api/v1/healthz` in `Tinkex.API.Service`.
+- **Sampling helper**: Added `SamplingClient.compute_logprobs/3` convenience for prompt token logprobs.
+- **CLI management**: Added checkpoint management subcommands (list/info/publish/unpublish/delete/download) and run management subcommands (list/info) with corresponding tests and docs.
+- **Live example**: New `examples/live_capabilities_and_logprobs.exs` showing capabilities + health probes and prompt logprobs; included in `examples/run_all.sh`.
+
+### Fixed
+
+- `RestClient` training run endpoints now return typed structs, and publish/unpublish checkpoint helpers are wired through REST with CLI wrappers.
+
 ## [0.1.7] - 2025-11-26
 
 ### Added

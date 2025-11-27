@@ -9,6 +9,8 @@ defmodule Tinkex.API.Rest do
   alias Tinkex.API
   alias Tinkex.Config
 
+  alias Tinkex.Types.{TrainingRun, TrainingRunsResponse}
+
   @doc """
   Get session information.
 
@@ -199,7 +201,7 @@ defmodule Tinkex.API.Rest do
   - `{:error, Tinkex.Error.t()}` - On failure
   """
   @spec get_training_run_by_tinker_path(Config.t(), String.t()) ::
-          {:ok, map()} | {:error, Tinkex.Error.t()}
+          {:ok, TrainingRun.t()} | {:error, Tinkex.Error.t()}
   def get_training_run_by_tinker_path(config, tinker_path) do
     with {:ok, {run_id, _checkpoint_id}} <- parse_tinker_path(tinker_path) do
       get_training_run(config, run_id)
@@ -219,10 +221,15 @@ defmodule Tinkex.API.Rest do
   - `{:ok, map()}` - Training run information on success
   - `{:error, Tinkex.Error.t()}` - On failure
   """
-  @spec get_training_run(Config.t(), String.t()) :: {:ok, map()} | {:error, Tinkex.Error.t()}
+  @spec get_training_run(Config.t(), String.t()) ::
+          {:ok, TrainingRun.t()} | {:error, Tinkex.Error.t()}
   def get_training_run(config, training_run_id) do
     path = "/api/v1/training_runs/#{training_run_id}"
-    API.get(path, config: config, pool_type: :training)
+
+    case API.get(path, config: config, pool_type: :training) do
+      {:ok, data} -> {:ok, TrainingRun.from_map(data)}
+      {:error, _} = error -> error
+    end
   end
 
   @doc """
@@ -240,10 +247,36 @@ defmodule Tinkex.API.Rest do
   - `{:error, Tinkex.Error.t()}` - On failure
   """
   @spec list_training_runs(Config.t(), integer(), integer()) ::
-          {:ok, map()} | {:error, Tinkex.Error.t()}
+          {:ok, TrainingRunsResponse.t()} | {:error, Tinkex.Error.t()}
   def list_training_runs(config, limit \\ 20, offset \\ 0) do
     path = "/api/v1/training_runs?limit=#{limit}&offset=#{offset}"
-    API.get(path, config: config, pool_type: :training)
+
+    case API.get(path, config: config, pool_type: :training) do
+      {:ok, data} -> {:ok, TrainingRunsResponse.from_map(data)}
+      {:error, _} = error -> error
+    end
+  end
+
+  @doc """
+  Publish a checkpoint to make it public.
+  """
+  @spec publish_checkpoint(Config.t(), String.t()) :: {:ok, map()} | {:error, Tinkex.Error.t()}
+  def publish_checkpoint(config, checkpoint_path) do
+    with {:ok, {run_id, checkpoint_id}} <- parse_tinker_path(checkpoint_path) do
+      path = "/api/v1/training_runs/#{run_id}/checkpoints/#{checkpoint_id}/publish"
+      API.post(path, %{}, config: config, pool_type: :training)
+    end
+  end
+
+  @doc """
+  Unpublish a checkpoint to make it private.
+  """
+  @spec unpublish_checkpoint(Config.t(), String.t()) :: {:ok, map()} | {:error, Tinkex.Error.t()}
+  def unpublish_checkpoint(config, checkpoint_path) do
+    with {:ok, {run_id, checkpoint_id}} <- parse_tinker_path(checkpoint_path) do
+      path = "/api/v1/training_runs/#{run_id}/checkpoints/#{checkpoint_id}/publish"
+      API.delete(path, config: config, pool_type: :training)
+    end
   end
 
   defp parse_tinker_path("tinker://" <> rest) do

@@ -26,7 +26,8 @@ defmodule Tinkex.SamplingClient do
     CreateSamplingSessionRequest,
     CreateSamplingSessionResponse,
     SampleRequest,
-    SampleResponse
+    SampleResponse,
+    SamplingParams
   }
 
   @type t :: pid()
@@ -60,6 +61,31 @@ defmodule Tinkex.SamplingClient do
   @spec sample(t(), map(), map(), keyword()) :: {:ok, Task.t()} | {:error, Error.t()}
   def sample(client, prompt, sampling_params, opts \\ []) do
     {:ok, Task.async(fn -> do_sample(client, prompt, sampling_params, opts) end)}
+  end
+
+  @doc """
+  Convenience helper to compute prompt token log probabilities.
+
+  Returns a Task that yields `{:ok, [float() | nil]}` or `{:error, %Tinkex.Error{}}`.
+  """
+  @spec compute_logprobs(t(), map(), keyword()) :: {:ok, Task.t()} | {:error, Error.t()}
+  def compute_logprobs(client, prompt, opts \\ []) do
+    params = %SamplingParams{max_tokens: 1}
+
+    {:ok,
+     Task.async(fn ->
+       case do_sample(client, prompt, params,
+              num_samples: 1,
+              prompt_logprobs: true,
+              topk_prompt_logprobs: Keyword.get(opts, :topk_prompt_logprobs, 0)
+            ) do
+         {:ok, %SampleResponse{prompt_logprobs: logprobs}} ->
+           {:ok, logprobs}
+
+         {:error, %Error{} = error} ->
+           {:error, error}
+       end
+     end)}
   end
 
   @impl true

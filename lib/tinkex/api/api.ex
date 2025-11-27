@@ -12,6 +12,10 @@ defmodule Tinkex.API do
 
   alias Tinkex.Error
   alias Tinkex.PoolKey
+  alias Tinkex.Transform
+  alias Tinkex.API.Response
+  alias Tinkex.API.StreamResponse
+  alias Tinkex.Streaming.{SSEDecoder, ServerSentEvent}
   alias Tinkex.Types.RequestErrorCategory
 
   @initial_retry_delay 500
@@ -32,6 +36,8 @@ defmodule Tinkex.API do
     headers = build_headers(:post, config.api_key, opts, timeout)
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     pool_type = Keyword.get(opts, :pool_type, :default)
+    response_mode = Keyword.get(opts, :response)
+    transform_opts = Keyword.get(opts, :transform, [])
 
     metadata =
       %{
@@ -42,18 +48,24 @@ defmodule Tinkex.API do
       }
       |> merge_telemetry_metadata(opts)
 
-    request = Finch.build(:post, url, headers, Jason.encode!(body))
+    request = Finch.build(:post, url, headers, prepare_body(body, transform_opts))
 
     pool_key = PoolKey.build(config.base_url, pool_type)
 
-    {result, _retry_count} =
+    {result, retry_count, duration} =
       execute_with_telemetry(
         &with_retries/5,
         [request, config.http_pool, timeout, pool_key, max_retries],
         metadata
       )
 
-    handle_response(result)
+    handle_response(result,
+      method: :post,
+      url: url,
+      retries: retry_count,
+      elapsed_native: duration,
+      response: response_mode
+    )
   end
 
   @impl true
@@ -66,6 +78,7 @@ defmodule Tinkex.API do
     headers = build_headers(:get, config.api_key, opts, timeout)
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     pool_type = Keyword.get(opts, :pool_type, :default)
+    response_mode = Keyword.get(opts, :response)
 
     metadata =
       %{
@@ -80,14 +93,20 @@ defmodule Tinkex.API do
 
     pool_key = PoolKey.build(config.base_url, pool_type)
 
-    {result, _retry_count} =
+    {result, retry_count, duration} =
       execute_with_telemetry(
         &with_retries/5,
         [request, config.http_pool, timeout, pool_key, max_retries],
         metadata
       )
 
-    handle_response(result)
+    handle_response(result,
+      method: :get,
+      url: url,
+      retries: retry_count,
+      elapsed_native: duration,
+      response: response_mode
+    )
   end
 
   @impl true
@@ -100,6 +119,7 @@ defmodule Tinkex.API do
     headers = build_headers(:delete, config.api_key, opts, timeout)
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     pool_type = Keyword.get(opts, :pool_type, :default)
+    response_mode = Keyword.get(opts, :response)
 
     metadata =
       %{
@@ -114,14 +134,64 @@ defmodule Tinkex.API do
 
     pool_key = PoolKey.build(config.base_url, pool_type)
 
-    {result, _retry_count} =
+    {result, retry_count, duration} =
       execute_with_telemetry(
         &with_retries/5,
         [request, config.http_pool, timeout, pool_key, max_retries],
         metadata
       )
 
-    handle_response(result)
+    handle_response(result,
+      method: :delete,
+      url: url,
+      retries: retry_count,
+      elapsed_native: duration,
+      response: response_mode
+    )
+  end
+
+  @spec stream_get(String.t(), keyword()) ::
+          {:ok, StreamResponse.t()} | {:error, Error.t()}
+  def stream_get(path, opts) do
+    config = Keyword.fetch!(opts, :config)
+
+    url = build_url(config.base_url, path)
+    timeout = Keyword.get(opts, :timeout, config.timeout)
+    headers = build_headers(:get, config.api_key, opts, timeout)
+    parser = Keyword.get(opts, :event_parser, :json)
+
+    request = Finch.build(:get, url, headers)
+
+    case Finch.request(request, config.http_pool, receive_timeout: timeout) do
+      {:ok, %Finch.Response{} = response} ->
+        response = maybe_decompress(response)
+        {events, _decoder} = SSEDecoder.feed(SSEDecoder.new(), response.body <> "\n\n")
+
+        parsed_events =
+          events
+          |> Enum.map(&decode_event(&1, parser))
+          |> Enum.reject(&(&1 in [nil, ""]))
+
+        {:ok,
+         %StreamResponse{
+           stream: Stream.concat([parsed_events]),
+           status: response.status,
+           headers: headers_to_map(response.headers),
+           method: :get,
+           url: url
+         }}
+
+      {:error, %Mint.HTTPError{} = error} ->
+        {:error,
+         build_error(Exception.message(error), :api_connection, nil, nil, %{exception: error})}
+
+      {:error, %Mint.TransportError{} = error} ->
+        {:error,
+         build_error(Exception.message(error), :api_connection, nil, nil, %{exception: error})}
+
+      {:error, reason} ->
+        {:error, build_error(inspect(reason), :api_connection, nil, nil, %{exception: reason})}
+    end
   end
 
   defp execute_with_telemetry(fun, args, metadata) do
@@ -147,7 +217,7 @@ defmodule Tinkex.API do
         |> Map.put(:retry_count, retry_count)
       )
 
-      {result, retry_count}
+      {result, retry_count, duration}
     rescue
       exception ->
         duration = System.monotonic_time() - start_native
@@ -201,12 +271,20 @@ defmodule Tinkex.API do
     |> dedupe_headers()
   end
 
-  defp handle_response({:ok, %Finch.Response{} = response}) do
-    response = maybe_decompress(response)
-    do_handle_response(response)
+  defp prepare_body(body, _transform_opts) when is_binary(body), do: body
+
+  defp prepare_body(body, transform_opts) do
+    body
+    |> Transform.transform(transform_opts)
+    |> Jason.encode!()
   end
 
-  defp handle_response({:error, %Mint.TransportError{} = exception}) do
+  defp handle_response({:ok, %Finch.Response{} = response}, opts) do
+    response = maybe_decompress(response)
+    do_handle_response(response, opts)
+  end
+
+  defp handle_response({:error, %Mint.TransportError{} = exception}, _opts) do
     Logger.debug("Transport error: #{Exception.message(exception)}")
 
     {:error,
@@ -219,7 +297,7 @@ defmodule Tinkex.API do
      )}
   end
 
-  defp handle_response({:error, %Mint.HTTPError{} = exception}) do
+  defp handle_response({:error, %Mint.HTTPError{} = exception}, _opts) do
     Logger.debug("HTTP error: #{Exception.message(exception)}")
 
     {:error,
@@ -232,7 +310,7 @@ defmodule Tinkex.API do
      )}
   end
 
-  defp handle_response({:error, exception}) do
+  defp handle_response({:error, exception}, _opts) do
     message =
       cond do
         is_struct(exception) and function_exported?(exception.__struct__, :message, 1) ->
@@ -253,7 +331,7 @@ defmodule Tinkex.API do
     {:error, build_error(message, :api_connection, nil, nil, %{exception: exception})}
   end
 
-  defp do_handle_response(%Finch.Response{status: status, headers: headers} = response)
+  defp do_handle_response(%Finch.Response{status: status, headers: headers} = response, opts)
        when status in [301, 302, 307, 308] do
     case find_header_value(headers, "location") do
       nil ->
@@ -268,15 +346,16 @@ defmodule Tinkex.API do
 
       location ->
         expires = find_header_value(headers, "expires")
-        {:ok, %{"url" => location, "status" => status, "expires" => expires}}
+        payload = %{"url" => location, "status" => status, "expires" => expires}
+        wrap_success(payload, response, opts)
     end
   end
 
-  defp do_handle_response(%Finch.Response{status: status, body: body})
+  defp do_handle_response(%Finch.Response{status: status, body: body} = response, opts)
        when status in 200..299 do
     case Jason.decode(body) do
       {:ok, data} ->
-        {:ok, data}
+        wrap_success(data, response, opts)
 
       {:error, reason} ->
         {:error,
@@ -290,7 +369,7 @@ defmodule Tinkex.API do
     end
   end
 
-  defp do_handle_response(%Finch.Response{status: 429, headers: headers, body: body}) do
+  defp do_handle_response(%Finch.Response{status: 429, headers: headers, body: body}, _opts) do
     error_data = decode_error_body(body)
     retry_after_ms = parse_retry_after(headers)
 
@@ -305,7 +384,7 @@ defmodule Tinkex.API do
      )}
   end
 
-  defp do_handle_response(%Finch.Response{status: status, headers: headers, body: body}) do
+  defp do_handle_response(%Finch.Response{status: status, headers: headers, body: body}, _opts) do
     error_data = decode_error_body(body)
 
     category =
@@ -352,6 +431,13 @@ defmodule Tinkex.API do
 
       _ ->
         nil
+    end)
+  end
+
+  defp headers_to_map(headers) do
+    Enum.reduce(headers || [], %{}, fn
+      {k, v}, acc -> Map.put(acc, String.downcase(k), v)
+      _, acc -> acc
     end)
   end
 
@@ -498,6 +584,13 @@ defmodule Tinkex.API do
     |> normalized_header("retry-after")
     |> parse_integer(:seconds, log: true)
   end
+
+  defp decode_event(%ServerSentEvent{} = event, :raw), do: event
+
+  defp decode_event(%ServerSentEvent{} = event, parser) when is_function(parser, 1),
+    do: parser.(event)
+
+  defp decode_event(%ServerSentEvent{} = event, _parser), do: ServerSentEvent.json(event)
 
   defp put_retry_headers(%Finch.Request{} = request, attempt, timeout_ms) do
     headers =
@@ -765,5 +858,28 @@ defmodule Tinkex.API do
       meta when is_map(meta) -> Map.merge(metadata, meta)
       _ -> metadata
     end
+  end
+
+  defp wrap_success(data, %Finch.Response{} = response, opts) do
+    case Keyword.get(opts, :response) do
+      :wrapped ->
+        {:ok,
+         Response.new(response,
+           method: Keyword.get(opts, :method),
+           url: Keyword.get(opts, :url),
+           retries: Keyword.get(opts, :retries, 0),
+           elapsed_ms: convert_elapsed(opts[:elapsed_native]),
+           data: data
+         )}
+
+      _ ->
+        {:ok, data}
+    end
+  end
+
+  defp convert_elapsed(nil), do: 0
+
+  defp convert_elapsed(native_duration) when is_integer(native_duration) do
+    System.convert_time_unit(native_duration, :native, :millisecond)
   end
 end

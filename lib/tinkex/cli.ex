@@ -8,7 +8,18 @@ defmodule Tinkex.CLI do
   """
 
   alias Tinkex.Error
-  alias Tinkex.Types.{LoraConfig, ModelInput, SampleResponse, SamplingParams, StopReason}
+
+  alias Tinkex.Types.{
+    CheckpointsListResponse,
+    LoraConfig,
+    ModelInput,
+    SampleResponse,
+    SamplingParams,
+    StopReason,
+    TrainingRun,
+    TrainingRunsResponse,
+    WeightsInfoResponse
+  }
 
   @doc """
   Entry point invoked by the escript executable.
@@ -43,12 +54,16 @@ defmodule Tinkex.CLI do
     end
   end
 
-  defp dispatch(:checkpoint, options) do
-    run_checkpoint(options)
+  defp dispatch({:checkpoint, :save}, options), do: run_checkpoint(options)
+
+  defp dispatch({:checkpoint, action}, options) do
+    run_checkpoint_management(action, options)
   end
 
-  defp dispatch(:run, options) do
-    run_sampling(options)
+  defp dispatch({:run, :sample}, options), do: run_sampling(options)
+
+  defp dispatch({:run, action}, options) do
+    run_run_management(action, options)
   end
 
   defp dispatch(:version, options) do
@@ -151,6 +166,20 @@ defmodule Tinkex.CLI do
       json_module: Jason,
       file_module: File,
       now_fun: &DateTime.utc_now/0
+    }
+    |> Map.merge(env_overrides)
+    |> Map.merge(overrides)
+  end
+
+  defp management_deps(overrides) do
+    env_overrides = Application.get_env(:tinkex, :cli_management_deps, %{}) || %{}
+
+    %{
+      rest_api_module: Tinkex.API.Rest,
+      rest_client_module: Tinkex.RestClient,
+      checkpoint_download_module: Tinkex.CheckpointDownload,
+      config_module: Tinkex.Config,
+      json_module: Jason
     }
     |> Map.merge(env_overrides)
     |> Map.merge(overrides)
@@ -783,28 +812,292 @@ defmodule Tinkex.CLI do
     IO.puts(:stderr, "Sampling failed: #{inspect(reason)}")
   end
 
+  @doc false
+  @spec run_checkpoint_management(atom(), map(), map()) :: {:ok, map()} | {:error, term()}
+  def run_checkpoint_management(action, options, overrides \\ %{}) do
+    deps = management_deps(overrides)
+
+    with {:ok, config} <- build_config(options, deps) do
+      case action do
+        :list -> checkpoint_list(config, options, deps)
+        :info -> checkpoint_info(config, options, deps)
+        :publish -> checkpoint_publish(config, options, deps)
+        :unpublish -> checkpoint_unpublish(config, options, deps)
+        :delete -> checkpoint_delete(config, options, deps)
+        :download -> checkpoint_download(config, options, deps)
+      end
+    end
+  end
+
+  @doc false
+  @spec run_run_management(atom(), map(), map()) :: {:ok, map()} | {:error, term()}
+  def run_run_management(action, options, overrides \\ %{}) do
+    deps = management_deps(overrides)
+
+    with {:ok, config} <- build_config(options, deps) do
+      case action do
+        :list -> run_list(config, options, deps)
+        :info -> run_info(config, options, deps)
+      end
+    end
+  end
+
+  defp checkpoint_list(config, options, deps) do
+    limit = Map.get(options, :limit, 20)
+    offset = Map.get(options, :offset, 0)
+
+    case deps.rest_api_module.list_user_checkpoints(config, limit, offset) do
+      {:ok, %CheckpointsListResponse{} = resp} ->
+        Enum.each(resp.checkpoints, fn ckpt ->
+          IO.puts("#{ckpt.checkpoint_id}\t#{ckpt.tinker_path}")
+        end)
+
+        {:ok, %{command: :checkpoint, action: :list, count: length(resp.checkpoints)}}
+
+      {:ok, data} when is_map(data) ->
+        resp = CheckpointsListResponse.from_map(data)
+
+        Enum.each(resp.checkpoints, fn ckpt ->
+          IO.puts("#{ckpt.checkpoint_id}\t#{ckpt.tinker_path}")
+        end)
+
+        {:ok, %{command: :checkpoint, action: :list, count: length(resp.checkpoints)}}
+
+      {:error, %Error{} = error} ->
+        IO.puts(:stderr, "Checkpoint list failed: #{Error.format(error)}")
+        {:error, error}
+    end
+  end
+
+  defp checkpoint_info(config, options, deps) do
+    path = Map.fetch!(options, :path)
+
+    case deps.rest_api_module.get_weights_info_by_tinker_path(config, path) do
+      {:ok, %WeightsInfoResponse{} = info} ->
+        IO.puts("Base model: #{info.base_model}")
+        IO.puts("LoRA: #{info.is_lora}")
+        if info.lora_rank, do: IO.puts("LoRA rank: #{info.lora_rank}")
+        {:ok, %{command: :checkpoint, action: :info, path: path}}
+
+      {:ok, data} ->
+        info = WeightsInfoResponse.from_json(data)
+        IO.puts("Base model: #{info.base_model}")
+        IO.puts("LoRA: #{info.is_lora}")
+        if info.lora_rank, do: IO.puts("LoRA rank: #{info.lora_rank}")
+        {:ok, %{command: :checkpoint, action: :info, path: path}}
+
+      {:error, %Error{} = error} ->
+        IO.puts(:stderr, "Checkpoint info failed: #{Error.format(error)}")
+        {:error, error}
+    end
+  end
+
+  defp checkpoint_publish(config, options, deps) do
+    path = Map.fetch!(options, :path)
+
+    case deps.rest_api_module.publish_checkpoint(config, path) do
+      {:ok, _} ->
+        IO.puts("Published #{path}")
+        {:ok, %{command: :checkpoint, action: :publish, path: path}}
+
+      {:error, %Error{} = error} ->
+        IO.puts(:stderr, "Publish failed: #{Error.format(error)}")
+        {:error, error}
+    end
+  end
+
+  defp checkpoint_unpublish(config, options, deps) do
+    path = Map.fetch!(options, :path)
+
+    case deps.rest_api_module.unpublish_checkpoint(config, path) do
+      {:ok, _} ->
+        IO.puts("Unpublished #{path}")
+        {:ok, %{command: :checkpoint, action: :unpublish, path: path}}
+
+      {:error, %Error{} = error} ->
+        IO.puts(:stderr, "Unpublish failed: #{Error.format(error)}")
+        {:error, error}
+    end
+  end
+
+  defp checkpoint_delete(config, options, deps) do
+    path = Map.fetch!(options, :path)
+
+    case deps.rest_api_module.delete_checkpoint(config, path) do
+      {:ok, _} ->
+        IO.puts("Deleted #{path}")
+        {:ok, %{command: :checkpoint, action: :delete, path: path}}
+
+      {:error, %Error{} = error} ->
+        IO.puts(:stderr, "Delete failed: #{Error.format(error)}")
+        {:error, error}
+    end
+  end
+
+  defp checkpoint_download(config, options, deps) do
+    path = Map.fetch!(options, :path)
+    output_dir = Map.get(options, :output)
+    force = Map.get(options, :force, false)
+    rest_client = deps.rest_client_module.new("cli", config)
+
+    case deps.checkpoint_download_module.download(rest_client, path,
+           output_dir: output_dir,
+           force: force
+         ) do
+      {:ok, result} ->
+        IO.puts("Downloaded to #{result.destination}")
+
+        {:ok,
+         %{command: :checkpoint, action: :download, path: path, destination: result.destination}}
+
+      {:error, reason} ->
+        IO.puts(:stderr, "Download failed: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  defp run_list(config, options, deps) do
+    limit = Map.get(options, :limit, 20)
+    offset = Map.get(options, :offset, 0)
+
+    case deps.rest_api_module.list_training_runs(config, limit, offset) do
+      {:ok, %TrainingRunsResponse{} = resp} ->
+        Enum.each(resp.training_runs, fn run ->
+          IO.puts("#{run.training_run_id}\t#{run.base_model}")
+        end)
+
+        {:ok, %{command: :run, action: :list, count: length(resp.training_runs)}}
+
+      {:ok, data} ->
+        resp = TrainingRunsResponse.from_map(data)
+
+        Enum.each(resp.training_runs, fn run ->
+          IO.puts("#{run.training_run_id}\t#{run.base_model}")
+        end)
+
+        {:ok, %{command: :run, action: :list, count: length(resp.training_runs)}}
+
+      {:error, %Error{} = error} ->
+        IO.puts(:stderr, "Run list failed: #{Error.format(error)}")
+        {:error, error}
+    end
+  end
+
+  defp run_info(config, options, deps) do
+    run_id = Map.fetch!(options, :run_id)
+
+    case deps.rest_api_module.get_training_run(config, run_id) do
+      {:ok, %TrainingRun{} = run} ->
+        IO.puts("#{run.training_run_id} (#{run.base_model})")
+        IO.puts("Owner: #{run.model_owner}")
+        {:ok, %{command: :run, action: :info, run_id: run.training_run_id}}
+
+      {:ok, data} ->
+        run = TrainingRun.from_map(data)
+        IO.puts("#{run.training_run_id} (#{run.base_model})")
+        {:ok, %{command: :run, action: :info, run_id: run.training_run_id}}
+
+      {:error, %Error{} = error} ->
+        IO.puts(:stderr, "Run info failed: #{Error.format(error)}")
+        {:error, error}
+    end
+  end
+
   defp parse([]), do: {:help, global_help()}
   defp parse(["--help"]), do: {:help, global_help()}
   defp parse(["-h"]), do: {:help, global_help()}
   defp parse(["--version" | rest]), do: parse_command(:version, rest)
-  defp parse(["checkpoint" | rest]), do: parse_command(:checkpoint, rest)
-  defp parse(["run" | rest]), do: parse_command(:run, rest)
+  defp parse(["checkpoint" | rest]), do: parse_checkpoint_command(rest)
+  defp parse(["run" | rest]), do: parse_run_command(rest)
   defp parse(["version" | rest]), do: parse_command(:version, rest)
 
   defp parse([unknown | _rest]) do
     {:error, "Unknown command: #{unknown}\n\n" <> global_help()}
   end
 
-  defp parse_command(:checkpoint, argv) do
-    parse_subcommand(:checkpoint, argv, checkpoint_switches(), &checkpoint_help/0)
+  defp parse_checkpoint_command([sub | rest])
+       when sub in ["list", "info", "publish", "unpublish", "delete", "download"] do
+    parse_management_command({:checkpoint, String.to_atom(sub)}, rest)
   end
 
-  defp parse_command(:run, argv) do
-    parse_subcommand(:run, argv, run_switches(), &run_help/0)
+  defp parse_checkpoint_command(rest), do: parse_command({:checkpoint, :save}, rest)
+
+  defp parse_run_command([sub | rest]) when sub in ["list", "info"] do
+    parse_management_command({:run, String.to_atom(sub)}, rest)
+  end
+
+  defp parse_run_command(rest), do: parse_command({:run, :sample}, rest)
+
+  defp parse_command({:checkpoint, :save}, argv) do
+    parse_subcommand({:checkpoint, :save}, argv, checkpoint_switches(), &checkpoint_help/0)
+  end
+
+  defp parse_command({:run, :sample}, argv) do
+    parse_subcommand({:run, :sample}, argv, run_switches(), &run_help/0)
   end
 
   defp parse_command(:version, argv) do
     parse_subcommand(:version, argv, version_switches(), &version_help/0)
+  end
+
+  defp parse_management_command({:checkpoint, action}, argv) do
+    switches = checkpoint_management_switches(action)
+    {parsed, remaining, invalid} = OptionParser.parse(argv, strict: switches, aliases: aliases())
+    parsed_map = Map.new(parsed)
+
+    cond do
+      Map.get(parsed_map, :help, false) ->
+        {:help, checkpoint_management_help()}
+
+      invalid != [] ->
+        {:error,
+         invalid_option_message({:checkpoint, action}, invalid, &checkpoint_management_help/0)}
+
+      action in [:info, :publish, :unpublish, :delete, :download] and remaining == [] ->
+        {:error, "Checkpoint path is required\n\n" <> checkpoint_management_help()}
+
+      remaining != [] and action == :list ->
+        {:error,
+         unexpected_args_message({:checkpoint, action}, remaining, &checkpoint_management_help/0)}
+
+      true ->
+        parsed_map =
+          case {action, remaining} do
+            {_act, [path | _]} -> Map.put(parsed_map, :path, path)
+            _ -> parsed_map
+          end
+
+        {:command, {:checkpoint, action}, parsed_map}
+    end
+  end
+
+  defp parse_management_command({:run, action}, argv) do
+    switches = run_management_switches(action)
+    {parsed, remaining, invalid} = OptionParser.parse(argv, strict: switches, aliases: aliases())
+    parsed_map = Map.new(parsed)
+
+    cond do
+      Map.get(parsed_map, :help, false) ->
+        {:help, run_management_help()}
+
+      invalid != [] ->
+        {:error, invalid_option_message({:run, action}, invalid, &run_management_help/0)}
+
+      action == :info and remaining == [] ->
+        {:error, "Run ID is required\n\n" <> run_management_help()}
+
+      remaining != [] and action == :list ->
+        {:error, unexpected_args_message({:run, action}, remaining, &run_management_help/0)}
+
+      true ->
+        parsed_map =
+          case {action, remaining} do
+            {:info, [run_id | _]} -> Map.put(parsed_map, :run_id, run_id)
+            _ -> parsed_map
+          end
+
+        {:command, {:run, action}, parsed_map}
+    end
   end
 
   defp parse_subcommand(command, argv, switches, help_fun) do
@@ -881,8 +1174,8 @@ defmodule Tinkex.CLI do
       tinkex <command> [options]
 
     Commands:
-      checkpoint   Manage checkpoints (Phase 7B)
-      run          Generate text with a sampling client (Phase 7C)
+      checkpoint   Save or manage checkpoints (list/info/publish/unpublish/delete/download)
+      run          Generate text or manage training runs (list/info)
       version      Show version information
 
     Run `tinkex <command> --help` for command-specific options.
@@ -892,7 +1185,8 @@ defmodule Tinkex.CLI do
   defp checkpoint_help do
     """
     Usage:
-      tinkex checkpoint [options]
+      tinkex checkpoint [options]          # save checkpoint
+      tinkex checkpoint <subcommand> ...   # management commands
 
     Options:
       --base-model <id>       Base model identifier (e.g., Qwen/Qwen2.5-7B)
@@ -910,10 +1204,29 @@ defmodule Tinkex.CLI do
     """
   end
 
+  defp checkpoint_management_help do
+    """
+    Usage:
+      tinkex checkpoint list [--limit <int>] [--offset <int>]
+      tinkex checkpoint info <tinker_path>
+      tinkex checkpoint publish <tinker_path>
+      tinkex checkpoint unpublish <tinker_path>
+      tinkex checkpoint delete <tinker_path>
+      tinkex checkpoint download <tinker_path> [--output <dir>] [--force]
+
+    Common options:
+      --api-key <key>         API key
+      --base-url <url>        API base URL
+      --timeout <ms>          Request timeout in milliseconds
+      -h, --help              Show this help text
+    """
+  end
+
   defp run_help do
     """
     Usage:
-      tinkex run [options]
+      tinkex run [options]              # sampling
+      tinkex run <subcommand> ...       # management commands
 
     Options:
       --base-model <id>       Base model identifier
@@ -931,6 +1244,20 @@ defmodule Tinkex.CLI do
       --http-pool <name>      HTTP pool name to use
       --output <path>         Write output to file (stdout by default)
       --json                  Output JSON (full response)
+      -h, --help              Show this help text
+    """
+  end
+
+  defp run_management_help do
+    """
+    Usage:
+      tinkex run list [--limit <int>] [--offset <int>]
+      tinkex run info <run_id>
+
+    Common options:
+      --api-key <key>         API key
+      --base-url <url>        API base URL
+      --timeout <ms>          Request timeout in milliseconds
       -h, --help              Show this help text
     """
   end
@@ -984,6 +1311,30 @@ defmodule Tinkex.CLI do
       http_pool: :string,
       output: :string,
       json: :boolean
+    ]
+  end
+
+  defp checkpoint_management_switches(_action) do
+    [
+      help: :boolean,
+      api_key: :string,
+      base_url: :string,
+      timeout: :integer,
+      limit: :integer,
+      offset: :integer,
+      output: :string,
+      force: :boolean
+    ]
+  end
+
+  defp run_management_switches(_action) do
+    [
+      help: :boolean,
+      api_key: :string,
+      base_url: :string,
+      timeout: :integer,
+      limit: :integer,
+      offset: :integer
     ]
   end
 

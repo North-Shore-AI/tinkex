@@ -54,23 +54,29 @@ defmodule Tinkex.Examples.TelemetryReporterDemo do
     Model: #{base_model}
     """)
 
-    # Start the reporter manually (usually ServiceClient does this)
-    session_id = "demo-session-#{System.unique_integer([:positive])}"
-
-    IO.puts("\n1. Starting reporter for session: #{session_id}")
+    # Start ServiceClient so we get a real session_id and reporter
+    IO.puts("\n1. Starting ServiceClient and reporter...")
+    {:ok, service} = Tinkex.ServiceClient.start_link(config: config)
 
     {:ok, reporter} =
-      Reporter.start_link(
-        session_id: session_id,
-        config: config,
-        # Demonstrate configurable options
-        flush_interval_ms: 5_000,
-        flush_threshold: 50,
-        http_timeout_ms: 5_000,
-        max_retries: 3,
-        retry_base_delay_ms: 500,
-        enabled: true
-      )
+      case Tinkex.ServiceClient.telemetry_reporter(service) do
+        {:ok, pid} ->
+          {:ok, pid}
+
+        {:error, :disabled} ->
+          session_id = :sys.get_state(service).session_id
+
+          Reporter.start_link(
+            session_id: session_id,
+            config: config,
+            flush_interval_ms: 5_000,
+            flush_threshold: 50,
+            http_timeout_ms: 5_000,
+            max_retries: 3,
+            retry_base_delay_ms: 500,
+            enabled: true
+          )
+      end
 
     IO.puts("   Reporter started: #{inspect(reporter)}")
 
@@ -110,8 +116,6 @@ defmodule Tinkex.Examples.TelemetryReporterDemo do
     # Perform actual sampling to generate HTTP telemetry
     IO.puts("\n4. Performing live sampling (generates HTTP telemetry)...")
 
-    {:ok, service} = Tinkex.ServiceClient.start_link(config: config)
-
     try do
       {:ok, sampler} =
         Tinkex.ServiceClient.create_sampling_client(service, base_model: base_model)
@@ -119,7 +123,12 @@ defmodule Tinkex.Examples.TelemetryReporterDemo do
       {:ok, prompt} = ModelInput.from_text(prompt_text, model_name: base_model)
       params = %SamplingParams{max_tokens: 32, temperature: 0.7}
 
-      {:ok, task} = Tinkex.SamplingClient.sample(sampler, prompt, params, num_samples: 1)
+      {:ok, task} =
+        Tinkex.SamplingClient.sample(sampler, prompt, params,
+          num_samples: 1,
+          prompt_logprobs: false
+        )
+
       {:ok, response} = Task.await(task, 30_000)
 
       IO.puts("   Sampling complete!")
@@ -166,6 +175,7 @@ defmodule Tinkex.Examples.TelemetryReporterDemo do
 
     Reporter.log(reporter, "demo.completing", %{"status" => "success"})
     :ok = Reporter.stop(reporter, 10_000)
+    GenServer.stop(service)
 
     IO.puts("   Reporter stopped gracefully (SESSION_END event sent)")
 

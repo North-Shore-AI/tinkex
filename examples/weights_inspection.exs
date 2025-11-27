@@ -52,34 +52,31 @@ defmodule Tinkex.Examples.WeightsInspection do
     IO.puts("--- Training Runs ---")
 
     case Rest.list_training_runs(config, 10, 0) do
+      {:ok, %Tinkex.Types.TrainingRunsResponse{} = response} ->
+        runs = response.training_runs || []
+        IO.puts("Found #{length(runs)} training runs:\n")
+
+        Enum.each(runs, fn %Tinkex.Types.TrainingRun{} = run ->
+          IO.puts("  #{run.training_run_id}")
+          IO.puts("    Base Model: #{run.base_model || "N/A"}")
+          IO.puts("    Is LoRA: #{run.is_lora}, Rank: #{run.lora_rank || "N/A"}")
+          IO.puts("    Corrupted: #{run.corrupted || false}")
+          IO.puts("    Last Checkpoint: #{format_checkpoint(run.last_checkpoint)}")
+          IO.puts("    Owner: #{run.model_owner || "N/A"}")
+          IO.puts("")
+        end)
+
+        if length(runs) > 0 do
+          inspect_training_run(config, hd(runs).training_run_id)
+        end
+
       {:ok, response} ->
         runs = response["training_runs"] || response[:training_runs] || []
         IO.puts("Found #{length(runs)} training runs:\n")
 
         Enum.each(runs, fn run ->
-          run_id = run["training_run_id"] || run[:training_run_id]
-          base_model = run["base_model"] || run[:base_model]
-          is_lora = run["is_lora"] || run[:is_lora]
-          lora_rank = run["lora_rank"] || run[:lora_rank]
-          corrupted = run["corrupted"] || run[:corrupted]
-          last_checkpoint = run["last_checkpoint"] || run[:last_checkpoint]
-          model_owner = run["model_owner"] || run[:model_owner]
-
-          IO.puts("  #{run_id}")
-          IO.puts("    Base Model: #{base_model || "N/A"}")
-          IO.puts("    Is LoRA: #{is_lora}, Rank: #{lora_rank || "N/A"}")
-          IO.puts("    Corrupted: #{corrupted || false}")
-          IO.puts("    Last Checkpoint: #{last_checkpoint || "none"}")
-          IO.puts("    Owner: #{model_owner || "N/A"}")
-          IO.puts("")
+          IO.puts("  #{run["training_run_id"] || run[:training_run_id]}")
         end)
-
-        # Inspect first run in detail if available
-        if length(runs) > 0 do
-          first_run = hd(runs)
-          run_id = first_run["training_run_id"] || first_run[:training_run_id]
-          inspect_training_run(config, run_id)
-        end
 
       {:error, error} ->
         IO.puts("Error listing training runs: #{inspect(error)}")
@@ -90,6 +87,17 @@ defmodule Tinkex.Examples.WeightsInspection do
     IO.puts("\n--- Training Run Details: #{run_id} ---")
 
     case Rest.get_training_run(config, run_id) do
+      {:ok, %Tinkex.Types.TrainingRun{} = run} ->
+        IO.puts("  ID: #{run.training_run_id}")
+        IO.puts("  Base Model: #{run.base_model || "N/A"}")
+        IO.puts("  Is LoRA: #{run.is_lora}")
+        IO.puts("  LoRA Rank: #{run.lora_rank || "N/A"}")
+        IO.puts("  Corrupted: #{run.corrupted || false}")
+        IO.puts("  Last Checkpoint: #{format_checkpoint(run.last_checkpoint)}")
+        IO.puts("  Last Sampler Checkpoint: #{format_checkpoint(run.last_sampler_checkpoint)}")
+        IO.puts("  Last Request: #{run.last_request_time || "N/A"}")
+        IO.puts("  Owner: #{run.model_owner || "N/A"}")
+
       {:ok, run} ->
         IO.puts("  ID: #{run["training_run_id"] || run[:training_run_id]}")
         IO.puts("  Base Model: #{run["base_model"] || run[:base_model] || "N/A"}")
@@ -162,6 +170,10 @@ defmodule Tinkex.Examples.WeightsInspection do
         IO.puts("Error listing run checkpoints: #{inspect(error)}")
     end
   end
+
+  defp format_checkpoint(nil), do: "none"
+  defp format_checkpoint(%Tinkex.Types.Checkpoint{} = ckpt), do: ckpt.tinker_path
+  defp format_checkpoint(other), do: inspect(other)
 end
 
 Tinkex.Examples.WeightsInspection.run()

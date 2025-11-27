@@ -29,7 +29,8 @@ defmodule Tinkex.TrainingClient do
     LoraConfig,
     OptimStepRequest,
     OptimStepResponse,
-    SaveWeightsForSamplerRequest
+    SaveWeightsForSamplerRequest,
+    SaveWeightsForSamplerResponse
   }
 
   @max_chunk_len 128
@@ -787,6 +788,12 @@ defmodule Tinkex.TrainingClient do
   defp handle_save_weights_response(%{request_id: _} = future, state, opts) do
     poll_save_weights_future(future, state, opts)
   end
+
+  defp handle_save_weights_response(%SaveWeightsForSamplerResponse{} = resp, _state, _opts),
+    do: {:ok, resp}
+
+  defp handle_save_weights_response(%{"path" => _} = result, _state, _opts),
+    do: {:ok, SaveWeightsForSamplerResponse.from_json(result)}
 
   defp handle_save_weights_response(result, _state, _opts), do: {:ok, result}
 

@@ -5,6 +5,34 @@ defmodule Tinkex.API.Service do
   Uses :session pool for model creation operations.
   """
 
+  alias Tinkex.Types.{GetServerCapabilitiesResponse, HealthResponse}
+
+  @doc """
+  Retrieve supported models and server capabilities.
+  """
+  @spec get_server_capabilities(keyword()) ::
+          {:ok, GetServerCapabilitiesResponse.t()} | {:error, Tinkex.Error.t()}
+  def get_server_capabilities(opts) do
+    case Tinkex.API.get(
+           "/api/v1/get_server_capabilities",
+           Keyword.put(opts, :pool_type, :session)
+         ) do
+      {:ok, json} -> {:ok, GetServerCapabilitiesResponse.from_json(json)}
+      {:error, _} = error -> error
+    end
+  end
+
+  @doc """
+  Perform a health check against the service.
+  """
+  @spec health_check(keyword()) :: {:ok, HealthResponse.t()} | {:error, Tinkex.Error.t()}
+  def health_check(opts) do
+    case Tinkex.API.get("/api/v1/healthz", Keyword.put(opts, :pool_type, :session)) do
+      {:ok, json} -> {:ok, HealthResponse.from_json(json)}
+      {:error, _} = error -> error
+    end
+  end
+
   @doc """
   Create a new model.
   """
