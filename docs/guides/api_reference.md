@@ -5,7 +5,7 @@ This guide summarizes the public modules that make up the Tinkex SDK. Full types
 ## ServiceClient
 
 - `start_link/1` – boots a session using `Tinkex.Config` (pulling API key/base URL from env if not supplied).
-- `create_lora_training_client/2` – spawns a TrainingClient; pass `:base_model`, optional `:lora_config`, and user metadata.
+- `create_lora_training_client/3` – spawns a TrainingClient; `base_model` is a required second argument, with optional `:lora_config` and user metadata in opts.
 - `create_sampling_client/2` – spawns a SamplingClient for a base model or an existing model path.
 - `create_sampling_client_async/2` – async variant that returns a `Task.t()` for concurrent bootstrapping.
 - `create_rest_client/1` – returns a `Tinkex.RestClient` for session/checkpoint REST calls.
@@ -33,7 +33,7 @@ All methods return typed structs (`ListSessionsResponse`, `GetSessionResponse`, 
 - Requests are sent sequentially inside the GenServer; polling futures runs in Tasks for concurrency.
 - `forward_backward/4` – accepts a list of `Tinkex.Types.Datum` structs and a loss function (atom or string). Automatically chunks input (128 items or 500k tokens) and reduces metrics via `Tinkex.MetricsReduction`.
 - `optim_step/3` – performs an optimizer step with `%Tinkex.Types.AdamParams{}`.
-- `save_weights_for_sampler/2` – persists weights and optionally specifies `:path` and `:sampling_session_seq_id` for deterministic naming. Returns a Task whose result may include a polling future.
+- `save_weights_for_sampler/3` – persists weights with a required `name` parameter (string) and optionally specifies `:path` and `:sampling_session_seq_id` in opts for deterministic naming. Returns a Task whose result may include a polling future.
 - `get_info/1` – stubbed until the info endpoint is wired; used by tokenizer resolution when available.
 - `create_sampling_client_async/3` – create a SamplingClient from a checkpoint path in a Task for concurrent fan-out.
 

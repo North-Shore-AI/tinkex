@@ -19,7 +19,7 @@ config = Tinkex.Config.new(api_key: System.fetch_env!("TINKER_API_KEY"))
 base_model = "meta-llama/Llama-3.1-8B"
 
 {:ok, service} = Tinkex.ServiceClient.start_link(config: config)
-{:ok, training} = Tinkex.ServiceClient.create_lora_training_client(service, base_model: base_model)
+{:ok, training} = Tinkex.ServiceClient.create_lora_training_client(service, base_model)
 
 {:ok, info} = Tinkex.TrainingClient.get_info(training)
 IO.inspect(info.model_data.tokenizer_id, label: "tokenizer_id")

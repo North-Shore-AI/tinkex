@@ -301,8 +301,8 @@ defmodule Tinkex.Integration.MultiClientConcurrencyTest do
     {:ok, service_a} = ServiceClient.start_link(config: config_a)
     {:ok, service_b} = ServiceClient.start_link(config: config_b)
 
-    {:ok, training_a} = ServiceClient.create_lora_training_client(service_a, base_model: "base-a")
-    {:ok, training_b} = ServiceClient.create_lora_training_client(service_b, base_model: "base-b")
+    {:ok, training_a} = ServiceClient.create_lora_training_client(service_a, "base-a")
+    {:ok, training_b} = ServiceClient.create_lora_training_client(service_b, "base-b")
 
     {:ok, sampler_a} =
       ServiceClient.create_sampling_client(service_a,

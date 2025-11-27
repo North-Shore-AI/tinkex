@@ -61,7 +61,7 @@ params = %Tinkex.Types.SamplingParams{max_tokens: 64, temperature: 0.7, top_p: 0
 
 {:ok, task} = Tinkex.SamplingClient.sample(sampler, prompt, params, num_samples: 1)
 {:ok, response} = Task.await(task, 10_000)
-IO.inspect(response.samples, label: "samples")
+IO.inspect(response.sequences, label: "sequences")
 ```
 
 `SamplingClient.sample/4` returns a `Task.t()` so you can await, stream, or supervise requests alongside other work.

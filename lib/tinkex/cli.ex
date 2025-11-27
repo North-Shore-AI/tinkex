@@ -287,10 +287,14 @@ defmodule Tinkex.CLI do
     lora_config = build_lora_config(options)
 
     training_opts =
-      [base_model: base_model, lora_config: lora_config]
+      [lora_config: lora_config]
       |> maybe_put(:model_path, Map.get(options, :model_path))
 
-    case deps.service_client_module.create_lora_training_client(service, training_opts) do
+    case deps.service_client_module.create_lora_training_client(
+           service,
+           base_model,
+           training_opts
+         ) do
       {:ok, training} ->
         {:ok, training}
 
@@ -343,10 +347,11 @@ defmodule Tinkex.CLI do
   defp default_if_nil(nil, default), do: default
   defp default_if_nil(value, _default), do: value
 
-  defp save_weights(training, options, deps, config, _base_model) do
+  defp save_weights(training, options, deps, config, base_model) do
     save_opts = build_save_options(options, config)
+    name = checkpoint_name(options, base_model)
 
-    case deps.training_client_module.save_weights_for_sampler(training, save_opts) do
+    case deps.training_client_module.save_weights_for_sampler(training, name, save_opts) do
       {:ok, %Task{} = task} ->
         await_checkpoint_task(task, save_opts)
 
@@ -374,6 +379,22 @@ defmodule Tinkex.CLI do
     |> Keyword.new()
     |> Keyword.put_new(:timeout, timeout)
     |> Keyword.put_new(:await_timeout, timeout)
+  end
+
+  defp checkpoint_name(options, base_model) do
+    case Map.get(options, :name) do
+      nil ->
+        # Generate default name from base_model
+        model_slug =
+          base_model
+          |> String.replace(~r{[/:]}, "-")
+          |> String.downcase()
+
+        "checkpoint-#{model_slug}"
+
+      name ->
+        name
+    end
   end
 
   defp await_checkpoint_task(%Task{} = task, save_opts) do
@@ -1281,6 +1302,7 @@ defmodule Tinkex.CLI do
       help: :boolean,
       base_model: :string,
       model_path: :string,
+      name: :string,
       output: :string,
       rank: :integer,
       seed: :integer,

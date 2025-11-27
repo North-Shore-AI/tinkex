@@ -13,12 +13,13 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the Tinker distributed machine learning platform. It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.10 Highlights
+## 0.1.11 Highlights
 
-- **RestClient async API**: All REST methods now have `*_async` variants returning `Task.t()` for parallel requests (e.g., `list_sessions_async/2`, `get_checkpoint_archive_url_async/2`).
-- **TrainingClient tokenizer helpers**: New `get_tokenizer/2`, `encode/3`, and `decode/3` convenience wrappers that resolve tokenizers from model info with caching.
-- **Config parity mode**: Set `parity_mode: :python` (or `TINKEX_PARITY=python`) to use Python SDK defaults for timeout (60s) and max_retries (10).
-- **Typed telemetry events**: Internal refactor - telemetry payloads now use typed structs (`GenericEvent`, `SessionStartEvent`, etc.) instead of ad-hoc maps.
+- **Full Python SDK parity**: Retry logic now matches `_base_client.py` (408/409/429/5xx, 0.75–1.0 jitter range, 10s delay cap). HTTP pool defaults align with `httpx.Limits` (50×20=1000 connections).
+- **API changes (breaking)**: `create_lora_training_client/3` and `save_weights_for_sampler/3` now take required positional arguments instead of opts.
+- **Missing types**: Added `FutureRetrieveRequest`, `RequestFailedResponse`, `SessionHeartbeatRequest/Response`, `TelemetryResponse`, and `TypeAliases` module.
+- **New helpers**: `Tinkex.API.Helpers` for `with_raw_response/1` and `with_streaming_response/1`; `Tinkex.Env` pool config via `TINKEX_POOL_SIZE`/`TINKEX_POOL_COUNT`.
+- **Bug fixes**: SampleRequest omits nil fields (fixes 422), tokenizer strips `/variant` suffix, CLI checkpoint generates default names.
 
 ## Features
 
@@ -53,7 +54,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.10"}
+    {:tinkex, "~> 0.1.11"}
   ]
 end
 ```
@@ -77,7 +78,7 @@ config :tinkex,
 {:ok, service_client} = Tinkex.ServiceClient.new()
 {:ok, training_client} = Tinkex.ServiceClient.create_lora_training_client(
   service_client,
-  base_model: "meta-llama/Llama-3.1-8B"
+  "meta-llama/Llama-3.1-8B"
 )
 
 # Prepare training data
@@ -516,9 +517,11 @@ mix docs
 - API overview & parity checklist: `docs/guides/api_reference.md`
 - Futures/retries: `docs/guides/futures_and_async.md`, `docs/guides/retry_and_error_handling.md`
 - Tokenization and end-to-end training: `docs/guides/tokenization.md`, `docs/guides/training_loop.md`
-- Sampling/streaming: `docs/guides/forward_inference.md`, `docs/guides/streaming.md`
-- Checkpoints/CLI: `docs/guides/checkpoint_management.md`, `docs/guides/cli_guide.md`
-- Observability: `docs/guides/telemetry.md`, `docs/guides/metrics.md`
+- Custom loss/regularizers: `docs/guides/regularizers.md`, `docs/guides/forward_inference.md`
+- Checkpoints & persistence: `docs/guides/checkpoint_management.md`, `docs/guides/training_persistence.md`
+- Model info/unload: `docs/guides/model_info_unload.md`
+- CLI reference: `docs/guides/cli_guide.md`
+- Observability: `docs/guides/telemetry.md`, `docs/guides/metrics.md`, `docs/guides/streaming.md`
 - Troubleshooting playbook: `docs/guides/troubleshooting.md`
 - End-to-end examples (sessions, checkpoints, downloads, async factories): see `examples/*.exs`
 

@@ -38,5 +38,29 @@ defmodule Tinkex.API.SamplingTest do
       assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
                       %{pool_type: :sampling, path: "/api/v1/asample"}}
     end
+
+    test "drops nil values from request body", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "POST", "/api/v1/asample", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        decoded = Jason.decode!(body)
+
+        # nil values should be omitted, not sent as null
+        refute Map.has_key?(decoded, "prompt_logprobs")
+        assert Map.has_key?(decoded, "session_id")
+        assert Map.has_key?(decoded, "num_samples")
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"sequence_id":"seq-123"}))
+      end)
+
+      request = %{
+        session_id: "test-session",
+        num_samples: 1,
+        prompt_logprobs: nil
+      }
+
+      {:ok, _} = Sampling.sample_async(request, config: config)
+    end
   end
 end

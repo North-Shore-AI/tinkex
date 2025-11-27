@@ -228,8 +228,7 @@ defmodule Tinkex.Examples.CheckpointDownloadExample do
     """)
 
     with {:ok, training_pid} <-
-           ServiceClient.create_lora_training_client(service_pid,
-             base_model: base_model,
+           ServiceClient.create_lora_training_client(service_pid, base_model,
              lora_config: %LoraConfig{rank: 8}
            ) do
       log("Created training client for #{base_model}")
@@ -287,7 +286,8 @@ defmodule Tinkex.Examples.CheckpointDownloadExample do
   end
 
   defp save_sampler_checkpoint(training_pid) do
-    with {:ok, save_task} <- TrainingClient.save_weights_for_sampler(training_pid),
+    with {:ok, save_task} <-
+           TrainingClient.save_weights_for_sampler(training_pid, "checkpoint-download-example"),
          {:ok, response} <- await_task(save_task) do
       cond do
         is_map(response) and Map.has_key?(response, "path") ->

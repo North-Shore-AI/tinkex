@@ -26,8 +26,7 @@ defmodule Tinkex.Examples.TrainingPersistenceLive do
 
     with {:ok, service} <- Tinkex.ServiceClient.start_link(config: config),
          {:ok, training} <-
-           Tinkex.ServiceClient.create_lora_training_client(service,
-             base_model: base_model,
+           Tinkex.ServiceClient.create_lora_training_client(service, base_model,
              lora_config: %LoraConfig{rank: 8}
            ),
          {:ok, save_task} <- Tinkex.TrainingClient.save_state(training, checkpoint_name),

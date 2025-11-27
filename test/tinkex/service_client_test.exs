@@ -91,8 +91,8 @@ defmodule Tinkex.ServiceClientTest do
         session_manager: manager
       )
 
-    {:ok, child1} = ServiceClient.create_lora_training_client(pid, base_model: "m1")
-    {:ok, child2} = ServiceClient.create_lora_training_client(pid, base_model: "m2")
+    {:ok, child1} = ServiceClient.create_lora_training_client(pid, "m1")
+    {:ok, child2} = ServiceClient.create_lora_training_client(pid, "m2")
 
     assert %{model_seq_id: 0, session_id: "service-session-2"} = :sys.get_state(child1)
     assert %{model_seq_id: 1, session_id: "service-session-2"} = :sys.get_state(child2)
@@ -116,8 +116,7 @@ defmodule Tinkex.ServiceClientTest do
       )
 
     {:ok, child} =
-      ServiceClient.create_lora_training_client(pid,
-        base_model: "m1",
+      ServiceClient.create_lora_training_client(pid, "m1",
         rank: 8,
         seed: 42,
         train_mlp: false,

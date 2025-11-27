@@ -45,4 +45,35 @@ defmodule Tinkex.TransformTest do
     assert NotGiven.omit?(NotGiven.omit())
     refute NotGiven.omit?(NotGiven.value())
   end
+
+  test "drop_nil? option drops nil values from maps" do
+    input = %{a: 1, b: nil, c: "hello", d: nil}
+
+    result = Transform.transform(input, drop_nil?: true)
+
+    assert result == %{"a" => 1, "c" => "hello"}
+    refute Map.has_key?(result, "b")
+    refute Map.has_key?(result, "d")
+  end
+
+  test "drop_nil? option drops nil values from structs" do
+    # Use URI struct as a well-known struct for testing
+    input = %URI{scheme: "https", host: "example.com", port: nil, path: nil}
+
+    result = Transform.transform(input, drop_nil?: true)
+
+    assert result["scheme"] == "https"
+    assert result["host"] == "example.com"
+    refute Map.has_key?(result, "port")
+    refute Map.has_key?(result, "path")
+  end
+
+  test "drop_nil? preserves false and 0 values" do
+    input = %{a: false, b: 0, c: nil, d: ""}
+
+    result = Transform.transform(input, drop_nil?: true)
+
+    assert result == %{"a" => false, "b" => 0, "d" => ""}
+    refute Map.has_key?(result, "c")
+  end
 end

@@ -34,11 +34,15 @@ defmodule Tinkex.ServiceClient do
 
   @doc """
   Create a training client from this ServiceClient.
+
+  `base_model` is a required second argument specifying the base model name
+  (e.g., "meta-llama/Llama-3.1-8B").
   """
-  @spec create_lora_training_client(t(), keyword()) ::
+  @spec create_lora_training_client(t(), String.t(), keyword()) ::
           {:ok, pid()} | {:error, term()}
-  def create_lora_training_client(service_client, opts \\ []) do
-    GenServer.call(service_client, {:create_training_client, opts})
+  def create_lora_training_client(service_client, base_model, opts \\ [])
+      when is_binary(base_model) do
+    GenServer.call(service_client, {:create_training_client, base_model, opts})
   end
 
   @doc """
@@ -230,12 +234,13 @@ defmodule Tinkex.ServiceClient do
   end
 
   @impl true
-  def handle_call({:create_training_client, opts}, _from, state) do
+  def handle_call({:create_training_client, base_model, opts}, _from, state) do
     model_seq_id = state.training_client_counter
 
     child_opts =
       opts
       |> normalize_training_opts()
+      |> Keyword.put(:base_model, base_model)
       |> Keyword.put(:session_id, state.session_id)
       |> Keyword.put(:config, state.config)
       |> Keyword.put(:model_seq_id, model_seq_id)

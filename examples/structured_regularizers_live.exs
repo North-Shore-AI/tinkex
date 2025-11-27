@@ -52,8 +52,7 @@ defmodule Tinkex.Examples.StructuredRegularizersLive do
   defp create_training_client(service, base_model) do
     IO.puts("Creating training client...")
 
-    Tinkex.ServiceClient.create_lora_training_client(service,
-      base_model: base_model,
+    Tinkex.ServiceClient.create_lora_training_client(service, base_model,
       lora_config: %Tinkex.Types.LoraConfig{rank: 16}
     )
   end

@@ -19,9 +19,9 @@ defmodule Tinkex.API do
   alias Tinkex.Streaming.{SSEDecoder, ServerSentEvent}
   alias Tinkex.Types.RequestErrorCategory
 
+  # Python SDK parity constants from _constants.py
   @initial_retry_delay 500
-  @max_retry_delay 8_000
-  @max_retry_duration_ms 30_000
+  @max_retry_delay 10_000
 
   @telemetry_start [:tinkex, :http, :request, :start]
   @telemetry_stop [:tinkex, :http, :request, :stop]
@@ -454,17 +454,15 @@ defmodule Tinkex.API do
     }
   end
 
+  # Python parity: No wall-clock timeout. Retries governed only by max_retries.
   @spec with_retries(Finch.Request.t(), atom(), timeout(), term(), non_neg_integer(), boolean()) ::
           {{:ok, Finch.Response.t()} | {:error, term()}, non_neg_integer()}
   defp with_retries(request, pool, timeout, _pool_key, max_retries, dump_headers?) do
-    start_time = System.monotonic_time(:millisecond)
-
     context = %{
       request: request,
       pool: pool,
       timeout: timeout,
       max_retries: max_retries,
-      start_time: start_time,
       dump_headers?: dump_headers?
     }
 
@@ -472,12 +470,7 @@ defmodule Tinkex.API do
   end
 
   defp do_retry(context, attempt) do
-    elapsed_ms = elapsed_since(context.start_time)
-
-    case retry_timeout_result(elapsed_ms, attempt) do
-      {:halt, result} -> result
-      :continue -> perform_request(context, attempt)
-    end
+    perform_request(context, attempt)
   end
 
   defp perform_request(context, attempt) do
@@ -535,12 +528,19 @@ defmodule Tinkex.API do
     end
   end
 
+  # Python parity: retries on 429 with Retry-After header
   defp status_based_decision(429, headers, _attempt),
     do: {:retry, parse_retry_after(headers)}
 
+  # Python parity: retries on 408 (Request Timeout)
   defp status_based_decision(408, _headers, attempt),
     do: {:retry, retry_delay(attempt)}
 
+  # Python parity: retries on 409 (Conflict/Lock Timeout) - _base_client.py line 724-727
+  defp status_based_decision(409, _headers, attempt),
+    do: {:retry, retry_delay(attempt)}
+
+  # Python parity: retries on 5xx (Server Errors)
   defp status_based_decision(status, _headers, attempt) when status in 500..599,
     do: {:retry, retry_delay(attempt)}
 
@@ -557,10 +557,16 @@ defmodule Tinkex.API do
     end
   end
 
+  # Python parity: _base_client.py `_calculate_retry_timeout`
+  # sleep_seconds = min(INITIAL_RETRY_DELAY * pow(2.0, nb_retries), MAX_RETRY_DELAY)
+  # jitter = 1 - 0.25 * random() -> range [0.75, 1.0]
+  # timeout = sleep_seconds * jitter
   defp retry_delay(attempt) do
     base_delay = @initial_retry_delay * :math.pow(2, attempt)
-    delay = min(base_delay * :rand.uniform(), @max_retry_delay)
-    round(delay)
+    capped_delay = min(base_delay, @max_retry_delay)
+    # Python jitter: 1 - 0.25 * random() gives [0.75, 1.0]
+    jitter = 0.75 + :rand.uniform() * 0.25
+    round(capped_delay * jitter)
   end
 
   defp parse_retry_after(headers) do
@@ -813,8 +819,6 @@ defmodule Tinkex.API do
   defp convert_retry_after(value, :ms), do: value
   defp convert_retry_after(value, :seconds), do: value * 1_000
 
-  defp elapsed_since(start_time), do: System.monotonic_time(:millisecond) - start_time
-
   defp maybe_decompress(%Finch.Response{} = response) do
     case normalized_header(response.headers, "content-encoding") do
       "gzip" ->
@@ -835,24 +839,6 @@ defmodule Tinkex.API do
 
   defp strip_content_encoding(headers) do
     Enum.reject(headers, fn {name, _} -> String.downcase(name) == "content-encoding" end)
-  end
-
-  defp retry_timeout_result(elapsed_ms, attempt) do
-    if elapsed_ms >= @max_retry_duration_ms do
-      Logger.warning("Retry timeout exceeded after #{elapsed_ms}ms")
-
-      error =
-        {:error,
-         %Error{
-           message: "Retry timeout exceeded (#{@max_retry_duration_ms}ms)",
-           type: :api_connection,
-           data: %{elapsed_ms: elapsed_ms, attempts: attempt}
-         }}
-
-      {:halt, {error, attempt}}
-    else
-      :continue
-    end
   end
 
   defp merge_telemetry_metadata(metadata, opts) do

@@ -12,7 +12,7 @@ config =
   )
 
 {:ok, service} = Tinkex.ServiceClient.start_link(config: config)
-{:ok, training} = Tinkex.ServiceClient.create_lora_training_client(service, base_model: "meta-llama/Llama-3.1-8B")
+{:ok, training} = Tinkex.ServiceClient.create_lora_training_client(service, "meta-llama/Llama-3.1-8B")
 
 {:ok, prompt} =
   Tinkex.Types.ModelInput.from_text(
@@ -30,7 +30,7 @@ started_ms = System.monotonic_time(:millisecond)
 {:ok, optim_task} = Tinkex.TrainingClient.optim_step(training, %Tinkex.Types.AdamParams{})
 {:ok, optim} = Task.await(optim_task, 60_000)
 
-{:ok, save_task} = Tinkex.TrainingClient.save_weights_for_sampler(training)
+{:ok, save_task} = Tinkex.TrainingClient.save_weights_for_sampler(training, "checkpoint_001")
 {:ok, save} = Task.await(save_task, 60_000)
 
 IO.inspect({fb.metrics, optim.metrics, save}, label: "training loop outputs")
@@ -39,4 +39,4 @@ IO.puts("end-to-end loop finished in #{System.monotonic_time(:millisecond) - sta
 
 - `forward_backward/4` automatically chunks large batches (128 examples or 500k tokens) and reduces metrics with weighted means/sums.
 - Every training action shares the same sequence counter; the example above yields sequential `seq_id` values for forward/backward chunks, optim, and save-weights.
-- `save_weights_for_sampler/2` accepts optional `:path` / `:sampling_session_seq_id` values if you need deterministic artifact names. The call will poll futures when the server responds with a `request_id`.
+- `save_weights_for_sampler/3` requires a `name` string argument (which maps to `path` in the server request) and accepts optional `:sampling_session_seq_id` in opts if you need deterministic artifact names. The call will poll futures when the server responds with a `request_id`.

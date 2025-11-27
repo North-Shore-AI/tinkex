@@ -26,7 +26,9 @@ defmodule Tinkex.Env do
       cf_access_client_id: cf_access_client_id(env),
       cf_access_client_secret: cf_access_client_secret(env),
       dump_headers?: dump_headers?(env),
-      parity_mode: parity_mode(env)
+      parity_mode: parity_mode(env),
+      pool_size: pool_size(env),
+      pool_count: pool_count(env)
     }
   end
 
@@ -88,6 +90,42 @@ defmodule Tinkex.Env do
     |> fetch("TINKEX_PARITY")
     |> normalize()
     |> parse_parity_mode()
+  end
+
+  @doc """
+  Get HTTP pool size from environment.
+
+  Python SDK uses `max_connections=1000` by default.
+  Set `TINKEX_POOL_SIZE` to override.
+  """
+  @spec pool_size(env_source()) :: pos_integer() | nil
+  def pool_size(env \\ :system) do
+    env
+    |> fetch("TINKEX_POOL_SIZE")
+    |> normalize()
+    |> parse_positive_integer()
+  end
+
+  @doc """
+  Get HTTP pool count from environment.
+
+  Set `TINKEX_POOL_COUNT` to override the number of connection pools.
+  """
+  @spec pool_count(env_source()) :: pos_integer() | nil
+  def pool_count(env \\ :system) do
+    env
+    |> fetch("TINKEX_POOL_COUNT")
+    |> normalize()
+    |> parse_positive_integer()
+  end
+
+  defp parse_positive_integer(nil), do: nil
+
+  defp parse_positive_integer(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {n, ""} when n > 0 -> n
+      _ -> nil
+    end
   end
 
   defp parse_parity_mode(nil), do: nil

@@ -35,6 +35,8 @@ defmodule Tinkex.API.Sampling do
       |> Keyword.put(:pool_type, :sampling)
       |> Keyword.put(:max_retries, max_retries)
       |> Keyword.put_new(:sampling_backpressure, true)
+      # Drop nil values - server rejects null for optional fields like prompt_logprobs
+      |> Keyword.put_new(:transform, drop_nil?: true)
 
     Tinkex.API.post("/api/v1/asample", request, opts)
   end

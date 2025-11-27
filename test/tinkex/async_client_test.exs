@@ -102,7 +102,7 @@ defmodule Tinkex.AsyncClientTest do
       {:ok, training_pid} =
         ServiceClient.create_lora_training_client(
           service_pid,
-          base_model: "meta-llama/Llama-3.2-1B"
+          "meta-llama/Llama-3.2-1B"
         )
 
       # Create sampling client async from training client

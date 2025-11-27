@@ -1,5 +1,6 @@
 defmodule Tinkex.Types.TensorDtypeTest do
   use Supertester.ExUnitFoundation, isolation: :full_isolation
+  import ExUnit.CaptureLog
 
   alias Tinkex.Types.TensorDtype
 
@@ -27,9 +28,18 @@ defmodule Tinkex.Types.TensorDtypeTest do
   end
 
   describe "from_nx_type/1" do
-    test "maps float types" do
+    test "maps float32 directly" do
       assert TensorDtype.from_nx_type({:f, 32}) == :float32
-      assert TensorDtype.from_nx_type({:f, 64}) == :float32
+    end
+
+    test "maps float64 to float32 with warning" do
+      log =
+        capture_log(fn ->
+          assert TensorDtype.from_nx_type({:f, 64}) == :float32
+        end)
+
+      assert log =~ "Downcasting float64 to float32"
+      assert log =~ "precision loss"
     end
 
     test "maps integer types" do
@@ -41,6 +51,57 @@ defmodule Tinkex.Types.TensorDtypeTest do
       assert TensorDtype.from_nx_type({:u, 8}) == :int64
       assert TensorDtype.from_nx_type({:u, 16}) == :int64
       assert TensorDtype.from_nx_type({:u, 32}) == :int64
+    end
+
+    test "warns when converting u64 (potential overflow)" do
+      log =
+        capture_log(fn ->
+          assert TensorDtype.from_nx_type({:u, 64}) == :int64
+        end)
+
+      assert log =~ "u64 to int64"
+      assert log =~ "overflow"
+    end
+  end
+
+  describe "from_nx_type_quiet/1" do
+    test "maps without warnings" do
+      log =
+        capture_log(fn ->
+          assert TensorDtype.from_nx_type_quiet({:f, 64}) == :float32
+          assert TensorDtype.from_nx_type_quiet({:u, 64}) == :int64
+        end)
+
+      assert log == ""
+    end
+
+    test "maps all types correctly" do
+      assert TensorDtype.from_nx_type_quiet({:f, 32}) == :float32
+      assert TensorDtype.from_nx_type_quiet({:f, 64}) == :float32
+      assert TensorDtype.from_nx_type_quiet({:s, 64}) == :int64
+      assert TensorDtype.from_nx_type_quiet({:s, 32}) == :int64
+      assert TensorDtype.from_nx_type_quiet({:u, 8}) == :int64
+    end
+  end
+
+  describe "check_precision_loss/1" do
+    test "returns :ok for safe conversions" do
+      assert TensorDtype.check_precision_loss({:f, 32}) == :ok
+      assert TensorDtype.check_precision_loss({:s, 64}) == :ok
+      assert TensorDtype.check_precision_loss({:s, 32}) == :ok
+      assert TensorDtype.check_precision_loss({:u, 32}) == :ok
+    end
+
+    test "returns {:downcast, reason} for float64" do
+      assert {:downcast, reason} = TensorDtype.check_precision_loss({:f, 64})
+      assert reason =~ "float64 to float32"
+      assert reason =~ "precision loss"
+    end
+
+    test "returns {:downcast, reason} for u64" do
+      assert {:downcast, reason} = TensorDtype.check_precision_loss({:u, 64})
+      assert reason =~ "u64 to int64"
+      assert reason =~ "overflow"
     end
   end
 

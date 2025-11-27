@@ -242,13 +242,20 @@ defmodule Tinkex.TrainingClient do
   @doc """
   Save weights for downstream sampling.
 
-  Returns a `Task.t()` that yields `{:ok, map()}` or `{:error, %Tinkex.Error{}}`.
+  ## Parameters
+  - `client` - The TrainingClient pid
+  - `name` - Name/path for the saved sampler weights (required)
+  - `opts` - Additional options
+
+  Returns a `Task.t()` that yields `{:ok, %SaveWeightsForSamplerResponse{}}` or
+  `{:error, %Tinkex.Error{}}`.
   """
-  @spec save_weights_for_sampler(t(), keyword()) :: {:ok, Task.t()} | {:error, Error.t()}
-  def save_weights_for_sampler(client, opts \\ []) do
+  @spec save_weights_for_sampler(t(), String.t(), keyword()) ::
+          {:ok, Task.t()} | {:error, Error.t()}
+  def save_weights_for_sampler(client, name, opts \\ []) when is_binary(name) do
     {:ok,
      Task.async(fn ->
-       GenServer.call(client, {:save_weights_for_sampler, opts}, :infinity)
+       GenServer.call(client, {:save_weights_for_sampler, name, opts}, :infinity)
      end)}
   end
 
@@ -756,11 +763,13 @@ defmodule Tinkex.TrainingClient do
   end
 
   @impl true
-  def handle_call({:save_weights_for_sampler, opts}, from, state) do
+  def handle_call({:save_weights_for_sampler, name, opts}, from, state) do
     seq_id = state.request_id_counter
     new_counter = seq_id + 1
 
-    {normalized_opts, next_sampling_counter} = normalize_save_weights_opts(opts, state)
+    # Put name as path in opts for the request
+    opts_with_path = Keyword.put(opts, :path, name)
+    {normalized_opts, next_sampling_counter} = normalize_save_weights_opts(opts_with_path, state)
 
     case send_save_weights_for_sampler_request(seq_id, normalized_opts, state) do
       {:error, reason} ->
