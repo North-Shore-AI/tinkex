@@ -8,7 +8,10 @@ defmodule Tinkex.RestClientTest do
     ListSessionsResponse,
     Checkpoint,
     CheckpointsListResponse,
-    CheckpointArchiveUrlResponse
+    CheckpointArchiveUrlResponse,
+    GetSamplerResponse,
+    TrainingRun,
+    WeightsInfoResponse
   }
 
   setup :setup_http_client
@@ -169,6 +172,79 @@ defmodule Tinkex.RestClientTest do
     end
   end
 
+  describe "get_sampler/2" do
+    test "returns sampler info", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/samplers/session-id%3Asample%3A0", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(
+          200,
+          ~s({"sampler_id": "session-id:sample:0", "base_model": "Qwen/Qwen2.5-7B", "model_path": "tinker://run/weights/001"})
+        )
+      end)
+
+      client = RestClient.new("session-123", config)
+      {:ok, response} = RestClient.get_sampler(client, "session-id:sample:0")
+
+      assert %GetSamplerResponse{} = response
+      assert response.base_model == "Qwen/Qwen2.5-7B"
+      assert response.model_path == "tinker://run/weights/001"
+    end
+
+    test "returns error on failure", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/samplers/unknown", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(404, ~s({"error": "Sampler not found"}))
+      end)
+
+      client = RestClient.new("session-123", config)
+      {:error, error} = RestClient.get_sampler(client, "unknown")
+
+      assert error.status == 404
+    end
+  end
+
+  describe "get_weights_info_by_tinker_path/2" do
+    test "returns checkpoint metadata", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "POST", "/api/v1/weights_info", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        assert Jason.decode!(body)["tinker_path"] == "tinker://run-id/weights/0001"
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(
+          200,
+          ~s({"base_model": "Qwen/Qwen2.5-7B", "is_lora": true, "lora_rank": 8})
+        )
+      end)
+
+      client = RestClient.new("session-123", config)
+
+      {:ok, response} =
+        RestClient.get_weights_info_by_tinker_path(client, "tinker://run-id/weights/0001")
+
+      assert %WeightsInfoResponse{} = response
+      assert response.is_lora
+      assert response.lora_rank == 8
+    end
+
+    test "returns error on failure", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "POST", "/api/v1/weights_info", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(404, ~s({"error": "Weights not found"}))
+      end)
+
+      client = RestClient.new("session-123", config)
+
+      {:error, error} =
+        RestClient.get_weights_info_by_tinker_path(client, "tinker://missing/weights/0001")
+
+      assert error.status == 404
+    end
+  end
+
   describe "list_user_checkpoints/2" do
     test "returns paginated user checkpoints", %{bypass: bypass, config: config} do
       Bypass.expect_once(bypass, "GET", "/api/v1/checkpoints", fn conn ->
@@ -262,6 +338,35 @@ defmodule Tinkex.RestClientTest do
     end
   end
 
+  describe "get_checkpoint_archive_url_by_tinker_path/2" do
+    test "delegates to archive URL helper", %{bypass: bypass, config: config} do
+      Bypass.expect_once(
+        bypass,
+        "GET",
+        "/api/v1/training_runs/run-123/checkpoints/weights/0001/archive",
+        fn conn ->
+          conn
+          |> Plug.Conn.put_resp_header(
+            "location",
+            "https://storage.example.com/checkpoints/ckpt-123.tar"
+          )
+          |> Plug.Conn.resp(302, "")
+        end
+      )
+
+      client = RestClient.new("session-123", config)
+
+      {:ok, response} =
+        RestClient.get_checkpoint_archive_url_by_tinker_path(
+          client,
+          "tinker://run-123/weights/0001"
+        )
+
+      assert %CheckpointArchiveUrlResponse{} = response
+      assert response.url == "https://storage.example.com/checkpoints/ckpt-123.tar"
+    end
+  end
+
   describe "delete_checkpoint/2" do
     test "deletes checkpoint successfully", %{bypass: bypass, config: config} do
       Bypass.expect_once(
@@ -313,6 +418,91 @@ defmodule Tinkex.RestClientTest do
       {:error, error} = RestClient.delete_checkpoint(client, "tinker://other-user/weights/0001")
 
       assert error.status == 403
+    end
+  end
+
+  describe "delete_checkpoint_by_tinker_path/2" do
+    test "aliases delete_checkpoint", %{bypass: bypass, config: config} do
+      Bypass.expect_once(
+        bypass,
+        "DELETE",
+        "/api/v1/training_runs/run-123/checkpoints/weights/0001",
+        fn conn ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"status": "deleted"}))
+        end
+      )
+
+      client = RestClient.new("session-123", config)
+
+      {:ok, _} =
+        RestClient.delete_checkpoint_by_tinker_path(client, "tinker://run-123/weights/0001")
+    end
+  end
+
+  describe "publish/unpublish aliases" do
+    test "publish_checkpoint_from_tinker_path/2 posts to publish endpoint", %{
+      bypass: bypass,
+      config: config
+    } do
+      Bypass.expect_once(
+        bypass,
+        "POST",
+        "/api/v1/training_runs/run-123/checkpoints/weights/0001/publish",
+        fn conn ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"status": "published"}))
+        end
+      )
+
+      client = RestClient.new("session-123", config)
+
+      {:ok, _} =
+        RestClient.publish_checkpoint_from_tinker_path(client, "tinker://run-123/weights/0001")
+    end
+
+    test "unpublish_checkpoint_from_tinker_path/2 deletes publish endpoint", %{
+      bypass: bypass,
+      config: config
+    } do
+      Bypass.expect_once(
+        bypass,
+        "DELETE",
+        "/api/v1/training_runs/run-123/checkpoints/weights/0001/publish",
+        fn conn ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"status": "unpublished"}))
+        end
+      )
+
+      client = RestClient.new("session-123", config)
+
+      {:ok, _} =
+        RestClient.unpublish_checkpoint_from_tinker_path(
+          client,
+          "tinker://run-123/weights/0001"
+        )
+    end
+  end
+
+  describe "get_training_run_by_tinker_path/2" do
+    test "extracts run_id and fetches training run", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/training_runs/run-xyz", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(
+          200,
+          ~s({"training_run_id": "run-xyz", "base_model": "m", "model_owner": "owner", "is_lora": false, "corrupted": false, "last_request_time": "2025-11-26T00:00:00Z"})
+        )
+      end)
+
+      client = RestClient.new("session-123", config)
+
+      {:ok, %TrainingRun{training_run_id: "run-xyz"}} =
+        RestClient.get_training_run_by_tinker_path(client, "tinker://run-xyz/weights/0001")
     end
   end
 end

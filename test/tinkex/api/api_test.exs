@@ -1,5 +1,7 @@
 defmodule Tinkex.APITest do
   use Tinkex.HTTPCase, async: false
+  import ExUnit.CaptureLog
+  require Logger
 
   alias Tinkex.API
   alias Tinkex.API.Sampling
@@ -299,6 +301,70 @@ defmodule Tinkex.APITest do
       assert Agent.get(counter, & &1) == 20
 
       Agent.stop(counter)
+    end
+  end
+
+  describe "headers and redaction" do
+    test "includes cloudflare headers when configured", %{bypass: bypass, config: config} do
+      config =
+        %Config{
+          config
+          | cf_access_client_id: "cf-id",
+            cf_access_client_secret: "cf-secret"
+        }
+
+      Bypass.expect_once(bypass, "GET", "/cf", fn conn ->
+        assert Plug.Conn.get_req_header(conn, "cf-access-client-id") == ["cf-id"]
+        assert Plug.Conn.get_req_header(conn, "cf-access-client-secret") == ["cf-secret"]
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"ok":true}))
+      end)
+
+      assert {:ok, %{"ok" => true}} = API.get("/cf", config: config)
+    end
+
+    test "omits cloudflare headers when not configured", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/cf-missing", fn conn ->
+        assert Plug.Conn.get_req_header(conn, "cf-access-client-id") == []
+        assert Plug.Conn.get_req_header(conn, "cf-access-client-secret") == []
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"ok":true}))
+      end)
+
+      assert {:ok, %{"ok" => true}} = API.get("/cf-missing", config: config)
+    end
+
+    test "redacts secrets when dumping headers", %{bypass: bypass, config: config} do
+      config =
+        %Config{
+          config
+          | cf_access_client_secret: "super-secret",
+            dump_headers?: true
+        }
+
+      Bypass.expect_once(bypass, "GET", "/dump", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"ok":true}))
+      end)
+
+      previous_level = Logger.level()
+
+      log =
+        capture_log([level: :debug], fn ->
+          Logger.configure(level: :debug)
+          assert {:ok, %{"ok" => true}} = API.get("/dump", config: config)
+        end)
+
+      Logger.configure(level: previous_level)
+
+      refute log =~ "super-secret"
+      refute log =~ "cf-access-client-secret"
+      assert log =~ "[REDACTED]"
     end
   end
 end

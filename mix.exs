@@ -1,7 +1,7 @@
 defmodule Tinkex.MixProject do
   use Mix.Project
 
-  @version "0.1.8"
+  @version "0.1.9"
   @source_url "https://github.com/North-Shore-AI/tinkex"
   @docs_url "https://hexdocs.pm/tinkex"
 
@@ -55,6 +55,7 @@ defmodule Tinkex.MixProject do
 
       # Telemetry
       {:telemetry, "~> 1.2"},
+      {:semaphore, "~> 1.3"},
 
       # Development
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
@@ -90,11 +91,14 @@ defmodule Tinkex.MixProject do
         "docs/guides/getting_started.md",
         "docs/guides/tokenization.md",
         "docs/guides/advanced_configuration.md",
+        "docs/guides/environment_configuration.md",
+        "docs/guides/model_info_unload.md",
         # Core Features
         "docs/guides/training_loop.md",
         "docs/guides/forward_inference.md",
         "docs/guides/regularizers.md",
         "docs/guides/checkpoint_management.md",
+        "docs/guides/training_persistence.md",
         # Async & Reliability
         "docs/guides/futures_and_async.md",
         "docs/guides/retry_and_error_handling.md",
@@ -111,13 +115,16 @@ defmodule Tinkex.MixProject do
         "Getting Started": [
           "docs/guides/getting_started.md",
           "docs/guides/tokenization.md",
-          "docs/guides/advanced_configuration.md"
+          "docs/guides/advanced_configuration.md",
+          "docs/guides/environment_configuration.md",
+          "docs/guides/model_info_unload.md"
         ],
         "Core Features": [
           "docs/guides/training_loop.md",
           "docs/guides/forward_inference.md",
           "docs/guides/regularizers.md",
-          "docs/guides/checkpoint_management.md"
+          "docs/guides/checkpoint_management.md",
+          "docs/guides/training_persistence.md"
         ],
         "Async & Reliability": [
           "docs/guides/futures_and_async.md",

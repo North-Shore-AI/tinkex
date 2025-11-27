@@ -141,6 +141,7 @@ config :tinkex,
   http_pool: Tinkex.HTTP.Pool,
   enable_http_pools: true,
   heartbeat_interval_ms: 10_000,
+  heartbeat_warning_after_ms: 120_000,
   metrics_enabled: true,
   metrics_latency_buckets: [1, 2, 5, 10, 20, 50, 100, 200, 500, 1_000, 2_000, 5_000],
   metrics_histogram_max_samples: 1_000,
@@ -179,6 +180,10 @@ config :tinkex,
 - How often to send session heartbeats
 - Lower values = more frequent health checks
 - Higher values = reduced API calls
+
+**:heartbeat_warning_after_ms**
+- Default: `120_000` ms (2 minutes)
+- How long heartbeats can fail consecutively before a warning is emitted (heartbeats continue retrying)
 
 **:metrics_enabled**
 - Default: `true`
@@ -432,11 +437,8 @@ For advanced use cases, you can manage sessions directly:
 ### Heartbeat Behavior
 
 - **Success (200)**: Session remains active
-- **Client error (4xx)**: Session silently dropped from tracking
-- **Server error (5xx)**: Session kept, retry on next interval
-- **Network error**: Session kept, retry on next interval
-
-This matches Python SDK behavior: silent failures, no warnings for individual heartbeats.
+- **Any error (4xx/5xx/network)**: Session remains tracked; heartbeat retries on the next interval
+- **Sustained failures**: If failures exceed `heartbeat_warning_after_ms` (default: 120s), a warning is logged with the last error; the manager keeps retrying
 
 ## User Metadata
 

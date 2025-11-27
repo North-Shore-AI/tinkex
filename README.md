@@ -13,7 +13,7 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the Tinker distributed machine learning platform. It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.8 Highlights
+## 0.1.9 Highlights
 
 - **NotGiven/transform layer**: Added omit/not-given sentinels and a transform pipeline for request serialization (aliasing, date formatting, and omission of unset fields) to match the Python SDK.
 - **Response wrappers + SSE**: HTTP responses now expose metadata (status, headers, URL, elapsed, retries) via `Tinkex.API.Response`, with SSE decoding helpers for event-stream endpoints.
@@ -38,8 +38,15 @@ Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-
 - **Retry Logic**: Configurable retry strategies with exponential backoff
 - **Telemetry**: Comprehensive observability through Elixir's telemetry ecosystem
 - **Metrics Aggregation**: Built-in `Tinkex.Metrics` for counters, gauges, and latency percentiles with snapshot/export helpers
-- **Session lifecycle resilience**: `SessionManager.stop_session/2` now waits for heartbeat cleanup so clients never race with session removal, and heartbeat errors that stem from user-visible failures simply drop the stale session instead of raising.
-- **REST metadata & inspection APIs**: New endpoints surface samplers, weights metadata, and training runs while the SDK exposes `GetSamplerResponse`, `WeightsInfoResponse`, `ImageChunk.expected_tokens`, `LoadWeightsRequest.load_optimizer_state`, and the `:cispo`/`:dro` `LossFnType` tags for richer load/save tooling.
+- **Session lifecycle resilience**: `SessionManager.stop_session/2` waits for heartbeat cleanup, heartbeats use the canonical `/api/v1/session_heartbeat` path, and sustained heartbeat failures now surface as warnings (after ~2 minutes by default) instead of silently dropping sessions.
+- **REST metadata & inspection APIs**: New endpoints surface samplers, weights metadata, and training runs while the SDK exposes `GetSamplerResponse`, `WeightsInfoResponse`, `ImageChunk.expected_tokens`, `LoadWeightsRequest.optimizer`, and the `:cispo`/`:dro` `LossFnType` tags for richer load/save tooling.
+- **Checkpoint persistence**: `TrainingClient.save_state/3`, `TrainingClient.load_state/3`, `TrainingClient.load_state_with_optimizer/3`, and `ServiceClient.create_training_client_from_state/3` enable saving checkpoints and resuming training with optimizer state.
+
+## Guides
+
+- Training persistence: `docs/guides/training_persistence.md`
+- Live training persistence example: `mix run examples/training_persistence_live.exs` (requires `TINKER_API_KEY` only)
+- Save-and-sample convenience: `mix run examples/save_weights_and_sample.exs` demonstrates `TrainingClient.save_weights_and_get_sampling_client_sync/2` (requires `TINKER_API_KEY`)
 
 ## Installation
 
@@ -48,20 +55,25 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.8"}
+    {:tinkex, "~> 0.1.9"}
   ]
 end
 ```
 
 ## Quick Start
 
-For a full walkthrough (installation, configuration, CLI), see `docs/guides/getting_started.md`.
+For a full walkthrough (installation, configuration, CLI), see `docs/guides/getting_started.md`. For environment flags and precedence, see `docs/guides/environment_configuration.md`. For advanced tuning knobs (HTTP pools, retries, telemetry), see `docs/guides/advanced_configuration.md`.
 
 ```elixir
 # Configure your API key
 config :tinkex,
   api_key: System.get_env("TINKER_API_KEY"),
   base_url: "https://tinker.thinkingmachines.dev/services/tinker-prod"
+
+# Optional: Cloudflare Access service tokens (ADR-002)
+# export CLOUDFLARE_ACCESS_CLIENT_ID=...
+# export CLOUDFLARE_ACCESS_CLIENT_SECRET=...
+# Tinkex will forward them on every request.
 
 # Create a training client for LoRA fine-tuning
 {:ok, service_client} = Tinkex.ServiceClient.new()
@@ -113,6 +125,58 @@ params = %Tinkex.Types.SamplingParams{
 {:ok, response} = Task.await(sample_task)
 ```
 
+### Sampling retries & backpressure
+
+Sampling clients now accept a `retry_config` to tune high-level retries and limit concurrent attempts:
+
+```elixir
+retry_config =
+  Tinkex.RetryConfig.new(
+    max_retries: 5,
+    base_delay_ms: 750,
+    max_delay_ms: 15_000,
+    jitter_pct: 0.25,
+    max_connections: 25
+  )
+
+{:ok, sampling_client} =
+  Tinkex.ServiceClient.create_sampling_client(service_client,
+    base_model: "meta-llama/Llama-3.1-8B",
+    retry_config: retry_config
+  )
+
+# Disable retries for a client
+{:ok, sampling_client} =
+  Tinkex.ServiceClient.create_sampling_client(service_client,
+    base_model: "meta-llama/Llama-3.1-8B",
+    retry_config: [enable_retry_logic: false]
+  )
+```
+
+Defaults mirror the Python SDK (0.5s base, 10s cap, 25% jitter, 30m progress timeout, 100 max connections). Retries run at the SamplingClient layer; HTTP sampling still defaults to 0 low-level retries.
+
+### Environment configuration
+
+`Tinkex.Config.new/1` now defaults from `Tinkex.Env` (precedence: opts > `config :tinkex` > env vars > built-ins). Supported env vars:
+
+- `TINKER_API_KEY` (required) and `TINKER_BASE_URL` (defaults to `https://tinker.thinkingmachines.dev/services/tinker-prod`).
+- `TINKER_TAGS`, `TINKER_FEATURE_GATES` (comma-separated lists), `TINKER_TELEMETRY` (on by default), and `TINKER_LOG` (`debug`/`info`/`warn`/`error`).
+- `TINKEX_DUMP_HEADERS` (debug logging; secrets redacted) and Cloudflare Access tokens `CLOUDFLARE_ACCESS_CLIENT_ID` / `CLOUDFLARE_ACCESS_CLIENT_SECRET` per ADR-002 (added to every request when set).
+
+App config defaults are also honored:
+
+```elixir
+config :tinkex,
+  api_key: System.get_env("TINKER_API_KEY"),
+  base_url: System.get_env("TINKER_BASE_URL"),
+  cf_access_client_id: System.get_env("CLOUDFLARE_ACCESS_CLIENT_ID"),
+  cf_access_client_secret: System.get_env("CLOUDFLARE_ACCESS_CLIENT_SECRET"),
+  telemetry_enabled?: true,
+  log_level: :info
+```
+
+See `docs/guides/environment_configuration.md` for the full matrix and precedence rules.
+
 ### Metrics snapshot
 
 `Tinkex.Metrics` subscribes to HTTP telemetry automatically. Flush and snapshot after a run to grab counters and latency percentiles without extra scripting:
@@ -147,7 +211,7 @@ The demo performs a capabilities + health probe and computes prompt logprobs via
 
 Use the `RestClient` for synchronous session and checkpoint management, and `CheckpointDownload` to pull artifacts locally:
 
-> Note: the heartbeat endpoint is `/api/v1/heartbeat` in this SDK (Python uses `/api/v1/session_heartbeat`), but behavior is equivalent.
+> Note: the heartbeat endpoint is `/api/v1/session_heartbeat` (aligned with the Python SDK). Heartbeats keep retrying on failure and emit a warning if consecutive failures exceed the warning window (default: 120s). For a live check, run `mix run examples/heartbeat_probe.exs` (requires `TINKER_API_KEY`).
 
 ```elixir
 {:ok, service} = Tinkex.ServiceClient.start_link(config: config)
@@ -450,9 +514,14 @@ mix docs
 
 - HexDocs site (API reference + guides): https://hexdocs.pm/tinkex (generate locally with `mix docs`, dev-only).
 - Getting started + CLI walkthrough: `docs/guides/getting_started.md`
+- Environment & advanced config: `docs/guides/environment_configuration.md`, `docs/guides/advanced_configuration.md`
 - API overview & parity checklist: `docs/guides/api_reference.md`
+- Futures/retries: `docs/guides/futures_and_async.md`, `docs/guides/retry_and_error_handling.md`
+- Tokenization and end-to-end training: `docs/guides/tokenization.md`, `docs/guides/training_loop.md`
+- Sampling/streaming: `docs/guides/forward_inference.md`, `docs/guides/streaming.md`
+- Checkpoints/CLI: `docs/guides/checkpoint_management.md`, `docs/guides/cli_guide.md`
+- Observability: `docs/guides/telemetry.md`, `docs/guides/metrics.md`
 - Troubleshooting playbook: `docs/guides/troubleshooting.md`
-- Tokenization and end-to-end training slices: `docs/guides/tokenization.md`, `docs/guides/training_loop.md`
 - End-to-end examples (sessions, checkpoints, downloads, async factories): see `examples/*.exs`
 
 ## Python parity checks
@@ -521,6 +590,7 @@ Run any of the sample scripts with `mix run examples/<name>.exs` (requires `TINK
 - `telemetry_live.exs` – live telemetry with custom events and sampling
 - `telemetry_reporter_demo.exs` – comprehensive reporter demo with retry, drain, and shutdown
 - `retry_and_capture.exs` – retry helper demo with telemetry events and capture macros (uses live session creation when `TINKER_API_KEY` is set)
+- `model_info_and_unload.exs` – fetch model metadata (including tokenizer id) and unload the model session (unload currently returns 404 on prod; see docs/guides/model_info_unload.md)
 
 Use `examples/run_all.sh` (requires `TINKER_API_KEY`) to run the curated set in sequence.
 

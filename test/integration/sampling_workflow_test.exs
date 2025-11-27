@@ -29,7 +29,7 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"session_id":"session-sample"}))
 
-        "/api/v1/heartbeat" ->
+        "/api/v1/session_heartbeat" ->
           conn
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"ok":true}))
@@ -69,7 +69,10 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
     {:ok, service} = ServiceClient.start_link(config: config)
 
     {:ok, sampling_client} =
-      ServiceClient.create_sampling_client(service, base_model: "base-model")
+      ServiceClient.create_sampling_client(service,
+        base_model: "base-model",
+        retry_config: [enable_retry_logic: false]
+      )
 
     prompt = ModelInput.from_ints([1, 2, 3])
     params = %SamplingParams{max_tokens: 4, temperature: 0.4}
@@ -101,7 +104,7 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"session_id":"session-rate"}))
 
-        "/api/v1/heartbeat" ->
+        "/api/v1/session_heartbeat" ->
           conn
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"ok":true}))
@@ -146,7 +149,10 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
     {:ok, service} = ServiceClient.start_link(config: config)
 
     {:ok, sampling_client} =
-      ServiceClient.create_sampling_client(service, base_model: "base-model")
+      ServiceClient.create_sampling_client(service,
+        base_model: "base-model",
+        retry_config: [enable_retry_logic: false]
+      )
 
     prompt = ModelInput.from_ints([1])
     params = %SamplingParams{max_tokens: 2, temperature: 0.2}
@@ -200,7 +206,7 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"session_id":"session-errors"}))
 
-        "/api/v1/heartbeat" ->
+        "/api/v1/session_heartbeat" ->
           conn
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"ok":true}))
@@ -234,7 +240,10 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
     {:ok, service} = ServiceClient.start_link(config: config)
 
     {:ok, sampling_client} =
-      ServiceClient.create_sampling_client(service, base_model: "base-model")
+      ServiceClient.create_sampling_client(service,
+        base_model: "base-model",
+        retry_config: [enable_retry_logic: false]
+      )
 
     prompt = ModelInput.from_ints([1])
     params = %SamplingParams{max_tokens: 1, temperature: 0.5}
@@ -289,7 +298,7 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"session_id":"session-a"}))
 
-        "/api/v1/heartbeat" ->
+        "/api/v1/session_heartbeat" ->
           conn
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"ok":true}))
@@ -323,7 +332,7 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"session_id":"session-b"}))
 
-        "/api/v1/heartbeat" ->
+        "/api/v1/session_heartbeat" ->
           conn
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"ok":true}))
@@ -362,8 +371,17 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
     {:ok, service_a} = ServiceClient.start_link(config: config_a)
     {:ok, service_b} = ServiceClient.start_link(config: config_b)
 
-    {:ok, client_a} = ServiceClient.create_sampling_client(service_a, base_model: "base-a")
-    {:ok, client_b} = ServiceClient.create_sampling_client(service_b, base_model: "base-b")
+    {:ok, client_a} =
+      ServiceClient.create_sampling_client(service_a,
+        base_model: "base-a",
+        retry_config: [enable_retry_logic: false]
+      )
+
+    {:ok, client_b} =
+      ServiceClient.create_sampling_client(service_b,
+        base_model: "base-b",
+        retry_config: [enable_retry_logic: false]
+      )
 
     prompt = ModelInput.from_ints([7])
     params = %SamplingParams{max_tokens: 2, temperature: 0.2}

@@ -3,6 +3,7 @@ defmodule Tinkex.SessionManagerTest do
 
   alias Plug.Conn
   alias Tinkex.{Config, SessionManager}
+  import ExUnit.CaptureLog
 
   defmodule SlowSessionAPI do
     def create(_request, config: _config) do
@@ -18,10 +19,7 @@ defmodule Tinkex.SessionManagerTest do
     bypass = Bypass.open()
     base_url = "http://localhost:#{bypass.port}"
     finch_name = start_test_finch(base_url)
-    manager_name = :"session_manager_#{System.unique_integer([:positive])}"
-
-    {:ok, _} =
-      start_supervised({SessionManager, name: manager_name, heartbeat_interval_ms: 1_000_000})
+    manager_name = start_session_manager(heartbeat_interval_ms: 1_000_000)
 
     config = Config.new(api_key: "test-key", base_url: base_url, http_pool: finch_name)
 
@@ -43,7 +41,7 @@ defmodule Tinkex.SessionManagerTest do
 
     expect_create_session(bypass, "session-1")
 
-    Bypass.stub(bypass, "POST", "/api/v1/heartbeat", fn conn ->
+    Bypass.stub(bypass, "POST", "/api/v1/session_heartbeat", fn conn ->
       send(test_pid, :heartbeat_called)
       Conn.resp(conn, 200, ~s({"ok":true}))
     end)
@@ -57,26 +55,41 @@ defmodule Tinkex.SessionManagerTest do
     SessionManager.stop_session("session-1", manager)
   end
 
-  @tag capture_log: true
-  test "user-error heartbeats drop the session", %{
+  test "user-error heartbeats warn after sustained failure and keep the session", %{
     bypass: bypass,
-    config: config,
-    manager: manager
+    config: config
   } do
     test_pid = self()
     expect_create_session(bypass, "session-2")
 
-    Bypass.stub(bypass, "POST", "/api/v1/heartbeat", fn conn ->
+    Bypass.stub(bypass, "POST", "/api/v1/session_heartbeat", fn conn ->
       send(test_pid, :heartbeat_error)
       Conn.resp(conn, 401, ~s({"error":"expired"}))
     end)
+
+    manager =
+      start_session_manager(
+        heartbeat_interval_ms: 1_000_000,
+        heartbeat_warning_after_ms: 50
+      )
 
     assert {:ok, "session-2"} = SessionManager.start_session(config, manager)
 
     send(manager, :heartbeat)
     assert_receive :heartbeat_error, 1_000
+    assert Map.has_key?(sessions(manager), "session-2")
 
-    refute Map.has_key?(sessions(manager), "session-2")
+    log =
+      capture_log([level: :warning], fn ->
+        Process.sleep(60)
+        send(manager, :heartbeat)
+        assert_receive :heartbeat_error, 1_000
+        Process.sleep(20)
+      end)
+
+    assert log =~ "session-2"
+    assert log =~ "Heartbeat has failed"
+    assert Map.has_key?(sessions(manager), "session-2")
   end
 
   test "transient heartbeat errors keep the session", %{
@@ -89,7 +102,7 @@ defmodule Tinkex.SessionManagerTest do
 
     {:ok, counter} = Agent.start_link(fn -> 0 end)
 
-    Bypass.stub(bypass, "POST", "/api/v1/heartbeat", fn conn ->
+    Bypass.stub(bypass, "POST", "/api/v1/session_heartbeat", fn conn ->
       count = Agent.get_and_update(counter, fn current -> {current + 1, current + 1} end)
 
       status = if count == 1, do: 500, else: 200
@@ -115,6 +128,26 @@ defmodule Tinkex.SessionManagerTest do
       Process.sleep(delay_ms)
       Conn.resp(conn, 200, ~s({"session_id":"#{session_id}"}))
     end)
+  end
+
+  defp start_session_manager(opts) do
+    name = Keyword.get(opts, :name, :"session_manager_#{System.unique_integer([:positive])}")
+    heartbeat_interval_ms = Keyword.get(opts, :heartbeat_interval_ms, 1_000_000)
+    heartbeat_warning_after_ms = Keyword.get(opts, :heartbeat_warning_after_ms, 120_000)
+    session_api = Keyword.get(opts, :session_api, Tinkex.API.Session)
+
+    spec =
+      Supervisor.child_spec(
+        {SessionManager,
+         name: name,
+         heartbeat_interval_ms: heartbeat_interval_ms,
+         heartbeat_warning_after_ms: heartbeat_warning_after_ms,
+         session_api: session_api},
+        id: {SessionManager, name}
+      )
+
+    {:ok, _} = start_supervised(spec)
+    name
   end
 
   defp start_test_finch(_base_url) do

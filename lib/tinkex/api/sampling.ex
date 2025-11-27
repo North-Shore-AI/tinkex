@@ -28,10 +28,12 @@ defmodule Tinkex.API.Sampling do
   @spec sample_async(map(), keyword()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def sample_async(request, opts) do
+    max_retries = Keyword.get(opts, :max_retries, 0)
+
     opts =
       opts
       |> Keyword.put(:pool_type, :sampling)
-      |> Keyword.put(:max_retries, 0)
+      |> Keyword.put(:max_retries, max_retries)
       |> Keyword.put_new(:sampling_backpressure, true)
 
     Tinkex.API.post("/api/v1/asample", request, opts)

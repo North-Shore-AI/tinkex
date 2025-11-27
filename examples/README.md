@@ -14,6 +14,7 @@ The examples are organized by functionality and complexity, ranging from simple 
 - `structured_regularizers.exs` – composable regularizer pipeline demo with mock data (runs offline)
 - `structured_regularizers_live.exs` – custom loss with regularizers via live Tinker API
 - `live_capabilities_and_logprobs.exs` – live health/capabilities check plus prompt logprobs (requires API key)
+- `model_info_and_unload.exs` – fetch active model metadata (tokenizer id, arch) and unload the session (requires API key)
 - `sessions_management.exs` – REST session listing and detail queries
 - `checkpoints_management.exs` – user checkpoint listing with metadata inspection
 - `checkpoint_download.exs` – archive discovery, download, and extraction with progress callbacks
@@ -25,6 +26,13 @@ The examples are organized by functionality and complexity, ranging from simple 
 - `telemetry_live.exs` – live telemetry with custom events and sampling
 - `telemetry_reporter_demo.exs` – comprehensive telemetry reporter demo with all features
 - `retry_and_capture.exs` – retry helper + capture macros with telemetry events
+- `heartbeat_probe.exs` – guarded live probe that asserts `/api/v1/session_heartbeat` returns 200 and `/api/v1/heartbeat` returns 404 (opt-in via env)
+- `training_persistence_live.exs` – save a checkpoint, reload it with optimizer state, and spin up a fresh training client from the saved weights (requires only `TINKER_API_KEY`)
+- `save_weights_and_sample.exs` – use the synchronous helper to save sampler weights and immediately create a SamplingClient, then run a sample with the freshly saved weights (requires `TINKER_API_KEY`)
+- Sampling retry tuning is supported in any sampling example via `retry_config` (e.g., pass
+  `retry_config: [max_retries: 5, max_connections: 20]` to
+  `ServiceClient.create_sampling_client/2` inside `sampling_basic.exs` if you want to see the
+  new semaphore-based limiter in action).
 - `examples/run_all.sh` – helper script that runs each example sequentially
 
 ## Prerequisites
@@ -80,6 +88,19 @@ examples/run_all.sh
 
 The script simply iterates through the example list and executes `mix run examples/<name>.exs` for each entry, exiting on the first failure. Export any additional variables (e.g., `TINKER_BASE_MODEL`, `TINKER_PROMPT`, `TINKEX_DEBUG=1`) before invoking the script so they apply to every example.
 
+### Heartbeat probe
+
+To verify the live heartbeat path, run:
+
+```bash
+export TINKER_API_KEY="your-api-key-here"
+# optional:
+# export TINKER_BASE_URL="https://tinker.thinkingmachines.dev/services/tinker-prod"
+mix run examples/heartbeat_probe.exs
+```
+
+The probe creates a session, expects `POST /api/v1/session_heartbeat` to return 200, and asserts `POST /api/v1/heartbeat` returns 404.
+
 ## Example Descriptions
 
 ### sampling_basic.exs
@@ -122,6 +143,17 @@ This example illustrates a complete training workflow including forward-backward
 - `TINKER_PROMPT` (optional, training prompt)
 - `TINKER_SAMPLE_AFTER_TRAIN` (optional, "1" to enable post-training sampling)
 - `TINKER_SAMPLE_PROMPT` (optional, prompt for post-training sampling)
+
+### save_weights_and_sample.exs
+
+Demonstrates the synchronous helper `TrainingClient.save_weights_and_get_sampling_client_sync/2`: saves sampler weights (or performs an ephemeral sampler save), instantiates a `SamplingClient`, and performs a sample using the freshly saved weights.
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional)
+- `TINKER_BASE_MODEL` (optional, defaults to Llama-3.1-8B)
+- `TINKER_PROMPT` (optional, defaults to "Hello from Tinkex!")
+- `TINKER_MAX_TOKENS` (optional, defaults to 32)
 
 ### forward_inference.exs
 
@@ -175,6 +207,27 @@ examples/run_all.sh
 ```
 
 Expected output includes supported models, `status: ok` for health, and a list of prompt logprobs.
+
+### model_info_and_unload.exs
+
+Fetch active model metadata via the TrainingClient (`get_info`) and explicitly unload the model when finished. This is the quickest way to confirm the tokenizer id returned by the service and to release GPU memory for the session.
+
+**Key Features:**
+- Creates a training client for the configured base model
+- Calls `/api/v1/get_info` to print `model_name`, `arch`, and `tokenizer_id`
+- Calls `/api/v1/unload_model` to end the session
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional, defaults to production)
+- `TINKER_BASE_MODEL` (optional, defaults to `meta-llama/Llama-3.1-8B`)
+
+**Quickstart:**
+
+```bash
+export TINKER_API_KEY="your-api-key-here"
+mix run examples/model_info_and_unload.exs
+```
 
 ### structured_regularizers.exs
 

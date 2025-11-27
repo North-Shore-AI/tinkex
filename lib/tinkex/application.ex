@@ -17,6 +17,9 @@ defmodule Tinkex.Application do
     enable_http_pools? = Application.get_env(:tinkex, :enable_http_pools, true)
     heartbeat_interval_ms = Application.get_env(:tinkex, :heartbeat_interval_ms, 10_000)
 
+    heartbeat_warning_after_ms =
+      Application.get_env(:tinkex, :heartbeat_warning_after_ms, 120_000)
+
     base_url =
       Application.get_env(
         :tinkex,
@@ -28,7 +31,7 @@ defmodule Tinkex.Application do
 
     children =
       maybe_add_http_pool(enable_http_pools?, destination) ++
-        base_children(heartbeat_interval_ms)
+        base_children(heartbeat_interval_ms, heartbeat_warning_after_ms)
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Tinkex.Supervisor)
   end
@@ -55,20 +58,33 @@ defmodule Tinkex.Application do
       :named_table,
       read_concurrency: true
     ])
+
+    create_table(:tinkex_sessions, [
+      :set,
+      :public,
+      :named_table,
+      read_concurrency: true,
+      write_concurrency: true
+    ])
   end
 
   defp create_table(name, options) do
-    case :ets.whereis(name) do
-      :undefined -> :ets.new(name, options)
-      _ -> name
+    try do
+      :ets.new(name, options)
+    rescue
+      ArgumentError -> name
     end
   end
 
-  defp base_children(heartbeat_interval_ms) do
+  defp base_children(heartbeat_interval_ms, heartbeat_warning_after_ms) do
     [
       Tinkex.Metrics,
+      Tinkex.RetrySemaphore,
       Tinkex.SamplingRegistry,
-      {Tinkex.SessionManager, heartbeat_interval_ms: heartbeat_interval_ms},
+      {Task.Supervisor, name: Tinkex.TaskSupervisor},
+      {Tinkex.SessionManager,
+       heartbeat_interval_ms: heartbeat_interval_ms,
+       heartbeat_warning_after_ms: heartbeat_warning_after_ms},
       {DynamicSupervisor, name: Tinkex.ClientSupervisor, strategy: :one_for_one}
     ]
   end

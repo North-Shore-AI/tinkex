@@ -13,8 +13,9 @@ defmodule Tinkex.TrainingClient do
 
   use GenServer
   use Tinkex.Telemetry.Provider
+  require Logger
 
-  alias Tinkex.API.{Service, Training, Weights}
+  alias Tinkex.API.{Models, Service, Training, Weights}
   alias Tinkex.Error
   alias Tinkex.Future.Combiner
   alias Tinkex.Telemetry.Reporter
@@ -26,11 +27,19 @@ defmodule Tinkex.TrainingClient do
     ForwardBackwardOutput,
     ForwardBackwardRequest,
     ForwardRequest,
+    GetInfoRequest,
+    GetInfoResponse,
     LoraConfig,
+    LoadWeightsRequest,
+    LoadWeightsResponse,
     OptimStepRequest,
     OptimStepResponse,
     SaveWeightsForSamplerRequest,
-    SaveWeightsForSamplerResponse
+    SaveWeightsForSamplerResponse,
+    SaveWeightsRequest,
+    SaveWeightsResponse,
+    UnloadModelRequest,
+    UnloadModelResponse
   }
 
   @max_chunk_len 128
@@ -43,15 +52,32 @@ defmodule Tinkex.TrainingClient do
     GenServer.start_link(__MODULE__, opts, name: opts[:name])
   end
 
+  def child_spec(opts) do
+    %{
+      id: Keyword.get(opts, :name, __MODULE__),
+      start: {__MODULE__, :start_link, [opts]},
+      restart: :temporary,
+      shutdown: 5_000,
+      type: :worker
+    }
+  end
+
   @doc """
   Fetch model metadata for the training client.
 
-  Used by tokenizer resolution to obtain `model_data.tokenizer_id`. Returns an
-  error until the info endpoint is wired.
+  Used by tokenizer resolution to obtain `model_data.tokenizer_id`.
   """
-  @spec get_info(t()) :: {:ok, map()} | {:error, Error.t()}
+  @spec get_info(t()) :: {:ok, GetInfoResponse.t()} | {:error, Error.t()}
   def get_info(client) do
     GenServer.call(client, :get_info)
+  end
+
+  @doc """
+  Unload the active model and end the session.
+  """
+  @spec unload_model(t()) :: {:ok, UnloadModelResponse.t() | map()} | {:error, Error.t()}
+  def unload_model(client) do
+    GenServer.call(client, :unload_model)
   end
 
   @doc """
@@ -118,6 +144,87 @@ defmodule Tinkex.TrainingClient do
     {:ok,
      Task.async(fn ->
        GenServer.call(client, {:save_weights_for_sampler, opts}, :infinity)
+     end)}
+  end
+
+  @doc """
+  Save weights for sampling and immediately create a SamplingClient.
+
+  Supports both persisted sampler checkpoints (path-based) and ephemeral
+  sampling sessions (sampling_session_id-only responses).
+  """
+  @spec save_weights_and_get_sampling_client(t(), keyword()) ::
+          {:ok, Task.t()} | {:error, Error.t()}
+  def save_weights_and_get_sampling_client(client, opts \\ []) do
+    {:ok,
+     Task.async(fn ->
+       GenServer.call(client, {:save_weights_and_get_sampling_client, opts}, :infinity)
+     end)}
+  end
+
+  @doc """
+  Synchronous helper for `save_weights_and_get_sampling_client/2`.
+
+  Waits for sampler save + SamplingClient creation and returns the pid directly.
+  """
+  @spec save_weights_and_get_sampling_client_sync(t(), keyword()) ::
+          {:ok, pid()} | {:error, Error.t()}
+  def save_weights_and_get_sampling_client_sync(client, opts \\ []) do
+    with {:ok, task} <- save_weights_and_get_sampling_client(client, opts) do
+      timeout = Keyword.get(opts, :await_timeout, :infinity)
+
+      try do
+        Task.await(task, timeout)
+      catch
+        :exit, reason ->
+          {:error,
+           Error.new(:request_failed, "save_weights_and_get_sampling_client failed",
+             data: %{exit_reason: reason}
+           )}
+      end
+    end
+  end
+
+  @doc """
+  Save model weights as a training checkpoint.
+
+  Returns a `Task.t()` that yields `{:ok, %SaveWeightsResponse{}}` or
+  `{:error, %Tinkex.Error{}}`.
+  """
+  @spec save_state(t(), String.t(), keyword()) :: {:ok, Task.t()} | {:error, Error.t()}
+  def save_state(client, name, opts \\ []) when is_binary(name) do
+    {:ok,
+     Task.async(fn ->
+       GenServer.call(client, {:save_state, name, opts}, :infinity)
+     end)}
+  end
+
+  @doc """
+  Load model weights from a checkpoint (without optimizer state).
+
+  Returns a `Task.t()` that yields `{:ok, %LoadWeightsResponse{}}` or
+  `{:error, %Tinkex.Error{}}`.
+  """
+  @spec load_state(t(), String.t(), keyword()) :: {:ok, Task.t()} | {:error, Error.t()}
+  def load_state(client, path, opts \\ []) when is_binary(path) do
+    {:ok,
+     Task.async(fn ->
+       GenServer.call(client, {:load_state, path, false, opts}, :infinity)
+     end)}
+  end
+
+  @doc """
+  Load model weights and optimizer state from a checkpoint.
+
+  Returns a `Task.t()` that yields `{:ok, %LoadWeightsResponse{}}` or
+  `{:error, %Tinkex.Error{}}`.
+  """
+  @spec load_state_with_optimizer(t(), String.t(), keyword()) ::
+          {:ok, Task.t()} | {:error, Error.t()}
+  def load_state_with_optimizer(client, path, opts \\ []) when is_binary(path) do
+    {:ok,
+     Task.async(fn ->
+       GenServer.call(client, {:load_state, path, true, opts}, :infinity)
      end)}
   end
 
@@ -208,7 +315,9 @@ defmodule Tinkex.TrainingClient do
     model_seq_id = Keyword.fetch!(opts, :model_seq_id)
     service_api = Keyword.get(opts, :service_api, Service)
     training_api = Keyword.get(opts, :training_api, Training)
+    models_api = Keyword.get(opts, :models_api, Models)
     weights_api = Keyword.get(opts, :weights_api, Weights)
+    sampling_client_module = Keyword.get(opts, :sampling_client_module, Tinkex.SamplingClient)
     future_module = Keyword.get(opts, :future_module, Tinkex.Future)
     client_supervisor = Keyword.get(opts, :client_supervisor, Tinkex.ClientSupervisor)
 
@@ -227,8 +336,11 @@ defmodule Tinkex.TrainingClient do
           config: config,
           http_pool: config.http_pool,
           request_id_counter: 1,
+          sampling_session_counter: 0,
           training_api: training_api,
+          models_api: models_api,
           weights_api: weights_api,
+          sampling_client_module: sampling_client_module,
           future_module: future_module,
           client_supervisor: client_supervisor,
           telemetry_metadata: telemetry_metadata,
@@ -277,44 +389,43 @@ defmodule Tinkex.TrainingClient do
       {:ok, futures_rev} ->
         futures = Enum.reverse(futures_rev)
 
-        Task.start(fn ->
-          reply =
-            try do
-              polling_tasks =
-                Enum.map(futures, fn future ->
-                  task =
-                    state.future_module.poll(
-                      future,
-                      poll_opts_with_type(state, opts, "ForwardBackward")
-                    )
+        start_background_task(
+          fn ->
+            reply =
+              try do
+                polling_tasks =
+                  Enum.map(futures, fn future ->
+                    task =
+                      state.future_module.poll(
+                        future,
+                        poll_opts_with_type(state, opts, "ForwardBackward")
+                      )
 
-                  unlink_task(task)
-                  task
-                end)
+                    unlink_task(task)
+                    task
+                  end)
 
-              case await_forward_backward_results(polling_tasks, state.future_module) do
-                {:ok, outputs} ->
-                  {:ok, Combiner.combine_forward_backward_results(outputs)}
+                case await_forward_backward_results(polling_tasks, state.future_module) do
+                  {:ok, outputs} ->
+                    {:ok, Combiner.combine_forward_backward_results(outputs)}
 
-                {:error, %Error{} = error} ->
-                  {:error, error}
+                  {:error, %Error{} = error} ->
+                    {:error, error}
+                end
+              rescue
+                e ->
+                  {:error,
+                   %Error{
+                     message: "Polling failed: #{Exception.message(e)}",
+                     type: :request_failed,
+                     data: %{exception: e, stacktrace: __STACKTRACE__}
+                   }}
               end
-            rescue
-              e ->
-                {:error,
-                 %Error{
-                   message: "Polling failed: #{Exception.message(e)}",
-                   type: :request_failed,
-                   data: %{exception: e, stacktrace: __STACKTRACE__}
-                 }}
-            end
 
-          try do
-            GenServer.reply(from, reply)
-          rescue
-            ArgumentError -> :ok
-          end
-        end)
+            safe_reply(from, reply)
+          end,
+          from
+        )
 
         {:noreply, %{state | request_id_counter: new_counter}}
     end
@@ -340,44 +451,43 @@ defmodule Tinkex.TrainingClient do
       {:ok, futures_rev} ->
         futures = Enum.reverse(futures_rev)
 
-        Task.start(fn ->
-          reply =
-            try do
-              polling_tasks =
-                Enum.map(futures, fn future ->
-                  task =
-                    state.future_module.poll(
-                      future,
-                      poll_opts_with_type(state, opts, "Forward")
-                    )
+        start_background_task(
+          fn ->
+            reply =
+              try do
+                polling_tasks =
+                  Enum.map(futures, fn future ->
+                    task =
+                      state.future_module.poll(
+                        future,
+                        poll_opts_with_type(state, opts, "Forward")
+                      )
 
-                  unlink_task(task)
-                  task
-                end)
+                    unlink_task(task)
+                    task
+                  end)
 
-              case await_forward_results(polling_tasks, state.future_module) do
-                {:ok, outputs} ->
-                  {:ok, Combiner.combine_forward_backward_results(outputs)}
+                case await_forward_results(polling_tasks, state.future_module) do
+                  {:ok, outputs} ->
+                    {:ok, Combiner.combine_forward_backward_results(outputs)}
 
-                {:error, %Error{} = error} ->
-                  {:error, error}
+                  {:error, %Error{} = error} ->
+                    {:error, error}
+                end
+              rescue
+                e ->
+                  {:error,
+                   %Error{
+                     message: "Polling failed: #{Exception.message(e)}",
+                     type: :request_failed,
+                     data: %{exception: e, stacktrace: __STACKTRACE__}
+                   }}
               end
-            rescue
-              e ->
-                {:error,
-                 %Error{
-                   message: "Polling failed: #{Exception.message(e)}",
-                   type: :request_failed,
-                   data: %{exception: e, stacktrace: __STACKTRACE__}
-                 }}
-            end
 
-          try do
-            GenServer.reply(from, reply)
-          rescue
-            ArgumentError -> :ok
-          end
-        end)
+            safe_reply(from, reply)
+          end,
+          from
+        )
 
         {:noreply, %{state | request_id_counter: new_counter}}
     end
@@ -393,40 +503,39 @@ defmodule Tinkex.TrainingClient do
         {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
 
       {:ok, future} ->
-        Task.start(fn ->
-          reply =
-            try do
-              task =
-                state.future_module.poll(
-                  future,
-                  poll_opts_with_type(state, opts, "OptimStep")
-                )
+        start_background_task(
+          fn ->
+            reply =
+              try do
+                task =
+                  state.future_module.poll(
+                    future,
+                    poll_opts_with_type(state, opts, "OptimStep")
+                  )
 
-              unlink_task(task)
+                unlink_task(task)
 
-              case safe_await(state.future_module, task, await_timeout(opts)) do
-                {:ok, result} ->
-                  {:ok, OptimStepResponse.from_json(result)}
+                case safe_await(state.future_module, task, await_timeout(opts)) do
+                  {:ok, result} ->
+                    {:ok, OptimStepResponse.from_json(result)}
 
-                {:error, %Error{} = error} ->
-                  {:error, error}
+                  {:error, %Error{} = error} ->
+                    {:error, error}
+                end
+              rescue
+                e ->
+                  {:error,
+                   %Error{
+                     message: "Polling failed: #{Exception.message(e)}",
+                     type: :request_failed,
+                     data: %{exception: e, stacktrace: __STACKTRACE__}
+                   }}
               end
-            rescue
-              e ->
-                {:error,
-                 %Error{
-                   message: "Polling failed: #{Exception.message(e)}",
-                   type: :request_failed,
-                   data: %{exception: e, stacktrace: __STACKTRACE__}
-                 }}
-            end
 
-          try do
-            GenServer.reply(from, reply)
-          rescue
-            ArgumentError -> :ok
-          end
-        end)
+            safe_reply(from, reply)
+          end,
+          from
+        )
 
         {:noreply, %{state | request_id_counter: new_counter}}
     end
@@ -434,7 +543,111 @@ defmodule Tinkex.TrainingClient do
 
   @impl true
   def handle_call(:get_info, _from, state) do
-    {:reply, {:error, Error.new(:validation, "get_info not implemented")}, state}
+    case state.models_api.get_info(
+           %GetInfoRequest{model_id: state.model_id},
+           config: state.config,
+           telemetry_metadata: base_telemetry_metadata(state, %{model_id: state.model_id})
+         ) do
+      {:ok, %GetInfoResponse{} = response} ->
+        {:reply, {:ok, response}, state}
+
+      {:error, %Error{} = error} ->
+        {:reply, {:error, error}, state}
+    end
+  end
+
+  @impl true
+  def handle_call(:unload_model, _from, state) do
+    case state.models_api.unload_model(
+           %UnloadModelRequest{model_id: state.model_id},
+           config: state.config,
+           telemetry_metadata: base_telemetry_metadata(state, %{model_id: state.model_id})
+         ) do
+      {:ok, %{"request_id" => _} = future} ->
+        reply = await_unload_future(future, state)
+        {:reply, reply, state}
+
+      {:ok, %{request_id: _} = future} ->
+        reply = await_unload_future(future, state)
+        {:reply, reply, state}
+
+      {:ok, %UnloadModelResponse{} = response} ->
+        {:reply, {:ok, response}, state}
+
+      {:ok, %{} = payload} ->
+        {:reply, {:ok, UnloadModelResponse.from_json(payload)}, state}
+
+      {:error, %Error{} = error} ->
+        {:reply, {:error, error}, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:save_state, name, opts}, from, state) do
+    seq_id = state.request_id_counter
+    new_counter = seq_id + 1
+
+    case send_save_state_request(name, seq_id, opts, state) do
+      {:error, reason} ->
+        {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
+
+      {:ok, response} ->
+        start_background_task(
+          fn ->
+            reply =
+              try do
+                handle_save_state_response(response, state, opts)
+              rescue
+                e ->
+                  {:error,
+                   %Error{
+                     message: "Save state failed: #{Exception.message(e)}",
+                     type: :request_failed,
+                     data: %{exception: e, stacktrace: __STACKTRACE__}
+                   }}
+              end
+
+            safe_reply(from, reply)
+          end,
+          from
+        )
+
+        {:noreply, %{state | request_id_counter: new_counter}}
+    end
+  end
+
+  @impl true
+  def handle_call({:load_state, path, optimizer, opts}, from, state) do
+    seq_id = state.request_id_counter
+    new_counter = seq_id + 1
+
+    case send_load_state_request(path, optimizer, seq_id, opts, state) do
+      {:error, reason} ->
+        {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
+
+      {:ok, response} ->
+        start_background_task(
+          fn ->
+            reply =
+              try do
+                handle_load_state_response(response, state, opts)
+              rescue
+                e ->
+                  {:error,
+                   %Error{
+                     message: "Load state failed: #{Exception.message(e)}",
+                     type: :request_failed,
+                     data: %{exception: e, stacktrace: __STACKTRACE__}
+                   }}
+              end
+
+            safe_reply(from, reply)
+          end,
+          from
+        )
+
+        {:noreply, %{state | request_id_counter: new_counter}}
+    end
   end
 
   @impl true
@@ -442,33 +655,88 @@ defmodule Tinkex.TrainingClient do
     seq_id = state.request_id_counter
     new_counter = seq_id + 1
 
-    case send_save_weights_for_sampler_request(seq_id, opts, state) do
+    {normalized_opts, next_sampling_counter} = normalize_save_weights_opts(opts, state)
+
+    case send_save_weights_for_sampler_request(seq_id, normalized_opts, state) do
       {:error, reason} ->
-        {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
+        {:reply, {:error, reason},
+         %{
+           state
+           | request_id_counter: new_counter,
+             sampling_session_counter: next_sampling_counter
+         }}
 
       {:ok, response} ->
-        Task.start(fn ->
-          reply =
-            try do
-              handle_save_weights_response(response, state, opts)
-            rescue
-              e ->
-                {:error,
-                 %Error{
-                   message: "Save weights failed: #{Exception.message(e)}",
-                   type: :request_failed,
-                   data: %{exception: e, stacktrace: __STACKTRACE__}
-                 }}
-            end
+        start_background_task(
+          fn ->
+            reply =
+              try do
+                handle_save_weights_response(response, state, normalized_opts)
+              rescue
+                e ->
+                  {:error,
+                   %Error{
+                     message: "Save weights failed: #{Exception.message(e)}",
+                     type: :request_failed,
+                     data: %{exception: e, stacktrace: __STACKTRACE__}
+                   }}
+              end
 
-          try do
-            GenServer.reply(from, reply)
-          rescue
-            ArgumentError -> :ok
-          end
-        end)
+            safe_reply(from, reply)
+          end,
+          from
+        )
 
-        {:noreply, %{state | request_id_counter: new_counter}}
+        {:noreply,
+         %{
+           state
+           | request_id_counter: new_counter,
+             sampling_session_counter: next_sampling_counter
+         }}
+    end
+  end
+
+  @impl true
+  def handle_call({:save_weights_and_get_sampling_client, opts}, from, state) do
+    seq_id = state.request_id_counter
+    new_counter = seq_id + 1
+
+    {normalized_opts, next_sampling_counter} = normalize_save_weights_opts(opts, state)
+
+    case send_save_weights_for_sampler_request(seq_id, normalized_opts, state) do
+      {:error, reason} ->
+        {:reply, {:error, reason},
+         %{
+           state
+           | request_id_counter: new_counter,
+             sampling_session_counter: next_sampling_counter
+         }}
+
+      {:ok, response} ->
+        start_background_task(
+          fn ->
+            reply =
+              with {:ok, save_response} <-
+                     handle_save_weights_response(response, state, normalized_opts),
+                   {:ok, sampling_client} <-
+                     start_sampling_client_from_save(save_response, seq_id, opts, state) do
+                {:ok, sampling_client}
+              else
+                {:error, %Error{} = error} -> {:error, error}
+                {:error, reason} -> {:error, reason}
+              end
+
+            safe_reply(from, reply)
+          end,
+          from
+        )
+
+        {:noreply,
+         %{
+           state
+           | request_id_counter: new_counter,
+             sampling_session_counter: next_sampling_counter
+         }}
     end
   end
 
@@ -485,7 +753,7 @@ defmodule Tinkex.TrainingClient do
 
     case DynamicSupervisor.start_child(
            state.client_supervisor,
-           {Tinkex.SamplingClient, child_opts}
+           {state.sampling_client_module, child_opts}
          ) do
       {:ok, pid} ->
         {:reply, {:ok, pid}, %{state | request_id_counter: state.request_id_counter + 1}}
@@ -499,35 +767,34 @@ defmodule Tinkex.TrainingClient do
   def handle_call({:forward_backward_custom, data, loss_fn, opts}, from, state) do
     # Spawn background Task for custom loss computation
     # This mirrors the pattern used for other long-running operations
-    Task.start(fn ->
-      reply =
-        try do
-          # Execute forward pass to get logprobs
-          case do_forward_for_custom_loss(data, opts, state) do
-            {:ok, logprobs} ->
-              # Run the regularizer pipeline
-              alias Tinkex.Regularizer.Pipeline
-              Pipeline.compute(data, logprobs, loss_fn, opts)
+    start_background_task(
+      fn ->
+        reply =
+          try do
+            # Execute forward pass to get logprobs
+            case do_forward_for_custom_loss(data, opts, state) do
+              {:ok, logprobs} ->
+                # Run the regularizer pipeline
+                alias Tinkex.Regularizer.Pipeline
+                Pipeline.compute(data, logprobs, loss_fn, opts)
 
-            {:error, _} = error ->
-              error
+              {:error, _} = error ->
+                error
+            end
+          rescue
+            e ->
+              {:error,
+               %Error{
+                 message: "Custom loss failed: #{Exception.message(e)}",
+                 type: :request_failed,
+                 data: %{exception: e, stacktrace: __STACKTRACE__}
+               }}
           end
-        rescue
-          e ->
-            {:error,
-             %Error{
-               message: "Custom loss failed: #{Exception.message(e)}",
-               type: :request_failed,
-               data: %{exception: e, stacktrace: __STACKTRACE__}
-             }}
-        end
 
-      try do
-        GenServer.reply(from, reply)
-      rescue
-        ArgumentError -> :ok
-      end
-    end)
+        safe_reply(from, reply)
+      end,
+      from
+    )
 
     {:noreply, state}
   end
@@ -662,6 +929,67 @@ defmodule Tinkex.TrainingClient do
     end
   end
 
+  defp send_save_state_request(name, seq_id, _opts, state) do
+    request = %SaveWeightsRequest{
+      model_id: state.model_id,
+      path: name,
+      seq_id: seq_id
+    }
+
+    case state.weights_api.save_weights(
+           request,
+           config: state.config,
+           telemetry_metadata:
+             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
+         ) do
+      {:ok, %{"request_id" => _} = future} ->
+        {:ok, future}
+
+      {:ok, %{request_id: _} = future} ->
+        {:ok, future}
+
+      {:ok, result} ->
+        {:ok, result}
+
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      other ->
+        {:error, Error.new(:validation, "Invalid save_weights response: #{inspect(other)}")}
+    end
+  end
+
+  defp send_load_state_request(path, optimizer, seq_id, _opts, state) do
+    request = %LoadWeightsRequest{
+      model_id: state.model_id,
+      path: path,
+      seq_id: seq_id,
+      optimizer: optimizer
+    }
+
+    case state.weights_api.load_weights(
+           request,
+           config: state.config,
+           telemetry_metadata:
+             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
+         ) do
+      {:ok, %{"request_id" => _} = future} ->
+        {:ok, future}
+
+      {:ok, %{request_id: _} = future} ->
+        {:ok, future}
+
+      {:ok, result} ->
+        {:ok, result}
+
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      other ->
+        {:error, Error.new(:validation, "Invalid load_weights response: #{inspect(other)}")}
+    end
+  end
+
   defp send_save_weights_for_sampler_request(seq_id, opts, state) do
     request = %SaveWeightsForSamplerRequest{
       model_id: state.model_id,
@@ -781,6 +1109,124 @@ defmodule Tinkex.TrainingClient do
 
   defp unlink_task(_), do: :ok
 
+  defp await_unload_future(future, state) do
+    task =
+      state.future_module.poll(
+        future,
+        poll_opts_with_type(state, [], "UnloadModel")
+      )
+
+    unlink_task(task)
+
+    case safe_await(state.future_module, task, await_timeout([])) do
+      {:ok, result} -> {:ok, UnloadModelResponse.from_json(result)}
+      {:error, %Error{} = error} -> {:error, error}
+    end
+  end
+
+  defp safe_reply(from, reply) do
+    try do
+      GenServer.reply(from, reply)
+    rescue
+      ArgumentError -> :ok
+    end
+  end
+
+  defp start_background_task(fun, from) when is_function(fun, 0) do
+    try do
+      case Task.Supervisor.async_nolink(Tinkex.TaskSupervisor, fun) do
+        %Task{pid: pid} ->
+          ref = Process.monitor(pid)
+
+          # Monitor abnormal exits so callers get an explicit error instead of hanging.
+          Task.Supervisor.start_child(Tinkex.TaskSupervisor, fn ->
+            receive do
+              {:DOWN, ^ref, :process, _pid, :normal} ->
+                :ok
+
+              {:DOWN, ^ref, :process, _pid, reason} ->
+                safe_reply(
+                  from,
+                  {:error,
+                   Error.new(:request_failed, "Background task crashed",
+                     data: %{exit_reason: reason}
+                   )}
+                )
+            end
+          end)
+
+          :ok
+      end
+    rescue
+      exception ->
+        Logger.error("Failed to start training background task: #{Exception.message(exception)}")
+        safe_reply(from, {:error, Error.new(:request_failed, "Background task failed to start")})
+        :error
+    end
+  end
+
+  defp handle_save_state_response(%{"request_id" => _} = future, state, opts) do
+    poll_save_state_future(future, state, opts)
+  end
+
+  defp handle_save_state_response(%{request_id: _} = future, state, opts) do
+    poll_save_state_future(future, state, opts)
+  end
+
+  defp handle_save_state_response(%SaveWeightsResponse{} = resp, _state, _opts), do: {:ok, resp}
+
+  defp handle_save_state_response(%{"path" => _} = result, _state, _opts) do
+    {:ok, SaveWeightsResponse.from_json(result)}
+  end
+
+  defp handle_save_state_response(result, _state, _opts), do: {:ok, result}
+
+  defp poll_save_state_future(future, state, opts) do
+    task =
+      state.future_module.poll(
+        future,
+        poll_opts_with_type(state, opts, "SaveWeights")
+      )
+
+    unlink_task(task)
+
+    case safe_await(state.future_module, task, await_timeout(opts)) do
+      {:ok, result} -> {:ok, SaveWeightsResponse.from_json(result)}
+      {:error, %Error{} = error} -> {:error, error}
+    end
+  end
+
+  defp handle_load_state_response(%{"request_id" => _} = future, state, opts) do
+    poll_load_state_future(future, state, opts)
+  end
+
+  defp handle_load_state_response(%{request_id: _} = future, state, opts) do
+    poll_load_state_future(future, state, opts)
+  end
+
+  defp handle_load_state_response(%LoadWeightsResponse{} = resp, _state, _opts), do: {:ok, resp}
+
+  defp handle_load_state_response(%{"path" => _} = result, _state, _opts) do
+    {:ok, LoadWeightsResponse.from_json(result)}
+  end
+
+  defp handle_load_state_response(result, _state, _opts), do: {:ok, result}
+
+  defp poll_load_state_future(future, state, opts) do
+    task =
+      state.future_module.poll(
+        future,
+        poll_opts_with_type(state, opts, "LoadWeights")
+      )
+
+    unlink_task(task)
+
+    case safe_await(state.future_module, task, await_timeout(opts)) do
+      {:ok, result} -> {:ok, LoadWeightsResponse.from_json(result)}
+      {:error, %Error{} = error} -> {:error, error}
+    end
+  end
+
   defp handle_save_weights_response(%{"request_id" => _} = future, state, opts) do
     poll_save_weights_future(future, state, opts)
   end
@@ -795,6 +1241,12 @@ defmodule Tinkex.TrainingClient do
   defp handle_save_weights_response(%{"path" => _} = result, _state, _opts),
     do: {:ok, SaveWeightsForSamplerResponse.from_json(result)}
 
+  defp handle_save_weights_response(%{"sampling_session_id" => _} = result, _state, _opts),
+    do: {:ok, SaveWeightsForSamplerResponse.from_json(result)}
+
+  defp handle_save_weights_response(result, _state, _opts) when is_map(result),
+    do: {:ok, SaveWeightsForSamplerResponse.from_json(result)}
+
   defp handle_save_weights_response(result, _state, _opts), do: {:ok, result}
 
   defp poll_save_weights_future(future, state, opts) do
@@ -806,6 +1258,54 @@ defmodule Tinkex.TrainingClient do
 
     unlink_task(task)
     safe_await(state.future_module, task, await_timeout(opts))
+  end
+
+  defp start_sampling_client_from_save(save_response, sampling_client_id, opts, state) do
+    path = Map.get(save_response, :path) || Map.get(save_response, "path")
+
+    sampling_session_id =
+      Map.get(save_response, :sampling_session_id) ||
+        Map.get(save_response, "sampling_session_id")
+
+    if is_nil(path) and is_nil(sampling_session_id) do
+      {:error,
+       Error.new(:validation, "save_weights_for_sampler returned neither path nor session")}
+    else
+      child_opts =
+        opts
+        |> Keyword.put(:session_id, state.session_id)
+        |> Keyword.put(:config, state.config)
+        |> Keyword.put(:sampling_client_id, sampling_client_id)
+        |> Keyword.put(:telemetry, state.telemetry)
+        |> Keyword.put(:telemetry_metadata, state.telemetry_metadata)
+        |> maybe_put(:model_path, path)
+        |> maybe_put(:sampling_session_id, sampling_session_id)
+
+      case DynamicSupervisor.start_child(
+             state.client_supervisor,
+             {state.sampling_client_module, child_opts}
+           ) do
+        {:ok, pid} -> {:ok, pid}
+        {:error, _} = error -> error
+      end
+    end
+  end
+
+  defp maybe_put(opts, _key, nil), do: opts
+  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
+
+  defp normalize_save_weights_opts(opts, state) do
+    cond do
+      Keyword.get(opts, :path) ->
+        {opts, state.sampling_session_counter}
+
+      Keyword.has_key?(opts, :sampling_session_seq_id) ->
+        {opts, state.sampling_session_counter}
+
+      true ->
+        counter = state.sampling_session_counter
+        {Keyword.put(opts, :sampling_session_seq_id, counter), counter + 1}
+    end
   end
 
   defp poll_opts(state, opts) do

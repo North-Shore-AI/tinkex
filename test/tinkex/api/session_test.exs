@@ -36,14 +36,19 @@ defmodule Tinkex.API.SessionTest do
   end
 
   describe "heartbeat/2" do
-    test "uses session pool", %{bypass: bypass, config: config} do
+    test "uses session pool and correct path", %{bypass: bypass, config: config} do
       attach_telemetry([[:tinkex, :http, :request, :start]])
-      stub_success(bypass, %{status: "alive"})
+
+      Bypass.expect_once(bypass, "POST", "/api/v1/session_heartbeat", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"status":"alive"}))
+      end)
 
       {:ok, _} = Session.heartbeat(%{session_id: "session-123"}, config: config)
 
       assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
-                      %{pool_type: :session, path: "/api/v1/heartbeat"}}
+                      %{pool_type: :session, path: "/api/v1/session_heartbeat"}}
     end
   end
 end

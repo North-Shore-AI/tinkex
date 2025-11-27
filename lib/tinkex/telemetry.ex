@@ -88,7 +88,13 @@ defmodule Tinkex.Telemetry do
   def init(opts) do
     with {:ok, session_id} <- fetch_required(opts, :session_id),
          {:ok, config} <- fetch_required(opts, :config) do
-      enabled? = Keyword.get(opts, :enabled?, telemetry_enabled?())
+      enabled? =
+        Keyword.get_lazy(opts, :enabled?, fn ->
+          case config.telemetry_enabled? do
+            value when is_boolean(value) -> value
+            _ -> Tinkex.Env.telemetry_enabled?()
+          end
+        end)
 
       if enabled? do
         telemetry_opts = Keyword.get(opts, :telemetry_opts, [])
@@ -114,16 +120,6 @@ defmodule Tinkex.Telemetry do
     case Keyword.fetch(opts, key) do
       {:ok, value} -> {:ok, value}
       :error -> {:error, {:missing_required_option, key}}
-    end
-  end
-
-  defp telemetry_enabled? do
-    case System.get_env("TINKER_TELEMETRY", "1") |> String.downcase() do
-      "1" -> true
-      "true" -> true
-      "yes" -> true
-      "on" -> true
-      _ -> false
     end
   end
 end

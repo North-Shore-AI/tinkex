@@ -49,7 +49,7 @@ docs/20251125/
 ### P0 - Critical (Block release)
 1. **New Types:** `WeightsInfoResponse`, `GetSamplerResponse`
 2. **Type Updates:** `LossFnType` (add `:cispo`, `:dro`), `ImageChunk` (add `expected_tokens`)
-3. **API Methods:** `RestClient.get_sampler/1`, `RestClient.get_weights_info_by_tinker_path/1`
+3. **API Methods:** `RestClient.get_sampler/1`, `RestClient.get_weights_info_by_tinker_path/1` (implemented)
 
 ### P1 - High (Should have)
 1. **LoadWeightsRequest Update:** Add `load_optimizer_state` field
@@ -124,8 +124,8 @@ end
 - [ ] `LossFnType` updated with `:cispo`, `:dro`
 - [ ] `ImageChunk` updated with `expected_tokens` field
 - [ ] `LoadWeightsRequest` updated with `load_optimizer_state` field
-- [ ] `RestClient.get_sampler/1` implemented
-- [ ] `RestClient.get_weights_info_by_tinker_path/1` implemented
+- [x] `RestClient.get_sampler/1` implemented
+- [x] `RestClient.get_weights_info_by_tinker_path/1` implemented
 - [ ] All public modules have comprehensive @moduledoc
 - [ ] All public functions have comprehensive @doc
 - [ ] ExDoc generates clean output

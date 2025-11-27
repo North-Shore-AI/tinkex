@@ -3,11 +3,33 @@ defmodule Tinkex.ServiceClientTest do
 
   alias Plug.Conn
   alias Tinkex.{Config, ServiceClient}
+  alias Tinkex.Types.LoraConfig
 
   defmodule TrainingClientStub do
     use GenServer
     def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
     def init(opts), do: {:ok, Map.new(opts)}
+  end
+
+  defmodule TrainingClientLoadStub do
+    use GenServer
+    def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
+    def init(opts), do: {:ok, Map.new(opts)}
+
+    def load_state(pid, path, _opts \\ []) do
+      state = :sys.get_state(pid)
+      if state[:test_pid], do: send(state.test_pid, {:load_state_called, path, state})
+      {:ok, Task.async(fn -> {:ok, :loaded} end)}
+    end
+
+    def load_state_with_optimizer(pid, path, _opts \\ []) do
+      state = :sys.get_state(pid)
+
+      if state[:test_pid],
+        do: send(state.test_pid, {:load_state_with_optimizer_called, path, state})
+
+      {:ok, Task.async(fn -> {:ok, :loaded_opt} end)}
+    end
   end
 
   defmodule SamplingClientStub do
@@ -76,6 +98,47 @@ defmodule Tinkex.ServiceClientTest do
     GenServer.stop(pid)
   end
 
+  test "create_lora_training_client maps rank and training flags into lora_config", %{
+    bypass: bypass,
+    config: config,
+    manager: manager
+  } do
+    expect_create_session(bypass, "service-session-rank")
+
+    {:ok, pid} =
+      ServiceClient.start_link(
+        config: config,
+        training_client_module: TrainingClientStub,
+        sampling_client_module: SamplingClientStub,
+        session_manager: manager
+      )
+
+    {:ok, child} =
+      ServiceClient.create_lora_training_client(pid,
+        base_model: "m1",
+        rank: 8,
+        seed: 42,
+        train_mlp: false,
+        train_attn: true,
+        train_unembed: false
+      )
+
+    state = :sys.get_state(child)
+
+    assert %LoraConfig{
+             rank: 8,
+             seed: 42,
+             train_mlp: false,
+             train_attn: true,
+             train_unembed: false
+           } =
+             state.lora_config
+
+    refute Map.has_key?(state, :rank)
+
+    GenServer.stop(pid)
+  end
+
   test "create_sampling_client starts supervised child with sequencing", %{
     bypass: bypass,
     config: config,
@@ -98,6 +161,69 @@ defmodule Tinkex.ServiceClientTest do
     assert %{sampling_client_id: 1, session_id: "service-session-3"} = :sys.get_state(child2)
 
     GenServer.stop(pid)
+  end
+
+  test "get_server_capabilities proxies through Service API", %{
+    bypass: bypass,
+    config: config,
+    manager: manager
+  } do
+    expect_create_session(bypass, "service-session-cap")
+
+    expect_get_server_capabilities(bypass, %{
+      "supported_models" => [%{"model_name" => "m1"}, "m2"]
+    })
+
+    {:ok, svc} =
+      ServiceClient.start_link(
+        config: config,
+        training_client_module: TrainingClientStub,
+        sampling_client_module: SamplingClientStub,
+        session_manager: manager
+      )
+
+    assert {:ok, %Tinkex.Types.GetServerCapabilitiesResponse{supported_models: ["m1", "m2"]}} =
+             ServiceClient.get_server_capabilities(svc)
+
+    GenServer.stop(svc)
+  end
+
+  test "create_training_client_from_state builds client from checkpoint metadata", %{
+    bypass: bypass,
+    config: config,
+    manager: manager
+  } do
+    expect_create_session(bypass, "service-session-5")
+
+    expect_weights_info(bypass, "tinker://run/weights/ckpt-1", %{
+      "base_model" => "meta/base",
+      "is_lora" => true,
+      "lora_rank" => 8
+    })
+
+    {:ok, svc} =
+      ServiceClient.start_link(
+        config: config,
+        training_client_module: TrainingClientLoadStub,
+        sampling_client_module: SamplingClientStub,
+        session_manager: manager
+      )
+
+    assert {:ok, client} =
+             ServiceClient.create_training_client_from_state(
+               svc,
+               "tinker://run/weights/ckpt-1",
+               test_pid: self()
+             )
+
+    assert_receive {:load_state_called, "tinker://run/weights/ckpt-1", state}, 2_000
+    assert state.base_model == "meta/base"
+    assert %LoraConfig{rank: 8} = state.lora_config
+    assert state.model_seq_id == 0
+    assert state.session_id == "service-session-5"
+
+    GenServer.stop(client)
+    GenServer.stop(svc)
   end
 
   test "multiple service clients do not interfere", %{config: config} do
@@ -166,7 +292,7 @@ defmodule Tinkex.ServiceClientTest do
   end
 
   defp heartbeat_stub(bypass) do
-    Bypass.stub(bypass, "POST", "/api/v1/heartbeat", fn conn ->
+    Bypass.stub(bypass, "POST", "/api/v1/session_heartbeat", fn conn ->
       Conn.resp(conn, 200, ~s({"ok":true}))
     end)
   end
@@ -174,6 +300,21 @@ defmodule Tinkex.ServiceClientTest do
   defp expect_create_session(bypass, session_id) do
     Bypass.expect_once(bypass, "POST", "/api/v1/create_session", fn conn ->
       Conn.resp(conn, 200, ~s({"session_id":"#{session_id}"}))
+    end)
+  end
+
+  defp expect_weights_info(bypass, tinker_path, payload) do
+    Bypass.expect_once(bypass, "POST", "/api/v1/weights_info", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      decoded = Jason.decode!(body)
+      assert decoded["tinker_path"] == tinker_path
+      Conn.resp(conn, 200, Jason.encode!(payload))
+    end)
+  end
+
+  defp expect_get_server_capabilities(bypass, payload) do
+    Bypass.expect_once(bypass, "GET", "/api/v1/get_server_capabilities", fn conn ->
+      Conn.resp(conn, 200, Jason.encode!(payload))
     end)
   end
 

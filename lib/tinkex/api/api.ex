@@ -13,6 +13,7 @@ defmodule Tinkex.API do
   alias Tinkex.Error
   alias Tinkex.PoolKey
   alias Tinkex.Transform
+  alias Tinkex.Env
   alias Tinkex.API.Response
   alias Tinkex.API.StreamResponse
   alias Tinkex.Streaming.{SSEDecoder, ServerSentEvent}
@@ -33,7 +34,7 @@ defmodule Tinkex.API do
 
     url = build_url(config.base_url, path)
     timeout = Keyword.get(opts, :timeout, config.timeout)
-    headers = build_headers(:post, config.api_key, opts, timeout)
+    headers = build_headers(:post, config, opts, timeout)
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     pool_type = Keyword.get(opts, :pool_type, :default)
     response_mode = Keyword.get(opts, :response)
@@ -54,8 +55,8 @@ defmodule Tinkex.API do
 
     {result, retry_count, duration} =
       execute_with_telemetry(
-        &with_retries/5,
-        [request, config.http_pool, timeout, pool_key, max_retries],
+        &with_retries/6,
+        [request, config.http_pool, timeout, pool_key, max_retries, config.dump_headers?],
         metadata
       )
 
@@ -75,7 +76,7 @@ defmodule Tinkex.API do
 
     url = build_url(config.base_url, path)
     timeout = Keyword.get(opts, :timeout, config.timeout)
-    headers = build_headers(:get, config.api_key, opts, timeout)
+    headers = build_headers(:get, config, opts, timeout)
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     pool_type = Keyword.get(opts, :pool_type, :default)
     response_mode = Keyword.get(opts, :response)
@@ -95,8 +96,8 @@ defmodule Tinkex.API do
 
     {result, retry_count, duration} =
       execute_with_telemetry(
-        &with_retries/5,
-        [request, config.http_pool, timeout, pool_key, max_retries],
+        &with_retries/6,
+        [request, config.http_pool, timeout, pool_key, max_retries, config.dump_headers?],
         metadata
       )
 
@@ -116,7 +117,7 @@ defmodule Tinkex.API do
 
     url = build_url(config.base_url, path)
     timeout = Keyword.get(opts, :timeout, config.timeout)
-    headers = build_headers(:delete, config.api_key, opts, timeout)
+    headers = build_headers(:delete, config, opts, timeout)
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     pool_type = Keyword.get(opts, :pool_type, :default)
     response_mode = Keyword.get(opts, :response)
@@ -136,8 +137,8 @@ defmodule Tinkex.API do
 
     {result, retry_count, duration} =
       execute_with_telemetry(
-        &with_retries/5,
-        [request, config.http_pool, timeout, pool_key, max_retries],
+        &with_retries/6,
+        [request, config.http_pool, timeout, pool_key, max_retries, config.dump_headers?],
         metadata
       )
 
@@ -157,7 +158,7 @@ defmodule Tinkex.API do
 
     url = build_url(config.base_url, path)
     timeout = Keyword.get(opts, :timeout, config.timeout)
-    headers = build_headers(:get, config.api_key, opts, timeout)
+    headers = build_headers(:get, config, opts, timeout)
     parser = Keyword.get(opts, :event_parser, :json)
 
     request = Finch.build(:get, url, headers)
@@ -253,16 +254,17 @@ defmodule Tinkex.API do
     URI.to_string(uri)
   end
 
-  defp build_headers(method, api_key, opts, timeout_ms) do
+  defp build_headers(method, config, opts, timeout_ms) do
     [
       {"accept", "application/json"},
       {"content-type", "application/json"},
       {"user-agent", user_agent()},
       {"connection", "keep-alive"},
       {"accept-encoding", "gzip"},
-      {"x-api-key", api_key}
+      {"x-api-key", config.api_key}
     ]
     |> Kernel.++(stainless_headers(timeout_ms))
+    |> Kernel.++(cloudflare_headers(config))
     |> Kernel.++(request_headers(opts))
     |> Kernel.++(idempotency_headers(method, opts))
     |> Kernel.++(sampling_headers(opts))
@@ -452,9 +454,9 @@ defmodule Tinkex.API do
     }
   end
 
-  @spec with_retries(Finch.Request.t(), atom(), timeout(), term(), non_neg_integer()) ::
+  @spec with_retries(Finch.Request.t(), atom(), timeout(), term(), non_neg_integer(), boolean()) ::
           {{:ok, Finch.Response.t()} | {:error, term()}, non_neg_integer()}
-  defp with_retries(request, pool, timeout, _pool_key, max_retries) do
+  defp with_retries(request, pool, timeout, _pool_key, max_retries, dump_headers?) do
     start_time = System.monotonic_time(:millisecond)
 
     context = %{
@@ -462,7 +464,8 @@ defmodule Tinkex.API do
       pool: pool,
       timeout: timeout,
       max_retries: max_retries,
-      start_time: start_time
+      start_time: start_time,
+      dump_headers?: dump_headers?
     }
 
     do_retry(context, 0)
@@ -479,7 +482,7 @@ defmodule Tinkex.API do
 
   defp perform_request(context, attempt) do
     request = put_retry_headers(context.request, attempt, context.timeout)
-    maybe_dump_request(request, attempt)
+    maybe_dump_request(request, attempt, context.dump_headers?)
 
     case Finch.request(request, context.pool, receive_timeout: context.timeout) do
       {:ok, %Finch.Response{} = response} = response_tuple ->
@@ -608,8 +611,8 @@ defmodule Tinkex.API do
     end
   end
 
-  defp maybe_dump_request(%Finch.Request{} = request, attempt) do
-    if dump_headers?() do
+  defp maybe_dump_request(%Finch.Request{} = request, attempt, dump_headers?) do
+    if dump_headers? do
       url = request_url(request)
       headers = redact_headers(request.headers)
       body = dump_body(request.body)
@@ -633,10 +636,12 @@ defmodule Tinkex.API do
   defp redact_headers(headers) do
     Enum.map(headers, fn
       {name, value} ->
-        if String.downcase(name) == "x-api-key" do
-          {name, "[redacted]"}
-        else
-          {name, value}
+        lowered = String.downcase(name)
+
+        cond do
+          lowered == "x-api-key" -> {name, Env.mask_secret(value)}
+          lowered == "cf-access-client-secret" -> {name, Env.mask_secret(value)}
+          true -> {name, value}
         end
 
       other ->
@@ -651,15 +656,6 @@ defmodule Tinkex.API do
       IO.iodata_to_binary(body)
     rescue
       _ -> inspect(body)
-    end
-  end
-
-  defp dump_headers? do
-    case System.get_env("TINKEX_DUMP_HEADERS") do
-      nil -> false
-      "0" -> false
-      "false" -> false
-      _ -> true
     end
   end
 
@@ -684,6 +680,12 @@ defmodule Tinkex.API do
     |> maybe_put("x-tinker-request-iteration", opts[:tinker_request_iteration])
     |> maybe_put("x-tinker-request-type", opts[:tinker_request_type])
     |> maybe_put_roundtrip(opts[:tinker_create_roundtrip_time])
+  end
+
+  defp cloudflare_headers(%{cf_access_client_id: id, cf_access_client_secret: secret}) do
+    []
+    |> maybe_put("CF-Access-Client-Id", id)
+    |> maybe_put("CF-Access-Client-Secret", secret)
   end
 
   defp maybe_put(headers, _name, nil), do: headers

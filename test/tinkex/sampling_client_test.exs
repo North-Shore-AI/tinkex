@@ -66,7 +66,8 @@ defmodule Tinkex.SamplingClientTest do
         session_id: "sess-2",
         sampling_client_id: 0,
         base_model: "base",
-        config: config
+        config: config,
+        retry_config: [enable_retry_logic: false]
       )
 
     prompt = ModelInput.from_ints([1, 2, 3])
@@ -108,7 +109,8 @@ defmodule Tinkex.SamplingClientTest do
         session_id: "sess-rl",
         sampling_client_id: 0,
         base_model: "base",
-        config: config
+        config: config,
+        retry_config: [enable_retry_logic: false]
       )
 
     [{_, entry}] = :ets.lookup(:tinkex_sampling_clients, {:config, client})

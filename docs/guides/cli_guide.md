@@ -910,7 +910,7 @@ When using `--json`, ensure you have `jq` or similar tools for parsing:
 - [API Reference](api_reference.md) - SDK API documentation
 - [Troubleshooting Guide](troubleshooting.md) - Common issues and solutions
 - [Training Loop Guide](training_loop.md) - End-to-end training workflows
-- [Examples Directory](../../examples/) - Runnable example scripts
+- Examples Directory (`examples/`) - Runnable example scripts
 
 ## Help Commands
 

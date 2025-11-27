@@ -8,9 +8,9 @@ defmodule Tinkex.RetryHandlerTest do
       handler = RetryHandler.new()
       assert handler.max_retries == 3
       assert handler.base_delay_ms == 500
-      assert handler.max_delay_ms == 8000
-      assert handler.jitter_pct == 1.0
-      assert handler.progress_timeout_ms == 30_000
+      assert handler.max_delay_ms == 10_000
+      assert handler.jitter_pct == 0.25
+      assert handler.progress_timeout_ms == 1_800_000
       assert handler.attempt == 0
       assert is_integer(handler.start_time)
     end
@@ -84,7 +84,7 @@ defmodule Tinkex.RetryHandlerTest do
     end
 
     test "adds jitter when jitter_pct > 0" do
-      handler = RetryHandler.new(base_delay_ms: 1000, jitter_pct: 1.0)
+      handler = RetryHandler.new(base_delay_ms: 1000, jitter_pct: 0.25)
 
       delays =
         for _ <- 1..10 do
@@ -93,8 +93,8 @@ defmodule Tinkex.RetryHandlerTest do
 
       # With jitter, delays should vary
       assert length(Enum.uniq(delays)) > 1
-      # All delays should be in valid range [0, base * 2]
-      assert Enum.all?(delays, fn d -> d >= 0 and d <= 2000 end)
+      # All delays should be in valid range [0, capped] +/- jitter_pct
+      assert Enum.all?(delays, fn d -> d >= 0 and d <= 1250 end)
     end
   end
 
@@ -124,6 +124,17 @@ defmodule Tinkex.RetryHandlerTest do
     test "returns false when last_progress_at is nil" do
       handler = RetryHandler.new() |> Map.put(:last_progress_at, nil)
       assert RetryHandler.progress_timeout?(handler) == false
+    end
+  end
+
+  describe "from_config/1" do
+    test "builds handler from RetryConfig" do
+      config = Tinkex.RetryConfig.new(max_retries: 4, base_delay_ms: 200, jitter_pct: 0.1)
+      handler = RetryHandler.from_config(config)
+
+      assert handler.max_retries == 4
+      assert handler.base_delay_ms == 200
+      assert handler.jitter_pct == 0.1
     end
   end
 

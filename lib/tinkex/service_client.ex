@@ -11,10 +11,13 @@ defmodule Tinkex.ServiceClient do
 
   require Logger
 
+  alias Tinkex.API.Service
   alias Tinkex.Config
+  alias Tinkex.RestClient
   alias Tinkex.SessionManager
   alias Tinkex.Telemetry
   alias Tinkex.Telemetry.Reporter
+  alias Tinkex.Types.LoraConfig
 
   @type t :: pid()
 
@@ -39,12 +42,41 @@ defmodule Tinkex.ServiceClient do
   end
 
   @doc """
+  Create a training client from a saved checkpoint path.
+
+  Uses checkpoint metadata to configure the client, then loads the weights (and optionally
+  optimizer state).
+  """
+  @spec create_training_client_from_state(t(), String.t(), keyword()) ::
+          {:ok, pid()} | {:error, term()}
+  def create_training_client_from_state(service_client, path, opts \\ []) when is_binary(path) do
+    GenServer.call(service_client, {:create_training_client_from_state, path, opts}, :infinity)
+  end
+
+  @doc """
   Create a sampling client from this ServiceClient.
   """
   @spec create_sampling_client(t(), keyword()) ::
           {:ok, pid()} | {:error, term()}
   def create_sampling_client(service_client, opts \\ []) do
     GenServer.call(service_client, {:create_sampling_client, opts})
+  end
+
+  @doc """
+  Fetch server capabilities (supported models/features) via the Service API.
+  """
+  @spec get_server_capabilities(t()) ::
+          {:ok, Tinkex.Types.GetServerCapabilitiesResponse.t()} | {:error, term()}
+  def get_server_capabilities(service_client) do
+    GenServer.call(service_client, :get_server_capabilities)
+  end
+
+  @doc """
+  Async helper for `get_server_capabilities/1`.
+  """
+  @spec get_server_capabilities_async(t()) :: Task.t()
+  def get_server_capabilities_async(service_client) do
+    Task.async(fn -> get_server_capabilities(service_client) end)
   end
 
   @doc """
@@ -203,6 +235,7 @@ defmodule Tinkex.ServiceClient do
 
     child_opts =
       opts
+      |> normalize_training_opts()
       |> Keyword.put(:session_id, state.session_id)
       |> Keyword.put(:config, state.config)
       |> Keyword.put(:model_seq_id, model_seq_id)
@@ -219,6 +252,40 @@ defmodule Tinkex.ServiceClient do
 
       {:error, _} = error ->
         {:reply, error, state}
+    end
+  end
+
+  @impl true
+  def handle_call({:create_training_client_from_state, path, opts}, _from, state) do
+    rest_client = RestClient.new(state.session_id, state.config)
+
+    case RestClient.get_weights_info_by_tinker_path(rest_client, path) do
+      {:ok, weights_info} ->
+        case start_training_client_from_weights(weights_info, opts, state) do
+          {:ok, training_client, new_counter} ->
+            case load_checkpoint(state.training_client_module, training_client, path, opts) do
+              {:ok, load_task} ->
+                case await_load_task(load_task, opts) do
+                  {:ok, _response} ->
+                    {:reply, {:ok, training_client},
+                     %{state | training_client_counter: new_counter}}
+
+                  {:error, reason} ->
+                    stop_training_client(training_client)
+                    {:reply, {:error, reason}, state}
+                end
+
+              {:error, reason} ->
+                stop_training_client(training_client)
+                {:reply, {:error, reason}, state}
+            end
+
+          {:error, reason} ->
+            {:reply, {:error, reason}, state}
+        end
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
     end
   end
 
@@ -240,6 +307,20 @@ defmodule Tinkex.ServiceClient do
          ) do
       {:ok, pid} ->
         {:reply, {:ok, pid}, %{state | sampling_client_counter: sampling_client_id + 1}}
+
+      {:error, _} = error ->
+        {:reply, error, state}
+    end
+  end
+
+  @impl true
+  def handle_call(:get_server_capabilities, _from, state) do
+    case Service.get_server_capabilities(
+           config: state.config,
+           telemetry_metadata: state.telemetry_metadata
+         ) do
+      {:ok, %Tinkex.Types.GetServerCapabilitiesResponse{} = resp} ->
+        {:reply, {:ok, resp}, state}
 
       {:error, _} = error ->
         {:reply, error, state}
@@ -286,6 +367,105 @@ defmodule Tinkex.ServiceClient do
     Reporter.stop(state[:telemetry])
     :ok
   end
+
+  defp start_training_client_from_weights(weights_info, opts, state) do
+    model_seq_id = state.training_client_counter
+
+    child_opts =
+      opts
+      |> Keyword.put(:session_id, state.session_id)
+      |> Keyword.put(:config, state.config)
+      |> Keyword.put(:model_seq_id, model_seq_id)
+      |> Keyword.put(:base_model, weights_info.base_model)
+      |> Keyword.put(:lora_config, lora_config_from_weights_info(weights_info))
+      |> Keyword.put(:client_supervisor, state.client_supervisor)
+      |> Keyword.put(:telemetry, state.telemetry)
+      |> Keyword.put(:telemetry_metadata, state.telemetry_metadata)
+
+    case DynamicSupervisor.start_child(
+           state.client_supervisor,
+           {state.training_client_module, child_opts}
+         ) do
+      {:ok, pid} ->
+        {:ok, pid, model_seq_id + 1}
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp load_checkpoint(training_client_module, training_client, path, opts) do
+    load_fn =
+      if Keyword.get(opts, :load_optimizer, false) do
+        &training_client_module.load_state_with_optimizer/3
+      else
+        &training_client_module.load_state/3
+      end
+
+    load_opts = Keyword.get(opts, :load_opts, [])
+    load_fn.(training_client, path, load_opts)
+  end
+
+  defp await_load_task(task, opts) do
+    timeout = Keyword.get(opts, :load_timeout, :infinity)
+
+    try do
+      Task.await(task, timeout)
+    catch
+      :exit, reason ->
+        {:error, reason}
+    end
+  end
+
+  defp stop_training_client(pid) when is_pid(pid) do
+    Process.exit(pid, :kill)
+    :ok
+  end
+
+  defp lora_config_from_weights_info(%{lora_rank: nil}), do: %LoraConfig{}
+
+  defp lora_config_from_weights_info(%{lora_rank: rank}) when is_integer(rank),
+    do: %LoraConfig{rank: rank}
+
+  defp normalize_training_opts(opts) do
+    lora_config = resolve_lora_config(opts)
+
+    opts
+    |> Keyword.put(:lora_config, lora_config)
+    |> Keyword.drop([:rank, :seed, :train_mlp, :train_attn, :train_unembed])
+  end
+
+  defp resolve_lora_config(opts) do
+    base =
+      case Keyword.get(opts, :lora_config) do
+        %LoraConfig{} = config ->
+          config
+
+        map when is_map(map) ->
+          defaults = Map.from_struct(%LoraConfig{})
+
+          merged =
+            Map.merge(
+              defaults,
+              Map.take(map, [:rank, :seed, :train_mlp, :train_attn, :train_unembed])
+            )
+
+          struct(LoraConfig, merged)
+
+        _ ->
+          %LoraConfig{}
+      end
+
+    base
+    |> maybe_override(:rank, opts[:rank])
+    |> maybe_override(:seed, opts[:seed])
+    |> maybe_override(:train_mlp, opts[:train_mlp])
+    |> maybe_override(:train_attn, opts[:train_attn])
+    |> maybe_override(:train_unembed, opts[:train_unembed])
+  end
+
+  defp maybe_override(config, _field, nil), do: config
+  defp maybe_override(%LoraConfig{} = config, field, value), do: Map.put(config, field, value)
 
   defp init_telemetry(session_id, config, opts) do
     telemetry_opts = Keyword.get(opts, :telemetry_opts, [])

@@ -11,6 +11,7 @@ Checkpoints are snapshots of model weights saved during training. Tinkex provide
 - Download checkpoint archives
 - Publish/unpublish checkpoints for sharing
 - Delete old checkpoints
+- Save and load training checkpoints (with optional optimizer state)
 
 All checkpoints are referenced using the **Tinker path format**: `tinker://run-id/weights/checkpoint-id`
 
@@ -27,6 +28,46 @@ config =
 
 {:ok, service} = Tinkex.ServiceClient.start_link(config: config)
 {:ok, rest_client} = Tinkex.ServiceClient.create_rest_client(service)
+```
+
+## Saving and Loading Training Checkpoints
+
+Save a named checkpoint during training:
+
+```elixir
+{:ok, task} = Tinkex.TrainingClient.save_state(training_client, "checkpoint-001")
+{:ok, %Tinkex.Types.SaveWeightsResponse{path: checkpoint_path}} = Task.await(task)
+```
+
+Load weights (without optimizer state) for transfer learning or evaluation:
+
+```elixir
+{:ok, task} =
+  Tinkex.TrainingClient.load_state(training_client, "tinker://run-id/weights/checkpoint-001")
+
+{:ok, _} = Task.await(task)
+```
+
+Resume training with optimizer state preserved:
+
+```elixir
+{:ok, task} =
+  Tinkex.TrainingClient.load_state_with_optimizer(
+    training_client,
+    "tinker://run-id/weights/checkpoint-001"
+  )
+
+{:ok, _} = Task.await(task)
+```
+
+Create a new training client directly from a checkpoint:
+
+```elixir
+{:ok, training_client} =
+  Tinkex.ServiceClient.create_training_client_from_state(
+    service,
+    "tinker://run-id/weights/checkpoint-001"
+  )
 ```
 
 ## Tinker Path Format
@@ -124,6 +165,16 @@ IO.puts("Last Sampler Checkpoint: #{run.last_sampler_checkpoint && run.last_samp
 IO.puts("Last Request Time: #{run.last_request_time}")
 ```
 
+You can also resolve the run directly from a checkpoint tinker path:
+
+```elixir
+{:ok, run} =
+  Tinkex.RestClient.get_training_run_by_tinker_path(
+    rest_client,
+    "tinker://run-abc123/weights/0001"
+  )
+```
+
 ## Checkpoint Information
 
 ### Get Checkpoint Metadata
@@ -131,12 +182,11 @@ IO.puts("Last Request Time: #{run.last_request_time}")
 Get detailed information about a checkpoint, including base model and LoRA configuration:
 
 ```elixir
-alias Tinkex.API.Rest
-
-{:ok, weights_info} = Rest.get_weights_info_by_tinker_path(
-  config,
-  "tinker://run-abc123/weights/0001"
-)
+{:ok, weights_info} =
+  Tinkex.RestClient.get_weights_info_by_tinker_path(
+    rest_client,
+    "tinker://run-abc123/weights/0001"
+  )
 
 IO.puts("Base Model: #{weights_info.base_model}")
 IO.puts("Is LoRA: #{weights_info.is_lora}")
@@ -148,8 +198,8 @@ IO.puts("LoRA Rank: #{weights_info.lora_rank}")
 Check if a checkpoint matches expected configuration:
 
 ```elixir
-def validate_checkpoint(config, path, expected_rank) do
-  case Rest.get_weights_info_by_tinker_path(config, path) do
+def validate_checkpoint(rest_client, path, expected_rank) do
+  case Tinkex.RestClient.get_weights_info_by_tinker_path(rest_client, path) do
     {:ok, %{is_lora: true, lora_rank: ^expected_rank}} ->
       :ok
 
@@ -214,10 +264,11 @@ IO.puts("Extracted to: #{result.destination}")
 Get a signed URL for downloading the checkpoint archive directly:
 
 ```elixir
-{:ok, url_response} = Tinkex.RestClient.get_checkpoint_archive_url(
-  rest_client,
-  "tinker://run-abc123/weights/0001"
-)
+{:ok, url_response} =
+  Tinkex.RestClient.get_checkpoint_archive_url_by_tinker_path(
+    rest_client,
+    "tinker://run-abc123/weights/0001"
+  )
 
 IO.puts("Download URL: #{url_response.url}")
 ```
@@ -350,10 +401,11 @@ case runs_response.training_runs do
         IO.puts("\nCheckpoint: #{checkpoint.tinker_path}")
 
         # 3. Get checkpoint metadata
-        {:ok, weights_info} = Tinkex.API.Rest.get_weights_info_by_tinker_path(
-          config,
-          checkpoint.tinker_path
-        )
+        {:ok, weights_info} =
+          Tinkex.RestClient.get_weights_info_by_tinker_path(
+            rest_client,
+            checkpoint.tinker_path
+          )
 
         IO.puts("Checkpoint Base Model: #{weights_info.base_model}")
         IO.puts("Checkpoint LoRA Rank: #{weights_info.lora_rank}")
@@ -416,7 +468,7 @@ end
 
 **Checkpoint Not Found:**
 ```elixir
-case Tinkex.RestClient.get_checkpoint_archive_url(rest_client, path) do
+case Tinkex.RestClient.get_checkpoint_archive_url_by_tinker_path(rest_client, path) do
   {:error, %Tinkex.Error{status: 404}} ->
     IO.puts("Checkpoint not found or no longer exists")
 
@@ -434,7 +486,7 @@ end
 
 ```elixir
 # Verify checkpoint exists before downloading
-case Tinkex.RestClient.get_checkpoint_archive_url(rest_client, checkpoint_path) do
+case Tinkex.RestClient.get_checkpoint_archive_url_by_tinker_path(rest_client, checkpoint_path) do
   {:ok, _url_response} ->
     # Proceed with download
     Tinkex.CheckpointDownload.download(rest_client, checkpoint_path, output_dir: "./models")

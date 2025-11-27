@@ -23,9 +23,11 @@ defmodule Tinkex.RestClient do
     CheckpointsListResponse,
     CheckpointArchiveUrlResponse,
     GetSessionResponse,
+    GetSamplerResponse,
     ListSessionsResponse,
     TrainingRun,
-    TrainingRunsResponse
+    TrainingRunsResponse,
+    WeightsInfoResponse
   }
 
   @type t :: %__MODULE__{
@@ -90,6 +92,44 @@ defmodule Tinkex.RestClient do
       {:ok, data} -> {:ok, ListSessionsResponse.from_map(data)}
       error -> error
     end
+  end
+
+  # Checkpoint APIs
+  @doc """
+  Get sampler information.
+
+  Returns details about a sampler, including the base model and any loaded
+  custom weights.
+
+  ## Examples
+
+      {:ok, response} = RestClient.get_sampler(client, "session-id:sample:0")
+      IO.inspect(response.base_model)
+      IO.inspect(response.model_path)
+  """
+  @spec get_sampler(t(), String.t()) ::
+          {:ok, GetSamplerResponse.t()} | {:error, Tinkex.Error.t()}
+  def get_sampler(%__MODULE__{config: config}, sampler_id) do
+    Rest.get_sampler(config, sampler_id)
+  end
+
+  @doc """
+  Get checkpoint information from a tinker path.
+
+  Returns metadata about a checkpoint such as base model and LoRA details.
+
+  ## Examples
+
+      path = "tinker://run-id/weights/checkpoint-001"
+      {:ok, response} = RestClient.get_weights_info_by_tinker_path(client, path)
+      IO.inspect(response.base_model)
+      IO.inspect(response.is_lora)
+      IO.inspect(response.lora_rank)
+  """
+  @spec get_weights_info_by_tinker_path(t(), String.t()) ::
+          {:ok, WeightsInfoResponse.t()} | {:error, Tinkex.Error.t()}
+  def get_weights_info_by_tinker_path(%__MODULE__{config: config}, tinker_path) do
+    Rest.get_weights_info_by_tinker_path(config, tinker_path)
   end
 
   # Checkpoint APIs
@@ -166,6 +206,17 @@ defmodule Tinkex.RestClient do
     Rest.delete_checkpoint(config, checkpoint_path)
   end
 
+  @doc """
+  Delete a checkpoint referenced by a tinker path.
+
+  Alias for `delete_checkpoint/2` to mirror Python convenience naming.
+  """
+  @spec delete_checkpoint_by_tinker_path(t(), String.t()) ::
+          {:ok, map()} | {:error, Tinkex.Error.t()}
+  def delete_checkpoint_by_tinker_path(client, checkpoint_path) do
+    delete_checkpoint(client, checkpoint_path)
+  end
+
   # Training run APIs
 
   @doc """
@@ -175,6 +226,15 @@ defmodule Tinkex.RestClient do
           {:ok, TrainingRun.t()} | {:error, Tinkex.Error.t()}
   def get_training_run(%__MODULE__{config: config}, run_id) do
     Rest.get_training_run(config, run_id)
+  end
+
+  @doc """
+  Get a training run by tinker path.
+  """
+  @spec get_training_run_by_tinker_path(t(), String.t()) ::
+          {:ok, TrainingRun.t()} | {:error, Tinkex.Error.t()}
+  def get_training_run_by_tinker_path(%__MODULE__{config: config}, tinker_path) do
+    Rest.get_training_run_by_tinker_path(config, tinker_path)
   end
 
   @doc """
@@ -198,10 +258,43 @@ defmodule Tinkex.RestClient do
   end
 
   @doc """
+  Publish a checkpoint referenced by a tinker path.
+
+  Alias for `publish_checkpoint/2` to mirror Python convenience naming.
+  """
+  @spec publish_checkpoint_from_tinker_path(t(), String.t()) ::
+          {:ok, map()} | {:error, Tinkex.Error.t()}
+  def publish_checkpoint_from_tinker_path(client, checkpoint_path) do
+    publish_checkpoint(client, checkpoint_path)
+  end
+
+  @doc """
   Unpublish a checkpoint (make it private).
   """
   @spec unpublish_checkpoint(t(), String.t()) :: {:ok, map()} | {:error, Tinkex.Error.t()}
   def unpublish_checkpoint(%__MODULE__{config: config}, checkpoint_path) do
     Rest.unpublish_checkpoint(config, checkpoint_path)
+  end
+
+  @doc """
+  Unpublish a checkpoint referenced by a tinker path.
+
+  Alias for `unpublish_checkpoint/2` to mirror Python convenience naming.
+  """
+  @spec unpublish_checkpoint_from_tinker_path(t(), String.t()) ::
+          {:ok, map()} | {:error, Tinkex.Error.t()}
+  def unpublish_checkpoint_from_tinker_path(client, checkpoint_path) do
+    unpublish_checkpoint(client, checkpoint_path)
+  end
+
+  @doc """
+  Get the archive download URL for a checkpoint referenced by a tinker path.
+
+  Alias for `get_checkpoint_archive_url/2` to mirror Python convenience naming.
+  """
+  @spec get_checkpoint_archive_url_by_tinker_path(t(), String.t()) ::
+          {:ok, CheckpointArchiveUrlResponse.t()} | {:error, Tinkex.Error.t()}
+  def get_checkpoint_archive_url_by_tinker_path(client, checkpoint_path) do
+    get_checkpoint_archive_url(client, checkpoint_path)
   end
 end

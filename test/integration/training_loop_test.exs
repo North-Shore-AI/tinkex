@@ -29,7 +29,7 @@ defmodule Tinkex.Integration.TrainingLoopTest do
       {:ok, body, conn} = Plug.Conn.read_body(conn)
 
       case conn.request_path do
-        "/api/v1/heartbeat" ->
+        "/api/v1/session_heartbeat" ->
           conn
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"ok":true}))

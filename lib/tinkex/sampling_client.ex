@@ -16,10 +16,18 @@ defmodule Tinkex.SamplingClient do
   use Tinkex.Telemetry.Provider
 
   alias Tinkex.API.{Sampling, Service}
-  alias Tinkex.Error
-  alias Tinkex.Future
-  alias Tinkex.RateLimiter
-  alias Tinkex.SamplingRegistry
+
+  alias Tinkex.{
+    Error,
+    Future,
+    RateLimiter,
+    Retry,
+    RetryConfig,
+    RetryHandler,
+    RetrySemaphore,
+    SamplingRegistry
+  }
+
   alias Tinkex.Telemetry.Reporter
 
   alias Tinkex.Types.{
@@ -35,6 +43,16 @@ defmodule Tinkex.SamplingClient do
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
     GenServer.start_link(__MODULE__, opts, name: opts[:name])
+  end
+
+  def child_spec(opts) do
+    %{
+      id: Keyword.get(opts, :name, __MODULE__),
+      start: {__MODULE__, :start_link, [opts]},
+      restart: :temporary,
+      shutdown: 5_000,
+      type: :worker
+    }
   end
 
   @doc """
@@ -95,8 +113,10 @@ defmodule Tinkex.SamplingClient do
     sampling_client_id = Keyword.fetch!(opts, :sampling_client_id)
     base_model = Keyword.get(opts, :base_model)
     model_path = Keyword.get(opts, :model_path)
+    sampling_session_id_override = Keyword.get(opts, :sampling_session_id)
     service_api = Keyword.get(opts, :service_api, Service)
     sampling_api = Keyword.get(opts, :sampling_api, Sampling)
+    retry_config = build_retry_config(opts[:retry_config])
 
     telemetry_metadata =
       opts
@@ -104,56 +124,58 @@ defmodule Tinkex.SamplingClient do
       |> Map.new()
       |> Map.put_new(:session_id, session_id)
 
-    case create_sampling_session(
-           session_id,
-           sampling_client_id,
-           base_model,
-           model_path,
-           config,
-           telemetry_metadata,
-           service_api
-         ) do
-      {:ok, sampling_session_id} ->
-        limiter = RateLimiter.for_key({config.base_url, config.api_key})
-        request_counter = :atomics.new(1, signed: false)
+    with {:ok, sampling_session_id} <-
+           resolve_sampling_session_id(
+             sampling_session_id_override,
+             session_id,
+             sampling_client_id,
+             base_model,
+             model_path,
+             config,
+             telemetry_metadata,
+             service_api
+           ) do
+      limiter = RateLimiter.for_key({config.base_url, config.api_key})
+      request_counter = :atomics.new(1, signed: false)
 
-        telemetry_metadata =
-          opts
-          |> Keyword.get(:telemetry_metadata, %{})
-          |> Map.new()
-          |> Map.put_new(:session_id, session_id)
-          |> Map.put_new(:sampling_session_id, sampling_session_id)
+      telemetry_metadata =
+        opts
+        |> Keyword.get(:telemetry_metadata, %{})
+        |> Map.new()
+        |> Map.put_new(:session_id, session_id)
+        |> Map.put_new(:sampling_session_id, sampling_session_id)
 
-        entry = %{
-          sampling_session_id: sampling_session_id,
-          http_pool: config.http_pool,
-          request_id_counter: request_counter,
-          rate_limiter: limiter,
-          config: config,
-          sampling_api: sampling_api,
-          telemetry_metadata: telemetry_metadata,
-          session_id: session_id
-        }
+      entry = %{
+        sampling_session_id: sampling_session_id,
+        http_pool: config.http_pool,
+        request_id_counter: request_counter,
+        rate_limiter: limiter,
+        config: config,
+        retry_config: retry_config,
+        sampling_api: sampling_api,
+        telemetry_metadata: telemetry_metadata,
+        session_id: session_id
+      }
 
-        :ok = SamplingRegistry.register(self(), entry)
+      :ok = SamplingRegistry.register(self(), entry)
 
-        telemetry = Keyword.get(opts, :telemetry)
-        put_telemetry(telemetry)
+      telemetry = Keyword.get(opts, :telemetry)
+      put_telemetry(telemetry)
 
-        {:ok,
-         %{
-           sampling_session_id: sampling_session_id,
-           request_id_counter: request_counter,
-           rate_limiter: limiter,
-           config: config,
-           sampling_api: sampling_api,
-           telemetry_metadata: telemetry_metadata,
-           telemetry: telemetry,
-           session_id: session_id
-         }}
-
-      {:error, reason} ->
-        {:stop, reason}
+      {:ok,
+       %{
+         sampling_session_id: sampling_session_id,
+         request_id_counter: request_counter,
+         rate_limiter: limiter,
+         config: config,
+         retry_config: retry_config,
+         sampling_api: sampling_api,
+         telemetry_metadata: telemetry_metadata,
+         telemetry: telemetry,
+         session_id: session_id
+       }}
+    else
+      {:error, reason} -> {:stop, reason}
     end
   end
 
@@ -180,41 +202,10 @@ defmodule Tinkex.SamplingClient do
   defp do_sample(client, prompt, sampling_params, opts) do
     case :ets.lookup(:tinkex_sampling_clients, {:config, client}) do
       [{{:config, ^client}, entry}] ->
-        RateLimiter.wait_for_backoff(entry.rate_limiter)
-        seq_id = next_seq_id(entry.request_id_counter)
-
-        request =
-          %SampleRequest{
-            sampling_session_id: entry.sampling_session_id,
-            seq_id: seq_id,
-            prompt: prompt,
-            sampling_params: sampling_params,
-            num_samples: Keyword.get(opts, :num_samples, 1),
-            prompt_logprobs: Keyword.get(opts, :prompt_logprobs),
-            topk_prompt_logprobs: Keyword.get(opts, :topk_prompt_logprobs, 0)
-          }
-
-        api_opts =
-          opts
-          |> Keyword.put(:config, entry.config)
-          |> Keyword.put(:tinker_request_type, "Sample")
-          |> Keyword.put(:tinker_request_iteration, seq_id)
-          |> Keyword.put(
-            :telemetry_metadata,
-            merge_metadata(entry.telemetry_metadata, opts[:telemetry_metadata])
-          )
-
-        case entry.sampling_api.sample_async(request, api_opts) do
-          {:ok, resp} ->
-            RateLimiter.clear_backoff(entry.rate_limiter)
-            handle_sample_response(resp, entry, seq_id, opts)
-
-          {:error, %Error{status: 429} = error} ->
-            maybe_set_backoff(entry.rate_limiter, error)
-            {:error, error}
-
-          {:error, %Error{} = error} ->
-            {:error, error}
+        if entry.retry_config.enable_retry_logic do
+          do_sample_with_retry(entry, prompt, sampling_params, opts)
+        else
+          do_sample_once(entry, prompt, sampling_params, opts)
         end
 
       [] ->
@@ -254,6 +245,41 @@ defmodule Tinkex.SamplingClient do
       {:error, _} = error ->
         error
     end
+  end
+
+  defp resolve_sampling_session_id(
+         nil,
+         session_id,
+         sampling_client_id,
+         base_model,
+         model_path,
+         config,
+         telemetry_metadata,
+         service_api
+       ) do
+    create_sampling_session(
+      session_id,
+      sampling_client_id,
+      base_model,
+      model_path,
+      config,
+      telemetry_metadata,
+      service_api
+    )
+  end
+
+  defp resolve_sampling_session_id(
+         sampling_session_id,
+         _session_id,
+         _sampling_client_id,
+         _base_model,
+         _model_path,
+         _config,
+         _telemetry_metadata,
+         _service_api
+       )
+       when is_binary(sampling_session_id) do
+    {:ok, sampling_session_id}
   end
 
   defp next_seq_id(counter) do
@@ -309,4 +335,67 @@ defmodule Tinkex.SamplingClient do
 
   defp put_telemetry(nil), do: :ok
   defp put_telemetry(pid), do: :erlang.put({__MODULE__, :telemetry}, pid)
+
+  defp build_retry_config(nil), do: RetryConfig.default()
+
+  defp build_retry_config(%RetryConfig{} = config), do: config
+
+  defp build_retry_config(opts) when is_list(opts), do: RetryConfig.new(opts)
+
+  defp do_sample_with_retry(entry, prompt, sampling_params, opts) do
+    handler = RetryHandler.from_config(entry.retry_config)
+
+    execute = fn ->
+      Retry.with_retry(
+        fn -> do_sample_once(entry, prompt, sampling_params, opts) end,
+        handler: handler,
+        telemetry_metadata: entry.telemetry_metadata
+      )
+    end
+
+    if entry.retry_config.max_connections > 0 do
+      RetrySemaphore.with_semaphore(entry.retry_config.max_connections, execute)
+    else
+      execute.()
+    end
+  end
+
+  defp do_sample_once(entry, prompt, sampling_params, opts) do
+    RateLimiter.wait_for_backoff(entry.rate_limiter)
+    seq_id = next_seq_id(entry.request_id_counter)
+
+    request =
+      %SampleRequest{
+        sampling_session_id: entry.sampling_session_id,
+        seq_id: seq_id,
+        prompt: prompt,
+        sampling_params: sampling_params,
+        num_samples: Keyword.get(opts, :num_samples, 1),
+        prompt_logprobs: Keyword.get(opts, :prompt_logprobs),
+        topk_prompt_logprobs: Keyword.get(opts, :topk_prompt_logprobs, 0)
+      }
+
+    api_opts =
+      opts
+      |> Keyword.put(:config, entry.config)
+      |> Keyword.put(:tinker_request_type, "Sample")
+      |> Keyword.put(:tinker_request_iteration, seq_id)
+      |> Keyword.put(
+        :telemetry_metadata,
+        merge_metadata(entry.telemetry_metadata, opts[:telemetry_metadata])
+      )
+
+    case entry.sampling_api.sample_async(request, api_opts) do
+      {:ok, resp} ->
+        RateLimiter.clear_backoff(entry.rate_limiter)
+        handle_sample_response(resp, entry, seq_id, opts)
+
+      {:error, %Error{status: 429} = error} ->
+        maybe_set_backoff(entry.rate_limiter, error)
+        {:error, error}
+
+      {:error, %Error{} = error} ->
+        {:error, error}
+    end
+  end
 end

@@ -50,7 +50,7 @@ Start here:
 **Key Changes to Port:**
 - New types: `WeightsInfoResponse`, `GetSamplerResponse`
 - Type updates: `LossFnType`, `ImageChunk`, `LoadWeightsRequest`
-- API methods: `get_sampler`, `get_weights_info_by_tinker_path`
+- API methods: `get_sampler`, `get_weights_info_by_tinker_path` (now exposed via `RestClient`)
 
 ---
 

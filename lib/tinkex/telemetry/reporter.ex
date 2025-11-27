@@ -144,7 +144,15 @@ defmodule Tinkex.Telemetry.Reporter do
 
   @impl true
   def init(opts) do
-    enabled? = Keyword.get(opts, :enabled, telemetry_enabled?())
+    enabled? =
+      Keyword.get(
+        opts,
+        :enabled,
+        case opts[:config] do
+          %Tinkex.Config{telemetry_enabled?: value} when is_boolean(value) -> value
+          _ -> telemetry_enabled?()
+        end
+      )
 
     case enabled? do
       true ->
@@ -709,13 +717,7 @@ defmodule Tinkex.Telemetry.Reporter do
 
   @spec telemetry_enabled?() :: boolean()
   defp telemetry_enabled? do
-    case System.get_env("TINKER_TELEMETRY", "1") |> String.downcase() do
-      "1" -> true
-      "true" -> true
-      "yes" -> true
-      "on" -> true
-      _ -> false
-    end
+    Tinkex.Env.telemetry_enabled?()
   end
 
   defp safe_call(pid, message, timeout \\ 5_000) do

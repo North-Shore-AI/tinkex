@@ -137,7 +137,7 @@ end
 
 ## Using Capture Macros
 
-The `Tinkex.Telemetry.Capture` module provides macros for automatic exception capture.
+The Tinkex.Telemetry.Capture module provides macros for automatic exception capture.
 
 ### Synchronous Code
 

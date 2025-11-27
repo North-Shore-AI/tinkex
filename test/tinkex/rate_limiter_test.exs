@@ -60,13 +60,13 @@ defmodule Tinkex.RateLimiterTest do
     RateLimiter.clear_backoff(limiter)
     refute RateLimiter.should_backoff?(limiter)
 
-    RateLimiter.set_backoff(limiter, 50)
+    RateLimiter.set_backoff(limiter, 120)
     assert RateLimiter.should_backoff?(limiter)
 
     start_ms = System.monotonic_time(:millisecond)
     :ok = RateLimiter.wait_for_backoff(limiter)
     elapsed = System.monotonic_time(:millisecond) - start_ms
-    assert elapsed >= 50
+    assert elapsed >= 100
 
     RateLimiter.clear_backoff(limiter)
     refute RateLimiter.should_backoff?(limiter)

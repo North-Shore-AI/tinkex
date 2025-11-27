@@ -110,7 +110,7 @@ defmodule Tinkex.Integration.MultiClientConcurrencyTest do
       {:ok, body, conn} = Plug.Conn.read_body(conn)
 
       case conn.request_path do
-        "/api/v1/heartbeat" ->
+        "/api/v1/session_heartbeat" ->
           conn
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"ok":true}))
@@ -221,7 +221,7 @@ defmodule Tinkex.Integration.MultiClientConcurrencyTest do
       {:ok, body, conn} = Plug.Conn.read_body(conn)
 
       case conn.request_path do
-        "/api/v1/heartbeat" ->
+        "/api/v1/session_heartbeat" ->
           conn
           |> Plug.Conn.put_resp_content_type("application/json")
           |> Plug.Conn.resp(200, ~s({"ok":true}))
@@ -304,8 +304,17 @@ defmodule Tinkex.Integration.MultiClientConcurrencyTest do
     {:ok, training_a} = ServiceClient.create_lora_training_client(service_a, base_model: "base-a")
     {:ok, training_b} = ServiceClient.create_lora_training_client(service_b, base_model: "base-b")
 
-    {:ok, sampler_a} = ServiceClient.create_sampling_client(service_a, base_model: "sample-a")
-    {:ok, sampler_b} = ServiceClient.create_sampling_client(service_b, base_model: "sample-b")
+    {:ok, sampler_a} =
+      ServiceClient.create_sampling_client(service_a,
+        base_model: "sample-a",
+        retry_config: [enable_retry_logic: false]
+      )
+
+    {:ok, sampler_b} =
+      ServiceClient.create_sampling_client(service_b,
+        base_model: "sample-b",
+        retry_config: [enable_retry_logic: false]
+      )
 
     data =
       Enum.map(1..4, fn idx ->

@@ -8,9 +8,44 @@ Tinkex's error handling system distinguishes between **user errors** (permanent 
 
 Key components:
 - `Tinkex.Error` - Structured error type with categorization
-- `Tinkex.Retry` - Retry orchestration with telemetry
-- `Tinkex.RetryHandler` - Configurable retry policy and timing
+- Tinkex.Retry - Retry orchestration with telemetry
+- Tinkex.RetryHandler - Configurable retry policy and timing
 - `Tinkex.RateLimiter` - Shared backoff state for rate limit coordination
+- `Tinkex.RetryConfig` - User-facing sampling retry configuration (max retries, jitter, progress timeout, connection limit)
+
+## Sampling retry configuration
+
+`SamplingClient` now accepts an optional `:retry_config`, letting you tune high-level retries and bound concurrent attempts per client. Defaults match the Python SDK: base delay 500ms, max delay 10s, ±25% jitter, 30-minute progress timeout, 10 max retries, 100 max_connections.
+
+```elixir
+# Custom retry profile
+retry_config =
+  Tinkex.RetryConfig.new(
+    max_retries: 5,
+    base_delay_ms: 750,
+    max_delay_ms: 15_000,
+    jitter_pct: 0.25,
+    max_connections: 20
+  )
+
+{:ok, sampler} =
+  Tinkex.ServiceClient.create_sampling_client(service,
+    base_model: "meta-llama/Llama-3.1-8B",
+    retry_config: retry_config
+  )
+
+# Disable retries for a specific client
+{:ok, sampler} =
+  Tinkex.ServiceClient.create_sampling_client(service,
+    base_model: "meta-llama/Llama-3.1-8B",
+    retry_config: [enable_retry_logic: false]
+  )
+```
+
+Notes:
+- Retry logic runs at the SamplingClient layer; HTTP sampling calls still default to 0 low-level retries.
+- `max_connections` gates concurrent sampling attempts using a semaphore to protect pools under load.
+- `progress_timeout_ms` aborts a retry loop if no forward progress is observed within the window.
 
 ## The Error Model
 

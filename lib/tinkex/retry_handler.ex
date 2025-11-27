@@ -5,9 +5,9 @@ defmodule Tinkex.RetryHandler do
 
   @default_max_retries 3
   @default_base_delay_ms 500
-  @default_max_delay_ms 8_000
-  @default_jitter_pct 1.0
-  @default_progress_timeout_ms 30_000
+  @default_max_delay_ms 10_000
+  @default_jitter_pct 0.25
+  @default_progress_timeout_ms 1_800_000
 
   defstruct [
     :max_retries,
@@ -64,10 +64,36 @@ defmodule Tinkex.RetryHandler do
     capped = min(base, handler.max_delay_ms)
 
     if handler.jitter_pct > 0 do
-      jitter = capped * handler.jitter_pct * :rand.uniform()
-      round(jitter)
+      # Jitter in the range [-jitter_pct, +jitter_pct] of the capped delay
+      jitter = capped * handler.jitter_pct * (2 * :rand.uniform() - 1)
+
+      capped
+      |> Kernel.+(jitter)
+      |> max(0)
+      |> min(handler.max_delay_ms)
+      |> round()
     else
       round(capped)
+    end
+  end
+
+  @doc """
+  Build a RetryHandler from a RetryConfig-like struct that implements
+  `to_handler_opts/1`.
+  """
+  @spec from_config(struct()) :: t()
+  def from_config(config) when is_struct(config) do
+    config
+    |> maybe_to_handler_opts()
+    |> new()
+  end
+
+  defp maybe_to_handler_opts(%mod{} = config) do
+    if function_exported?(mod, :to_handler_opts, 1) do
+      apply(mod, :to_handler_opts, [config])
+    else
+      raise ArgumentError,
+            "retry config struct #{inspect(mod)} must implement to_handler_opts/1"
     end
   end
 

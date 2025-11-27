@@ -30,28 +30,35 @@ defmodule Tinkex.API.Telemetry do
   def send(request, opts) do
     timeout = Keyword.get(opts, :timeout, @default_timeout_ms)
 
-    Task.start(fn ->
-      try do
-        opts =
-          opts
-          |> Keyword.put(:pool_type, :telemetry)
-          |> Keyword.put(:max_retries, 1)
-          |> Keyword.put(:timeout, timeout)
+    case Task.Supervisor.start_child(Tinkex.TaskSupervisor, fn ->
+           try do
+             opts =
+               opts
+               |> Keyword.put(:pool_type, :telemetry)
+               |> Keyword.put(:max_retries, 1)
+               |> Keyword.put(:timeout, timeout)
 
-        case Tinkex.API.post("/api/v1/telemetry", request, opts) do
-          {:ok, _} ->
-            :ok
+             case Tinkex.API.post("/api/v1/telemetry", request, opts) do
+               {:ok, _} ->
+                 :ok
 
-          {:error, error} ->
-            Logger.warning("Telemetry send failed: #{inspect(error)}")
-        end
-      rescue
-        exception ->
-          Logger.error(
-            "Telemetry task crashed: #{Exception.format(:error, exception, __STACKTRACE__)}"
-          )
-      end
-    end)
+               {:error, error} ->
+                 Logger.warning("Telemetry send failed: #{inspect(error)}")
+             end
+           rescue
+             exception ->
+               Logger.error(
+                 "Telemetry task crashed: #{Exception.format(:error, exception, __STACKTRACE__)}"
+               )
+           end
+         end) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.error("Failed to start telemetry task: #{inspect(reason)}")
+        :ok
+    end
 
     :ok
   end

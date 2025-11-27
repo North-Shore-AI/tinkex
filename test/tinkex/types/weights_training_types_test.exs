@@ -29,6 +29,17 @@ defmodule Tinkex.Types.WeightsTrainingTypesTest do
     assert resp.type == "save_weights_for_sampler"
   end
 
+  test "parses save_weights_for_sampler responses when path is absent" do
+    resp =
+      SaveWeightsForSamplerResponse.from_json(%{
+        "sampling_session_id" => "session:sample:ephemeral"
+      })
+
+    assert resp.path == nil
+    assert resp.sampling_session_id == "session:sample:ephemeral"
+    assert resp.type == "save_weights_for_sampler"
+  end
+
   test "parses load weights response" do
     resp = LoadWeightsResponse.from_json(%{"path" => "tinker://run/weights/step-3"})
     assert resp.path == "tinker://run/weights/step-3"

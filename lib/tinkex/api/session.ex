@@ -57,7 +57,7 @@ defmodule Tinkex.API.Session do
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def heartbeat(request, opts) do
     Tinkex.API.post(
-      "/api/v1/heartbeat",
+      "/api/v1/session_heartbeat",
       request,
       Keyword.put(opts, :pool_type, :session)
     )

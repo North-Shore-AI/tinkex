@@ -2,21 +2,104 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.9] - 2025-11-26
+
+### Added
+
+#### Env and Configuration Parity
+- **Tinkex.Env**: Introduced as the single source of truth for environment-driven configuration knobs.
+- **Config precedence**: Wired `Tinkex.Config.new/1` to use opts > app config > env > defaults.
+- **New env vars**: Support for `TINKER_TAGS`, `TINKER_FEATURE_GATES`, `TINKER_TELEMETRY`, `TINKER_LOG`, `TINKEX_DUMP_HEADERS`, `CLOUDFLARE_ACCESS_CLIENT_ID`, and `CLOUDFLARE_ACCESS_CLIENT_SECRET`.
+- **Secret masking**: Added masking for API key and Cloudflare secrets in inspect and HTTP dumps.
+- **Config accessors**: Exposed `tags`, `feature_gates`, `telemetry_enabled?`, `log_level`, `dump_headers?` on `Tinkex.Config`; documented in `environment_configuration.md`.
+
+#### Cloudflare Access and Header Redaction
+- **CF headers**: Inject `CF-Access-Client-Id` and `CF-Access-Client-Secret` from config/env into all requests via `build_headers/4`.
+- **Redaction**: Redact both `x-api-key` and `cf-access-client-secret` in request dump logs.
+- **Tests**: Added tests asserting Cloudflare headers are present when configured and that secrets never appear in logs.
+
+#### Heartbeat Path and SessionManager Robustness
+- **Heartbeat alignment**: Changed Elixir heartbeat endpoint to POST `/api/v1/session_heartbeat` (matching Python) instead of `/api/v1/heartbeat`.
+- **Warning threshold**: Introduced `heartbeat_warning_after_ms` (default 120,000 ms) and emit warnings when heartbeats have failed for longer than this window.
+- **Resilient sessions**: Stop silently dropping sessions on 4xx; keep sessions alive and continue retrying while surfacing failures via logs.
+- **ETS persistence**: Persist session state in a protected ETS table `:tinkex_sessions` and reload on `SessionManager` init so restarts preserve heartbeat state.
+- **Timer cleanup**: Ensure heartbeat timers are tracked and cancelled on terminate.
+
+#### Sampling Retries, Backpressure, and Connection Limiting
+- **RetryConfig**: Added `Tinkex.RetryConfig` with `max_retries`, `base_delay_ms`, `max_delay_ms`, `jitter_pct`, `progress_timeout_ms`, `max_connections`, and `enable_retry_logic`.
+- **SamplingClient integration**: Integrated `RetryConfig` into `SamplingClient`; allow per-client configs and a simple keyword shorthand `retry_config: [...]`.
+- **RetryHandler**: Use `RetryHandler.from_config/1` to wrap sampling requests with retry logic matching Python semantics (0.5s base, 10s cap, 25% jitter, long progress timeout).
+- **RetrySemaphore**: Introduced `Tinkex.RetrySemaphore` to cap concurrent sampling attempts per client using an ETS-backed semaphore and `max_connections`.
+- **Retry defaults**: Removed hardcoded `max_retries: 0` in Sampling API; now respects configured `max_retries` from `RetryConfig` or opts.
+- **Tests**: Added tests for `RetryConfig`, `RetryHandler` jitter, `RetrySemaphore`, and integration cases for enabled/disabled retries.
+
+#### Training Persistence and Checkpoint Workflows
+- **LoadWeightsRequest fix**: Fixed wire protocol by renaming `load_optimizer_state` to `optimizer` to match Python and server expectations.
+- **TrainingClient.save_state/3**: Implemented to save training checkpoints via `/api/v1/save_weights`, returning `SaveWeightsResponse` with `tinker://` path.
+- **TrainingClient.load_state/3**: Implemented to load weights via `/api/v1/load_weights`.
+- **TrainingClient.load_state_with_optimizer/3**: Implemented to load weights with optimizer state.
+- **ServiceClient.create_training_client_from_state/3**: Uses `RestClient.get_weights_info_by_tinker_path/2` to derive base_model and LoRA rank, creates a `TrainingClient`, then loads the checkpoint.
+- **SaveWeightsForSamplerResponse**: Extended to support both `path` and `sampling_session_id`-only responses, matching ephemeral sampler flows.
+- **TrainingClient.save_weights_and_get_sampling_client/2**: Added to save sampler weights or ephemeral sessions and return a `SamplingClient`.
+- **TrainingClient.save_weights_and_get_sampling_client_sync/2**: Synchronous helper variant.
+- **Docs & examples**: Added `training_persistence.md` guide and examples `training_persistence_live.exs` and `save_weights_and_sample.exs`.
+
+#### Model Info and Unload Endpoints
+- **Types**: Added `ModelData`, `GetInfoRequest`, `GetInfoResponse`, `UnloadModelRequest`, and `UnloadModelResponse` types.
+- **API endpoints**: Implemented `Tinkex.API.Models.get_info/2` and `unload_model/2` on top of `/api/v1/get_info` and `/api/v1/unload_model`.
+- **TrainingClient.get_info/1**: Wired to the typed `get_info` endpoint, returning `GetInfoResponse` for tokenizer_id and architecture.
+- **TrainingClient.unload_model/1**: Wired to the `unload_model` endpoint with support for both immediate and future-based responses.
+- **Example & guide**: Added `model_info_and_unload.exs` example and `model_info_unload.md` guide.
+
+#### REST Surface Parity and Tinker-Path Helpers
+- **RestClient.get_sampler/2**: Exposed on top of `Rest.get_sampler/2`, returning typed `GetSamplerResponse`.
+- **RestClient.get_weights_info_by_tinker_path/2**: Returns `WeightsInfoResponse`.
+- **New helpers**:
+  - `get_training_run_by_tinker_path/2`
+  - `delete_checkpoint_by_tinker_path/2`
+  - `publish_checkpoint_from_tinker_path/2`
+  - `unpublish_checkpoint_from_tinker_path/2`
+  - `get_checkpoint_archive_url_by_tinker_path/2`
+- **Docs**: Extended `checkpoint_management.md` to use the new helpers.
+
+#### Telemetry and Task Supervision
+- **Task.Supervisor**: Introduced top-level `Tinkex.TaskSupervisor` and route telemetry HTTP sends through it instead of `Task.start/1`.
+- **Child specs**: Made `SamplingClient` and `TrainingClient` `child_spec` use `restart: :temporary` to avoid restart storms and match user-managed lifecycle semantics.
+- **Telemetry toggle**: Keep `telemetry_enabled?` driven by `Tinkex.Config.telemetry_enabled?` with `TINKER_TELEMETRY` as the env fallback.
+
+#### Docs, Guides, and Examples
+- **New guides**: `environment_configuration.md`, advanced configuration updates describing env precedence, Cloudflare Access, and heartbeat tuning.
+- **Retry guide**: Extended `retry_and_error_handling.md` with `SamplingClient` `retry_config` details and connection limiting behavior.
+- **Persistence guides**: Added `training_persistence.md` and `model_info_unload.md` focused on checkpoints, optimizer state, and model metadata APIs.
+- **Examples README**: Updated `examples/README.md` and `run_all.sh` to include new examples: `heartbeat_probe.exs`, `model_info_and_unload.exs`, `training_persistence_live.exs`, `save_weights_and_sample.exs`.
+
+### Tests
+
+- Added unit tests for `Env`, `Config` precedence, Cloudflare redaction, `RetryConfig`, `RetryHandler`, `RetrySemaphore`, `ModelInfo` and `Unload` types, `LoadWeightsRequest` wire format, and updated rate limiter behavior.
+- Added integration tests covering:
+  - Multi-client concurrency with `retry_config` enabled/disabled
+  - Sampling workflows under rate limits and transient errors
+  - Training loop + checkpoint flows with save/load and `from_state`
+  - `SessionManager` heartbeat path and warning behavior
+
 ## [0.1.8] - 2025-11-26
 
 ### Added
 
 - **NotGiven + transform layer**: Introduced omit/not-given sentinels and request transformation with aliasing/formatting to mirror Python serialization semantics.
+- **REST client parity**: Added `RestClient.get_sampler/2`, `RestClient.get_weights_info_by_tinker_path/2`, and tinker-path convenience aliases (training run, delete/archive/publish/unpublish) to match Python ergonomics.
 - **Response wrappers & SSE**: Added `Tinkex.API.Response` with metadata (headers, status, URL, elapsed, retries) plus SSE decoding helpers and streaming response support for event-stream endpoints.
 - **Typed responses**: New structs for weight save/load responses, training runs, cursors, server capabilities, and health checks; REST training run endpoints now decode into typed structs.
 - **Service endpoints**: Implemented `/api/v1/get_server_capabilities` and `/api/v1/healthz` in `Tinkex.API.Service`.
 - **Sampling helper**: Added `SamplingClient.compute_logprobs/3` convenience for prompt token logprobs.
 - **CLI management**: Added checkpoint management subcommands (list/info/publish/unpublish/delete/download) and run management subcommands (list/info) with corresponding tests and docs.
 - **Live example**: New `examples/live_capabilities_and_logprobs.exs` showing capabilities + health probes and prompt logprobs; included in `examples/run_all.sh`.
+- **Centralized env + Cloudflare headers**: `Tinkex.Env` feeds `Tinkex.Config`/HTTP defaults (API key, base URL, tags, feature gates, telemetry, log level, dump headers, Cloudflare Access) with redaction helpers, matching Python env behavior and ADR-002.
 
 ### Fixed
 
 - `RestClient` training run endpoints now return typed structs, and publish/unpublish checkpoint helpers are wired through REST with CLI wrappers.
+- **Session heartbeat parity**: Heartbeats now POST to `/api/v1/session_heartbeat` (matching Python), continue retrying on all errors, and emit warnings after sustained failure windows instead of silently dropping sessions on 4xx. Added a guarded probe script to verify `/api/v1/session_heartbeat` = 200 and `/api/v1/heartbeat` = 404 against a real server.
 
 ## [0.1.7] - 2025-11-26
 

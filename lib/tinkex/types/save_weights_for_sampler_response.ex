@@ -3,11 +3,10 @@ defmodule Tinkex.Types.SaveWeightsForSamplerResponse do
   Response payload for save_weights_for_sampler.
   """
 
-  @enforce_keys [:path]
   defstruct [:path, :sampling_session_id, type: "save_weights_for_sampler"]
 
   @type t :: %__MODULE__{
-          path: String.t(),
+          path: String.t() | nil,
           sampling_session_id: String.t() | nil,
           type: String.t()
         }
@@ -16,19 +15,14 @@ defmodule Tinkex.Types.SaveWeightsForSamplerResponse do
   Parse from JSON map with string or atom keys.
   """
   @spec from_json(map()) :: t()
-  def from_json(%{"path" => path} = json) do
-    %__MODULE__{
-      path: path,
-      sampling_session_id: json["sampling_session_id"],
-      type: json["type"] || "save_weights_for_sampler"
-    }
-  end
+  def from_json(%{} = json) do
+    path = Map.get(json, "path") || Map.get(json, :path)
 
-  def from_json(%{path: path} = json) do
     %__MODULE__{
       path: path,
-      sampling_session_id: json[:sampling_session_id],
-      type: json[:type] || "save_weights_for_sampler"
+      sampling_session_id:
+        Map.get(json, "sampling_session_id") || Map.get(json, :sampling_session_id),
+      type: Map.get(json, "type") || Map.get(json, :type) || "save_weights_for_sampler"
     }
   end
 end

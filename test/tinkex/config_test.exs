@@ -12,6 +12,10 @@ defmodule Tinkex.ConfigTest do
       assert config.timeout == 120_000
       assert config.max_retries == 2
       assert config.http_pool == Tinkex.HTTP.Pool
+      assert config.tags == ["tinkex-elixir"]
+      assert config.feature_gates == []
+      refute config.telemetry_enabled?
+      refute config.dump_headers?
     end
 
     test "overrides defaults with options" do
@@ -38,6 +42,103 @@ defmodule Tinkex.ConfigTest do
     test "accepts user_metadata" do
       config = Config.new(api_key: "test-key", user_metadata: %{user_id: "123"})
       assert config.user_metadata == %{user_id: "123"}
+    end
+
+    test "uses env and app config precedence" do
+      System.put_env("TINKER_API_KEY", "env-key")
+      Application.put_env(:tinkex, :api_key, "app-key")
+
+      config = Config.new(api_key: "opt-key")
+      assert config.api_key == "opt-key"
+
+      Application.delete_env(:tinkex, :api_key)
+      config = Config.new()
+      assert config.api_key == "env-key"
+
+      System.delete_env("TINKER_API_KEY")
+    end
+
+    test "applies opts > app config > env > defaults for shared fields" do
+      env_snapshot =
+        snapshot_env(
+          ~w[TINKER_API_KEY TINKER_BASE_URL TINKER_TELEMETRY TINKER_LOG TINKEX_DUMP_HEADERS]
+        )
+
+      app_snapshot =
+        snapshot_app([
+          :api_key,
+          :base_url,
+          :telemetry_enabled?,
+          :log_level,
+          :dump_headers?
+        ])
+
+      on_exit(fn ->
+        restore_env(env_snapshot)
+        restore_app(app_snapshot)
+      end)
+
+      System.put_env("TINKER_API_KEY", "env-key")
+      System.put_env("TINKER_BASE_URL", "https://env.example.com/base")
+      System.put_env("TINKER_TELEMETRY", "1")
+      System.put_env("TINKER_LOG", "debug")
+      System.put_env("TINKEX_DUMP_HEADERS", "1")
+
+      Application.put_env(:tinkex, :api_key, "app-key")
+      Application.put_env(:tinkex, :base_url, "https://app.example.com/base")
+      Application.put_env(:tinkex, :telemetry_enabled?, false)
+      Application.put_env(:tinkex, :log_level, :warn)
+      Application.put_env(:tinkex, :dump_headers?, false)
+
+      config = Config.new()
+      assert config.api_key == "app-key"
+      assert config.base_url == "https://app.example.com/base"
+      refute config.telemetry_enabled?
+      assert config.log_level == :warn
+      refute config.dump_headers?
+
+      config =
+        Config.new(
+          api_key: "opt-key",
+          base_url: "https://opt.example.com/base",
+          telemetry_enabled?: true,
+          log_level: :error,
+          dump_headers?: true
+        )
+
+      assert config.api_key == "opt-key"
+      assert config.base_url == "https://opt.example.com/base"
+      assert config.telemetry_enabled?
+      assert config.log_level == :error
+      assert config.dump_headers?
+
+      Application.delete_env(:tinkex, :api_key)
+      Application.delete_env(:tinkex, :base_url)
+      Application.delete_env(:tinkex, :telemetry_enabled?)
+      Application.delete_env(:tinkex, :log_level)
+      Application.delete_env(:tinkex, :dump_headers?)
+
+      config = Config.new()
+      assert config.api_key == "env-key"
+      assert config.base_url == "https://env.example.com/base"
+      assert config.telemetry_enabled?
+      assert config.log_level == :debug
+      assert config.dump_headers?
+    end
+
+    test "pulls cloudflare credentials from env" do
+      System.put_env("TINKER_API_KEY", "key")
+      System.put_env("CLOUDFLARE_ACCESS_CLIENT_ID", "cf-id")
+      System.put_env("CLOUDFLARE_ACCESS_CLIENT_SECRET", "cf-secret")
+
+      config = Config.new()
+
+      assert config.cf_access_client_id == "cf-id"
+      assert config.cf_access_client_secret == "cf-secret"
+
+      System.delete_env("CLOUDFLARE_ACCESS_CLIENT_ID")
+      System.delete_env("CLOUDFLARE_ACCESS_CLIENT_SECRET")
+      System.delete_env("TINKER_API_KEY")
     end
 
     test "raises without api_key" do
@@ -70,7 +171,14 @@ defmodule Tinkex.ConfigTest do
           http_pool: :pool,
           timeout: 1_000,
           max_retries: 2,
-          user_metadata: nil
+          user_metadata: nil,
+          tags: [],
+          feature_gates: [],
+          telemetry_enabled?: false,
+          log_level: nil,
+          cf_access_client_id: nil,
+          cf_access_client_secret: nil,
+          dump_headers?: false
         }
 
         assert Config.validate!(config) == config
@@ -113,6 +221,40 @@ defmodule Tinkex.ConfigTest do
       refute inspected =~ "tml-abcdef123456"
       assert inspected =~ "tml-ab...3456"
     end
+
+    test "hides cloudflare secret" do
+      config =
+        Config.new(
+          api_key: "key",
+          cf_access_client_secret: "super-secret"
+        )
+
+      inspected = inspect(config)
+      refute inspected =~ "super-secret"
+      assert inspected =~ "[REDACTED]"
+    end
+  end
+
+  defp snapshot_env(keys) do
+    Enum.into(keys, %{}, fn key -> {key, System.get_env(key)} end)
+  end
+
+  defp restore_env(snapshot) do
+    Enum.each(snapshot, fn
+      {key, nil} -> System.delete_env(key)
+      {key, value} -> System.put_env(key, value)
+    end)
+  end
+
+  defp snapshot_app(keys) do
+    Enum.into(keys, %{}, fn key -> {key, Application.get_env(:tinkex, key)} end)
+  end
+
+  defp restore_app(snapshot) do
+    Enum.each(snapshot, fn
+      {key, nil} -> Application.delete_env(:tinkex, key)
+      {key, value} -> Application.put_env(:tinkex, key, value)
+    end)
   end
 
   defp without_api_key_sources(fun) when is_function(fun, 0) do

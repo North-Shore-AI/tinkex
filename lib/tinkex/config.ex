@@ -10,6 +10,7 @@ defmodule Tinkex.Config do
   """
 
   require Logger
+  alias Tinkex.Env
 
   @enforce_keys [:base_url, :api_key]
   defstruct [
@@ -18,7 +19,14 @@ defmodule Tinkex.Config do
     :http_pool,
     :timeout,
     :max_retries,
-    :user_metadata
+    :user_metadata,
+    :tags,
+    :feature_gates,
+    :telemetry_enabled?,
+    :log_level,
+    :cf_access_client_id,
+    :cf_access_client_secret,
+    :dump_headers?
   ]
 
   @type t :: %__MODULE__{
@@ -27,7 +35,14 @@ defmodule Tinkex.Config do
           http_pool: atom(),
           timeout: pos_integer(),
           max_retries: non_neg_integer(),
-          user_metadata: map() | nil
+          user_metadata: map() | nil,
+          tags: [String.t()] | nil,
+          feature_gates: [String.t()] | nil,
+          telemetry_enabled?: boolean(),
+          log_level: :debug | :info | :warn | :error | nil,
+          cf_access_client_id: String.t() | nil,
+          cf_access_client_secret: String.t() | nil,
+          dump_headers?: boolean()
         }
 
   @default_base_url "https://tinker.thinkingmachines.dev/services/tinker-prod"
@@ -42,20 +57,80 @@ defmodule Tinkex.Config do
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
+    env = Env.snapshot()
+
     api_key =
-      opts[:api_key] ||
-        Application.get_env(:tinkex, :api_key) ||
-        System.get_env("TINKER_API_KEY")
+      pick([
+        opts[:api_key],
+        Application.get_env(:tinkex, :api_key),
+        env.api_key
+      ])
 
     base_url =
-      opts[:base_url] ||
-        Application.get_env(:tinkex, :base_url, @default_base_url)
+      pick(
+        [
+          opts[:base_url],
+          Application.get_env(:tinkex, :base_url),
+          env.base_url
+        ],
+        @default_base_url
+      )
 
-    http_pool = opts[:http_pool] || Application.get_env(:tinkex, :http_pool, Tinkex.HTTP.Pool)
-    timeout = opts[:timeout] || Application.get_env(:tinkex, :timeout, @default_timeout)
+    http_pool =
+      pick([opts[:http_pool], Application.get_env(:tinkex, :http_pool)], Tinkex.HTTP.Pool)
+
+    timeout = pick([opts[:timeout], Application.get_env(:tinkex, :timeout)], @default_timeout)
 
     max_retries =
-      opts[:max_retries] || Application.get_env(:tinkex, :max_retries, @default_max_retries)
+      pick([opts[:max_retries], Application.get_env(:tinkex, :max_retries)], @default_max_retries)
+
+    tags =
+      pick(
+        [opts[:tags], Application.get_env(:tinkex, :tags)],
+        default_tags(env.tags)
+      )
+
+    feature_gates =
+      pick(
+        [opts[:feature_gates], Application.get_env(:tinkex, :feature_gates)],
+        env.feature_gates
+      )
+
+    telemetry_enabled? =
+      pick(
+        [
+          opts[:telemetry_enabled?],
+          Application.get_env(:tinkex, :telemetry_enabled?)
+        ],
+        env.telemetry_enabled?
+      )
+
+    log_level =
+      pick(
+        [opts[:log_level], Application.get_env(:tinkex, :log_level)],
+        env.log_level
+      )
+
+    cf_access_client_id =
+      pick(
+        [opts[:cf_access_client_id], Application.get_env(:tinkex, :cf_access_client_id)],
+        env.cf_access_client_id
+      )
+
+    cf_access_client_secret =
+      pick(
+        [opts[:cf_access_client_secret], Application.get_env(:tinkex, :cf_access_client_secret)],
+        env.cf_access_client_secret
+      )
+
+    dump_headers? =
+      pick(
+        [
+          opts[:dump_headers?],
+          Application.get_env(:tinkex, :dump_headers?)
+        ],
+        env.dump_headers?
+      )
 
     config = %__MODULE__{
       base_url: base_url,
@@ -63,7 +138,14 @@ defmodule Tinkex.Config do
       http_pool: http_pool,
       timeout: timeout,
       max_retries: max_retries,
-      user_metadata: opts[:user_metadata]
+      user_metadata: opts[:user_metadata],
+      tags: tags,
+      feature_gates: feature_gates,
+      telemetry_enabled?: telemetry_enabled?,
+      log_level: log_level,
+      cf_access_client_id: cf_access_client_id,
+      cf_access_client_secret: cf_access_client_secret,
+      dump_headers?: dump_headers?
     }
 
     # Fail fast on malformed URLs so pool creation does not explode deeper in the stack.
@@ -97,6 +179,29 @@ defmodule Tinkex.Config do
     unless is_integer(config.max_retries) and config.max_retries >= 0 do
       raise ArgumentError,
             "max_retries must be a non-negative integer, got: #{inspect(config.max_retries)}"
+    end
+
+    unless is_list(config.tags) do
+      raise ArgumentError, "tags must be a list of strings, got: #{inspect(config.tags)}"
+    end
+
+    unless is_list(config.feature_gates) do
+      raise ArgumentError,
+            "feature_gates must be a list of strings, got: #{inspect(config.feature_gates)}"
+    end
+
+    unless is_boolean(config.telemetry_enabled?) do
+      raise ArgumentError,
+            "telemetry_enabled? must be boolean, got: #{inspect(config.telemetry_enabled?)}"
+    end
+
+    unless is_boolean(config.dump_headers?) do
+      raise ArgumentError,
+            "dump_headers? must be boolean, got: #{inspect(config.dump_headers?)}"
+    end
+
+    unless config.log_level in [nil, :debug, :info, :warn, :error] do
+      raise ArgumentError, "log_level must be one of :debug | :info | :warn | :error | nil"
     end
 
     maybe_warn_about_base_url(config)
@@ -140,16 +245,28 @@ defmodule Tinkex.Config do
   end
 
   def mask_api_key(other), do: other
+
+  defp pick(values, default \\ nil) do
+    case Enum.find(values, &(!is_nil(&1))) do
+      nil -> default
+      value -> value
+    end
+  end
+
+  defp default_tags([]), do: ["tinkex-elixir"]
+  defp default_tags(tags) when is_list(tags), do: tags
 end
 
 defimpl Inspect, for: Tinkex.Config do
   import Inspect.Algebra
+  alias Tinkex.Env
 
   def inspect(config, opts) do
     data =
       config
       |> Map.from_struct()
       |> Map.update(:api_key, nil, &Tinkex.Config.mask_api_key/1)
+      |> Map.update(:cf_access_client_secret, nil, &Env.mask_secret/1)
 
     concat(["#Tinkex.Config<", to_doc(data, opts), ">"])
   end

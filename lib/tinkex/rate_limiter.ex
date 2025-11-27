@@ -67,11 +67,18 @@ defmodule Tinkex.RateLimiter do
   """
   @spec wait_for_backoff(limiter()) :: :ok
   def wait_for_backoff(limiter) do
-    if should_backoff?(limiter) do
-      Process.sleep(100)
-      wait_for_backoff(limiter)
-    else
-      :ok
+    backoff_until = :atomics.get(limiter, 1)
+
+    if backoff_until != 0 do
+      now = System.monotonic_time(:millisecond)
+
+      wait_ms = backoff_until - now
+
+      if wait_ms > 0 do
+        Process.sleep(wait_ms)
+      end
     end
+
+    :ok
   end
 end
