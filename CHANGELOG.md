@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.13] - 2025-12-01
+
+Documentation release: clarifies project status and attribution.
+
+### Documentation
+
+- Added disclaimer clarifying Tinkex is an independent, community-maintained project not affiliated with or endorsed by Thinking Machines Lab.
+- Added links to official [Thinking Machines Lab](https://thinkingmachines.ai/) homepage and [Tinker documentation](https://tinker-docs.thinkingmachines.ai/).
+- Improved intro section clarity around Tinker's provenance.
+
 ## [0.1.12] - 2025-11-27
 
 Custom loss training now mirrors the Python SDK while adding multipart uploads, proxy-aware HTTP, streaming checkpoint downloads, queue observers, and richer capabilities metadata.

@@ -11,16 +11,12 @@
 [![Docs](https://img.shields.io/badge/docs-hexdocs.pm-blue.svg)](https://hexdocs.pm/tinkex)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
-Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the Tinker distributed machine learning platform. It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
+Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.12 Highlights
+## 0.1.13 Highlights
 
-- **Custom loss training parity**: `forward_backward_custom/4` keeps per-datum logprobs as Nx tensors, computes gradients locally, sends them back as weights so the backend trains, and returns `ForwardBackwardOutput` compatible with `optim_step/2`.
-- **Structured capabilities metadata**: Capabilities responses return `SupportedModel` structs with `model_id`/`model_name`/`arch`; `model_names/1` stays backward compatible and the example now prints the richer metadata.
-- **Multipart uploads**: Tinkex.API.post/3 normalizes file inputs, flattens nested bodies into bracketed fields, generates boundaries, and sets `Content-Type` automatically when `:files` are present (with path-based helpers and a runnable demo).
-- **Streaming checkpoint downloads**: Checkpoint archives stream via Finch with O(1) memory usage while preserving progress callbacks and extraction semantics.
-- **Queue backpressure visibility**: Sampling and training clients hook queue observers into `Future.poll/2`, emitting debounced warnings for rate limiting or capacity throttling with human-readable reasons in line with the Python SDK.
-- **Proxy-aware HTTP**: Finch pools honor proxies from `Tinkex.Config` (including `TINKEX_PROXY`/`TINKEX_PROXY_HEADERS` and tuple proxies) and mask credentials in logs and inspect output.
+- **Disclaimer and attribution**: Clarified that Tinkex is an independent, community-maintained project not affiliated with or endorsed by Thinking Machines Lab.
+- **Official documentation links**: Added links to the official [Tinker documentation](https://tinker-docs.thinkingmachines.ai/) and [Thinking Machines Lab](https://thinkingmachines.ai/) homepage.
 
 ## Features
 
@@ -45,6 +41,10 @@ Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-
 - **Multipart uploads**: The `:files` option builds multipart/form-data bodies automatically (path and tuple normalization, bracketed form fields, boundary generation, and tuple metadata) while preserving JSON requests when no files are present; includes a runnable multipart example and path-based helpers.
 - **Proxy-aware HTTP**: Finch pools pick up proxies from `Tinkex.Config` (or `TINKEX_PROXY`/`TINKEX_PROXY_HEADERS`) while masking credentials in logs and inspect output.
 
+## Disclaimer
+
+Tinkex is an independent, community-maintained Elixir SDK for the Tinker API. It is not affiliated with, endorsed by, or supported by Thinking Machines Lab or the official Tinker team. Please refer to the [official Tinker documentation](https://tinker-docs.thinkingmachines.ai/) for canonical behavior, SLAs, and support.
+
 ## Guides
 
 - Getting started & configuration: `docs/guides/getting_started.md`, `docs/guides/environment_configuration.md`
@@ -60,7 +60,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.12"}
+    {:tinkex, "~> 0.1.13"}
   ]
 end
 ```
