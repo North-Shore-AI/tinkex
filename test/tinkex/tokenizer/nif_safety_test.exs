@@ -3,9 +3,8 @@ defmodule Tinkex.Tokenizer.NifSafetyTest do
 
   alias Tokenizers.{Encoding, Tokenizer}
 
-  @moduletag :network
   @table_name :tinkex_tokenizers_nif_safety
-  @tokenizer_id "gpt2"
+  @tokenizer_id "local-ets-fixture"
 
   setup do
     {:ok, _} = Application.ensure_all_started(:tokenizers)
@@ -18,7 +17,7 @@ defmodule Tinkex.Tokenizer.NifSafetyTest do
   end
 
   test "tokenizer handles are usable across processes via ETS" do
-    {:ok, tokenizer} = Tokenizer.from_pretrained(@tokenizer_id)
+    {:ok, tokenizer} = Tokenizer.from_buffer(local_tokenizer_json())
     :ets.insert(@table_name, {@tokenizer_id, tokenizer})
 
     task =
@@ -34,6 +33,29 @@ defmodule Tinkex.Tokenizer.NifSafetyTest do
       end)
 
     assert {:ok, _ids} = Task.await(task, 15_000)
+  end
+
+  defp local_tokenizer_json do
+    ~s|{
+      "version": "1.0",
+      "truncation": null,
+      "padding": null,
+      "added_tokens": [],
+      "normalizer": null,
+      "pre_tokenizer": { "type": "Whitespace" },
+      "post_processor": null,
+      "decoder": null,
+      "model": {
+        "type": "WordLevel",
+        "vocab": {
+          "hello": 0,
+          "from": 1,
+          "another": 2,
+          "process": 3
+        },
+        "unk_token": "[UNK]"
+      }
+    }|
   end
 
   defp drop_table(name) do
