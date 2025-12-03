@@ -7,11 +7,11 @@ defmodule Tinkex.RetryConfigTest do
     test "builds with defaults" do
       config = RetryConfig.new()
 
-      assert config.max_retries == 10
+      assert config.max_retries == :infinity
       assert config.base_delay_ms == 500
       assert config.max_delay_ms == 10_000
       assert config.jitter_pct == 0.25
-      assert config.progress_timeout_ms == 1_800_000
+      assert config.progress_timeout_ms == 7_200_000
       assert config.max_connections == 100
       assert config.enable_retry_logic == true
     end
@@ -36,11 +36,17 @@ defmodule Tinkex.RetryConfigTest do
       assert config.max_connections == 5
       assert config.enable_retry_logic == false
     end
+
+    test "allows :infinity max_retries" do
+      config = RetryConfig.new(max_retries: :infinity)
+      assert config.max_retries == :infinity
+    end
   end
 
   describe "validate!/1" do
     test "raises on invalid values" do
       assert_raise ArgumentError, fn -> RetryConfig.new(max_retries: -1) end
+      assert_raise ArgumentError, fn -> RetryConfig.new(max_retries: :never) end
       assert_raise ArgumentError, fn -> RetryConfig.new(base_delay_ms: 0) end
       assert_raise ArgumentError, fn -> RetryConfig.new(max_delay_ms: 1) end
       assert_raise ArgumentError, fn -> RetryConfig.new(jitter_pct: -0.1) end

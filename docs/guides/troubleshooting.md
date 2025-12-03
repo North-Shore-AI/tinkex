@@ -17,7 +17,7 @@ Reference this guide when CLI or SDK calls fail or diverge from expectations. Mo
 
 - **Compilation/ABI errors**: Ensure Rust toolchains and C toolchains are available; re-run `mix deps.compile tokenizers`.
 - **Runtime crashes**: The ETS cache stores NIF handles; verify the same OS/CPU architecture used to build dependencies. If you suspect a bad cache entry, restart the BEAM and clear `_build`/`deps`.
-- **Unexpected token IDs**: Confirm you are passing fully formatted text (chat templates are not inserted) and the correct model name. For Llama-3 variants, the SDK automatically swaps to `"baseten/Meta-Llama-3-tokenizer"`.
+- **Unexpected token IDs**: Confirm you are passing fully formatted text (chat templates are not inserted) and the correct model name. For Llama-3 variants, the SDK automatically swaps to `"thinkingmachineslabinc/meta-llama-3-tokenizer"`.
 
 ## CLI failures
 

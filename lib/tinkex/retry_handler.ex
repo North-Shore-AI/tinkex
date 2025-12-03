@@ -3,11 +3,11 @@ defmodule Tinkex.RetryHandler do
 
   alias Tinkex.Error
 
-  @default_max_retries 3
+  @default_max_retries :infinity
   @default_base_delay_ms 500
   @default_max_delay_ms 10_000
   @default_jitter_pct 0.25
-  @default_progress_timeout_ms 1_800_000
+  @default_progress_timeout_ms 7_200_000
 
   defstruct [
     :max_retries,
@@ -21,7 +21,7 @@ defmodule Tinkex.RetryHandler do
   ]
 
   @type t :: %__MODULE__{
-          max_retries: non_neg_integer(),
+          max_retries: non_neg_integer() | :infinity,
           base_delay_ms: non_neg_integer(),
           max_delay_ms: non_neg_integer(),
           jitter_pct: float(),
@@ -48,7 +48,8 @@ defmodule Tinkex.RetryHandler do
   end
 
   @spec retry?(t(), Error.t() | term()) :: boolean()
-  def retry?(%__MODULE__{attempt: attempt, max_retries: max}, _error) when attempt >= max do
+  def retry?(%__MODULE__{attempt: attempt, max_retries: max}, _error)
+      when is_integer(max) and attempt >= max do
     false
   end
 
@@ -103,6 +104,7 @@ defmodule Tinkex.RetryHandler do
   end
 
   @spec progress_timeout?(t()) :: boolean()
+  def progress_timeout?(%__MODULE__{attempt: 0}), do: false
   def progress_timeout?(%__MODULE__{last_progress_at: nil}), do: false
 
   def progress_timeout?(%__MODULE__{} = handler) do

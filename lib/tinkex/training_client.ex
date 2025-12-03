@@ -1259,9 +1259,13 @@ defmodule Tinkex.TrainingClient do
   defp estimate_number_count(%{model_input: model_input, loss_fn_inputs: loss_inputs}) do
     model_input_count =
       case model_input do
-        nil -> 0
-        %_{} -> Tinkex.Types.ModelInput.length(model_input)
-        _ -> 0
+        %Tinkex.Types.ModelInput{chunks: chunks} when is_list(chunks) ->
+          Enum.reduce(chunks, 0, fn chunk, acc ->
+            acc + _estimate_number_count_in_chunk(chunk)
+          end)
+
+        _ ->
+          0
       end
 
     loss_count =
@@ -1274,6 +1278,28 @@ defmodule Tinkex.TrainingClient do
 
     model_input_count + loss_count
   end
+
+  defp _estimate_number_count_in_chunk(%Tinkex.Types.ImageChunk{data: data}) when is_binary(data),
+    do: byte_size(data)
+
+  defp _estimate_number_count_in_chunk(%Tinkex.Types.ImageAssetPointerChunk{
+         location: location
+       })
+       when is_binary(location),
+       do: byte_size(location)
+
+  defp _estimate_number_count_in_chunk(%Tinkex.Types.EncodedTextChunk{} = chunk),
+    do: Tinkex.Types.EncodedTextChunk.length(chunk)
+
+  defp _estimate_number_count_in_chunk(%{__struct__: mod} = chunk) do
+    if function_exported?(mod, :length, 1) do
+      mod.length(chunk)
+    else
+      0
+    end
+  end
+
+  defp _estimate_number_count_in_chunk(_chunk), do: 0
 
   defp allocate_request_ids(count, counter) when count <= 0, do: {[], counter}
 

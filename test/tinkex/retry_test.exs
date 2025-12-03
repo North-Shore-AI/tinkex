@@ -156,7 +156,29 @@ defmodule Tinkex.RetryTest do
 
       result = Retry.with_retry(fun, opts)
       assert {:error, %Error{type: :api_timeout}} = result
-      assert :counters.get(counter, 1) == 0
+      assert :counters.get(counter, 1) == 1
+    end
+
+    test "halts infinite retries when progress timeout is exceeded" do
+      counter = :counters.new(1, [])
+
+      fun = fn ->
+        :counters.add(counter, 1, 1)
+        {:error, %Error{type: :api_status, status: 503, message: "server error"}}
+      end
+
+      handler =
+        RetryHandler.new(
+          max_retries: :infinity,
+          base_delay_ms: 5,
+          jitter_pct: 0.0,
+          progress_timeout_ms: 2
+        )
+
+      result = Retry.with_retry(fun, handler: handler)
+
+      assert {:error, %Error{type: :api_timeout}} = result
+      assert :counters.get(counter, 1) == 1
     end
   end
 end

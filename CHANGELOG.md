@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.14] - 2025-12-02
+
+### Added
+- `ServiceClient.create_training_client_from_state_with_optimizer/3` (+ async) for weight+optimizer restore with documented weights-only default on the existing helper.
+- CLI `checkpoint delete` now accepts multiple `tinker://` paths with upfront validation, a single confirmation prompt (`--yes` to skip), per-path progress output, and aggregated failure reporting.
+- New examples:
+  - `examples/multimodal_resume_and_cleanup.exs` (multimodal with `expected_tokens`, optimizer resume helper, multi-delete CLI usage)
+  - `examples/checkpoint_multi_delete_live.exs` (creates two checkpoints and deletes both live with one CLI call)
+  - `examples/llama3_tokenizer_override_live.exs` (live Llama-3 sampling plus encode/decode using the override tokenizer)
+- DELETE HTTP responses now accept empty bodies without raising JSON decode errors, fixing CLI multi-delete against endpoints that return 204/empty responses.
+- Retry handler no longer trips progress timeout before the first attempt (attempt 0 is allowed to run).
+
+### Changed
+- **Image chunks:** removed `height`/`width`/`tokens` fields from `ImageChunk` and `ImageAssetPointerChunk`, added `expected_tokens`, and made `.length/1` raise when missing; JSON encoders now match Python. ModelInput length follows the new contract and training batching counts images by base64/location length to avoid missing expected tokens.
+- **Retries:** default progress timeout increased to 120 minutes and retries now run until that timeout (no attempt cap by default); RetryConfig/RetryHandler defaults and docs updated.
+- **Tokenizer override:** Llama-3 models now use `thinkingmachineslabinc/meta-llama-3-tokenizer` to avoid gated downloads.
+- Documentation updates for CLI multi-delete, optimizer resume helper, retry defaults, expected_tokens schema, and new example references.
+
 ## [0.1.13] - 2025-12-01
 
 Documentation release: clarifies project status and attribution.

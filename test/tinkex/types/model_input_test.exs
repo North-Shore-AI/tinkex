@@ -1,7 +1,7 @@
 defmodule Tinkex.Types.ModelInputTest do
   use Supertester.ExUnitFoundation, isolation: :full_isolation
 
-  alias Tinkex.Types.{ModelInput, EncodedTextChunk}
+  alias Tinkex.Types.{EncodedTextChunk, ImageChunk, ImageAssetPointerChunk, ModelInput}
 
   describe "from_ints/1" do
     test "creates ModelInput from token list" do
@@ -25,6 +25,31 @@ defmodule Tinkex.Types.ModelInputTest do
     test "returns total token count" do
       model_input = ModelInput.from_ints([1, 2, 3])
       assert ModelInput.length(model_input) == 3
+    end
+
+    test "sums encoded text and image chunks when expected_tokens provided" do
+      model_input = %ModelInput{
+        chunks: [
+          %EncodedTextChunk{tokens: [1, 2], type: "encoded_text"},
+          ImageChunk.new("img", :png, expected_tokens: 5),
+          %ImageAssetPointerChunk{location: "tinker://asset", format: :jpeg, expected_tokens: 7}
+        ]
+      }
+
+      assert ModelInput.length(model_input) == 14
+    end
+
+    test "raises when image chunk lacks expected_tokens" do
+      model_input = %ModelInput{
+        chunks: [
+          %EncodedTextChunk{tokens: [1], type: "encoded_text"},
+          ImageChunk.new("img", :png)
+        ]
+      }
+
+      assert_raise ArgumentError, fn ->
+        ModelInput.length(model_input)
+      end
     end
   end
 

@@ -235,6 +235,81 @@ defmodule Tinkex.ServiceClientTest do
     GenServer.stop(svc)
   end
 
+  test "create_training_client_from_state_with_optimizer loads optimizer state", %{
+    bypass: bypass,
+    config: config,
+    manager: manager
+  } do
+    expect_create_session(bypass, "service-session-6")
+
+    expect_weights_info(bypass, "tinker://run/weights/ckpt-opt", %{
+      "base_model" => "meta/opt-base",
+      "is_lora" => true,
+      "lora_rank" => 4
+    })
+
+    {:ok, svc} =
+      ServiceClient.start_link(
+        config: config,
+        training_client_module: TrainingClientLoadStub,
+        sampling_client_module: SamplingClientStub,
+        session_manager: manager
+      )
+
+    assert {:ok, client} =
+             ServiceClient.create_training_client_from_state_with_optimizer(
+               svc,
+               "tinker://run/weights/ckpt-opt",
+               test_pid: self()
+             )
+
+    assert_receive {:load_state_with_optimizer_called, "tinker://run/weights/ckpt-opt", state},
+                   2_000
+
+    assert state.base_model == "meta/opt-base"
+    assert %LoraConfig{rank: 4} = state.lora_config
+
+    GenServer.stop(client)
+    GenServer.stop(svc)
+  end
+
+  test "create_training_client_from_state_with_optimizer_async returns task", %{
+    bypass: bypass,
+    config: config,
+    manager: manager
+  } do
+    expect_create_session(bypass, "service-session-async-opt")
+
+    expect_weights_info(bypass, "tinker://run/weights/ckpt-async", %{
+      "base_model" => "meta/opt-base",
+      "is_lora" => true,
+      "lora_rank" => 2
+    })
+
+    {:ok, svc} =
+      ServiceClient.start_link(
+        config: config,
+        training_client_module: TrainingClientLoadStub,
+        sampling_client_module: SamplingClientStub,
+        session_manager: manager
+      )
+
+    task =
+      ServiceClient.create_training_client_from_state_with_optimizer_async(
+        svc,
+        "tinker://run/weights/ckpt-async",
+        test_pid: self()
+      )
+
+    assert {:ok, client} = Task.await(task, 2_000)
+
+    assert_receive {:load_state_with_optimizer_called, "tinker://run/weights/ckpt-async", _state},
+                   2_000
+
+    GenServer.stop(client)
+    GenServer.stop(svc)
+  end
+
   test "multiple service clients do not interfere", %{config: config} do
     bypass1 = Bypass.open()
     bypass2 = Bypass.open()

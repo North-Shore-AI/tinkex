@@ -6,11 +6,11 @@ defmodule Tinkex.RetryHandlerTest do
   describe "new/1" do
     test "creates handler with defaults" do
       handler = RetryHandler.new()
-      assert handler.max_retries == 3
+      assert handler.max_retries == :infinity
       assert handler.base_delay_ms == 500
       assert handler.max_delay_ms == 10_000
       assert handler.jitter_pct == 0.25
-      assert handler.progress_timeout_ms == 1_800_000
+      assert handler.progress_timeout_ms == 7_200_000
       assert handler.attempt == 0
       assert is_integer(handler.start_time)
     end
@@ -39,6 +39,12 @@ defmodule Tinkex.RetryHandlerTest do
       handler = RetryHandler.new(max_retries: 3) |> Map.put(:attempt, 3)
       system_error = %Tinkex.Error{type: :api_status, status: 500, message: "server error"}
       assert RetryHandler.retry?(handler, system_error) == false
+    end
+
+    test "retries indefinitely when max_retries is :infinity" do
+      handler = RetryHandler.new(max_retries: :infinity) |> Map.put(:attempt, 10_000)
+      system_error = %Tinkex.Error{type: :api_status, status: 500, message: "server error"}
+      assert RetryHandler.retry?(handler, system_error) == true
     end
 
     test "returns true for 408 timeout" do
@@ -122,6 +128,7 @@ defmodule Tinkex.RetryHandlerTest do
       handler =
         RetryHandler.new(progress_timeout_ms: 10)
         |> Map.put(:last_progress_at, System.monotonic_time(:millisecond) - 100)
+        |> Map.put(:attempt, 1)
 
       assert RetryHandler.progress_timeout?(handler) == true
     end

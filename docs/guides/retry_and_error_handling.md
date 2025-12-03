@@ -15,13 +15,13 @@ Key components:
 
 ## Sampling retry configuration
 
-`SamplingClient` now accepts an optional `:retry_config`, letting you tune high-level retries and bound concurrent attempts per client. Defaults match the Python SDK: base delay 500ms, max delay 10s, ±25% jitter, 30-minute progress timeout, 10 max retries, 100 max_connections.
+`SamplingClient` now accepts an optional `:retry_config`, letting you tune high-level retries and bound concurrent attempts per client. Defaults match the Python SDK: base delay 500ms, max delay 10s, ±25% jitter, 120-minute progress timeout, unbounded retries until the progress timeout elapses, and 100 max_connections.
 
 ```elixir
 # Custom retry profile
 retry_config =
   Tinkex.RetryConfig.new(
-    max_retries: 5,
+    max_retries: :infinity,
     base_delay_ms: 750,
     max_delay_ms: 15_000,
     jitter_pct: 0.25,
@@ -145,11 +145,11 @@ Configure retry behavior with `RetryHandler`:
 alias Tinkex.{Retry, RetryHandler}
 
 handler = RetryHandler.new(
-  max_retries: 5,                    # Attempt up to 5 times (default: 3)
+  max_retries: :infinity,            # Time-bounded by progress_timeout_ms (default)
   base_delay_ms: 1000,               # Start with 1s delay (default: 500ms)
-  max_delay_ms: 30_000,              # Cap at 30s (default: 8s)
-  jitter_pct: 1.0,                   # Full jitter (default: 1.0)
-  progress_timeout_ms: 60_000        # Abort if no progress for 60s (default: 30s)
+  max_delay_ms: 30_000,              # Cap at 30s (default: 10s)
+  jitter_pct: 1.0,                   # Full jitter (default: 0.25)
+  progress_timeout_ms: 60_000        # Abort if no progress for 60s (default: 120m)
 )
 
 result = Retry.with_retry(&my_operation/0, handler: handler)
@@ -180,12 +180,12 @@ The progress timeout prevents infinite retry loops when operations make no forwa
 
 ```elixir
 handler = RetryHandler.new(
-  max_retries: 100,              # High retry count
-  progress_timeout_ms: 30_000    # But abort if stuck for 30s
+  max_retries: :infinity,        # Time-bounded instead of attempt-bounded
+  progress_timeout_ms: 30_000    # Abort if stuck for 30s
 )
 ```
 
-Progress is recorded after each attempt completes (success or retryable failure). If the elapsed time since last progress exceeds `progress_timeout_ms`, the retry loop aborts with:
+Progress is measured from the last recorded progress event (initially the start of the retry loop). Because retries no longer reset this timer, loops are bounded by `progress_timeout_ms` (default: 120 minutes) unless you explicitly call `RetryHandler.record_progress/1` when real work is happening between attempts. If the elapsed time exceeds `progress_timeout_ms`, the retry loop aborts with:
 
 ```elixir
 {:error, %Error{type: :api_timeout, message: "Progress timeout exceeded"}}
@@ -354,7 +354,7 @@ end
 handler = RetryHandler.new(
   base_delay_ms: 200,
   jitter_pct: 0.0,      # Deterministic delays for demo
-  max_retries: 2
+  max_retries: 2        # Override the default (:infinity) to keep the demo short
 )
 
 # Execute with retry
@@ -459,22 +459,19 @@ defmodule MyApp.RetryMetrics do
 end
 ```
 
-### 5. Set Reasonable Max Retries
+### 5. Tune Retry Bounds
 
-Balance reliability with latency:
+Balance reliability with latency by adjusting `progress_timeout_ms` and optionally capping attempts:
 
 ```elixir
 # For interactive applications (< 30s total)
-handler = RetryHandler.new(max_retries: 3)
+handler = RetryHandler.new(max_retries: 3, progress_timeout_ms: 30_000)
 
 # For background jobs (tolerate longer delays)
-handler = RetryHandler.new(max_retries: 8)
+handler = RetryHandler.new(max_retries: 8, progress_timeout_ms: 120_000)
 
-# For critical operations (keep trying)
-handler = RetryHandler.new(
-  max_retries: 20,
-  progress_timeout_ms: 600_000  # But still enforce progress timeout
-)
+# For critical operations (time-bounded, no attempt cap)
+handler = RetryHandler.new(max_retries: :infinity, progress_timeout_ms: 600_000)
 ```
 
 ### 6. Handle Non-Retryable Errors Explicitly

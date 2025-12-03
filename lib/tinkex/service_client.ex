@@ -69,13 +69,28 @@ defmodule Tinkex.ServiceClient do
   @doc """
   Create a training client from a saved checkpoint path.
 
-  Uses checkpoint metadata to configure the client, then loads the weights (and optionally
-  optimizer state).
+  Uses checkpoint metadata to configure the client, then loads the weights.
+  To include optimizer state, pass `load_optimizer: true` or use
+  `create_training_client_from_state_with_optimizer/3`.
   """
   @spec create_training_client_from_state(t(), String.t(), keyword()) ::
           {:ok, pid()} | {:error, term()}
   def create_training_client_from_state(service_client, path, opts \\ []) when is_binary(path) do
     GenServer.call(service_client, {:create_training_client_from_state, path, opts}, :infinity)
+  end
+
+  @doc """
+  Create a training client from a saved checkpoint path, loading optimizer state.
+
+  Convenience wrapper around `create_training_client_from_state/3` that sets
+  `load_optimizer: true`.
+  """
+  @spec create_training_client_from_state_with_optimizer(t(), String.t(), keyword()) ::
+          {:ok, pid()} | {:error, term()}
+  def create_training_client_from_state_with_optimizer(service_client, path, opts \\ [])
+      when is_binary(path) do
+    opts = Keyword.put(opts, :load_optimizer, true)
+    create_training_client_from_state(service_client, path, opts)
   end
 
   @doc """
@@ -88,6 +103,18 @@ defmodule Tinkex.ServiceClient do
       when is_binary(path) do
     Task.async(fn ->
       create_training_client_from_state(service_client, path, opts)
+    end)
+  end
+
+  @doc """
+  Async variant of `create_training_client_from_state_with_optimizer/3`.
+  """
+  @spec create_training_client_from_state_with_optimizer_async(t(), String.t(), keyword()) ::
+          Task.t()
+  def create_training_client_from_state_with_optimizer_async(service_client, path, opts \\ [])
+      when is_binary(path) do
+    Task.async(fn ->
+      create_training_client_from_state_with_optimizer(service_client, path, opts)
     end)
   end
 

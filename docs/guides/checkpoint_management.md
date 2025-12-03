@@ -70,6 +70,16 @@ Create a new training client directly from a checkpoint:
   )
 ```
 
+To restore optimizer state as well, use:
+
+```elixir
+{:ok, training_client} =
+  Tinkex.ServiceClient.create_training_client_from_state_with_optimizer(
+    service,
+    "tinker://run-id/weights/checkpoint-001"
+  )
+```
+
 ## Tinker Path Format
 
 Checkpoints use a structured URI format:

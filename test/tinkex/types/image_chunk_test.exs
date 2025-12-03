@@ -3,69 +3,64 @@ defmodule Tinkex.Types.ImageChunkTest do
 
   alias Tinkex.Types.ImageChunk
 
-  describe "new/5" do
+  describe "new/3" do
     test "creates chunk with base64 encoded data" do
       binary = "fake_png_data"
-      chunk = ImageChunk.new(binary, :png, 100, 200, 50)
+      chunk = ImageChunk.new(binary, :png)
 
       assert chunk.data == Base.encode64(binary)
       assert chunk.format == :png
-      assert chunk.height == 100
-      assert chunk.width == 200
-      assert chunk.tokens == 50
       assert chunk.type == "image"
       assert chunk.expected_tokens == nil
     end
-  end
 
-  describe "new/6 with options" do
-    test "creates chunk with expected_tokens" do
+    test "creates chunk with expected_tokens when provided" do
       binary = "fake_png_data"
-      chunk = ImageChunk.new(binary, :png, 100, 200, 50, expected_tokens: 50)
+      chunk = ImageChunk.new(binary, :png, expected_tokens: 50)
 
       assert chunk.data == Base.encode64(binary)
       assert chunk.format == :png
-      assert chunk.height == 100
-      assert chunk.width == 200
-      assert chunk.tokens == 50
       assert chunk.expected_tokens == 50
       assert chunk.type == "image"
-    end
-
-    test "creates chunk without expected_tokens when not provided" do
-      chunk = ImageChunk.new("data", :png, 100, 200, 50, [])
-      assert chunk.expected_tokens == nil
     end
   end
 
   describe "length/1" do
-    test "returns tokens count" do
-      chunk = ImageChunk.new("data", :jpeg, 10, 10, 42)
+    test "returns expected_tokens" do
+      chunk = ImageChunk.new("data", :jpeg, expected_tokens: 42)
       assert ImageChunk.length(chunk) == 42
+    end
+
+    test "raises when expected_tokens is nil" do
+      chunk = ImageChunk.new("data", :jpeg)
+
+      assert_raise ArgumentError, fn ->
+        ImageChunk.length(chunk)
+      end
     end
   end
 
   describe "JSON encoding" do
     test "encodes with correct field names" do
-      chunk = ImageChunk.new("test_data", :png, 100, 200, 50)
+      chunk = ImageChunk.new("test_data", :png)
       json = Jason.encode!(chunk)
       decoded = Jason.decode!(json)
 
       # Verify field names match Python SDK exactly
       assert decoded["data"] == Base.encode64("test_data")
       assert decoded["format"] == "png"
-      assert decoded["height"] == 100
-      assert decoded["width"] == 200
-      assert decoded["tokens"] == 50
       assert decoded["type"] == "image"
 
       # Ensure we're NOT using wrong field names
       refute Map.has_key?(decoded, "image_data")
       refute Map.has_key?(decoded, "image_format")
+      refute Map.has_key?(decoded, "height")
+      refute Map.has_key?(decoded, "width")
+      refute Map.has_key?(decoded, "tokens")
     end
 
     test "encodes jpeg format correctly" do
-      chunk = ImageChunk.new("jpeg_data", :jpeg, 50, 50, 10)
+      chunk = ImageChunk.new("jpeg_data", :jpeg)
       json = Jason.encode!(chunk)
       decoded = Jason.decode!(json)
 
@@ -73,7 +68,7 @@ defmodule Tinkex.Types.ImageChunkTest do
     end
 
     test "includes expected_tokens when present" do
-      chunk = ImageChunk.new("test_data", :png, 100, 200, 50, expected_tokens: 50)
+      chunk = ImageChunk.new("test_data", :png, expected_tokens: 50)
       json = Jason.encode!(chunk)
       decoded = Jason.decode!(json)
 
@@ -81,7 +76,7 @@ defmodule Tinkex.Types.ImageChunkTest do
     end
 
     test "excludes expected_tokens when nil" do
-      chunk = ImageChunk.new("test_data", :png, 100, 200, 50)
+      chunk = ImageChunk.new("test_data", :png)
       json = Jason.encode!(chunk)
       decoded = Jason.decode!(json)
 

@@ -85,6 +85,9 @@ defmodule Tinkex.Types.ModelInput do
 
   @doc """
   Get the total length (token count) of the ModelInput.
+
+  For image chunks, `expected_tokens` must be set; otherwise `length/1` will
+  raise to mirror Python SDK guardrails.
   """
   @spec length(t()) :: non_neg_integer()
   def length(%__MODULE__{chunks: chunks}) do

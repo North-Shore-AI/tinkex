@@ -5,8 +5,8 @@
 
 ## Context
 - Python changed the Llama-3 tokenizer override from `baseten/Meta-Llama-3-tokenizer` to `thinkingmachineslabinc/meta-llama-3-tokenizer` to avoid gating.
-- Elixir still uses `@llama3_tokenizer "baseten/Meta-Llama-3-tokenizer"` in `lib/tinkex/tokenizer.ex`, returned whenever `model_name` starts with `"meta-llama/Llama-3"`.
-- Mismatch may lead to gated downloads or inconsistent tokenization behavior relative to Python.
+- Elixir used `@llama3_tokenizer "baseten/Meta-Llama-3-tokenizer"` in `lib/tinkex/tokenizer.ex`, returned whenever `model_name` starts with `"meta-llama/Llama-3"`.
+- Mismatch may lead to gated downloads or inconsistent tokenization behavior relative to Python. This ADR updates the override to the ungated repo.
 
 ## Decision
 - Update the override constant to `thinkingmachineslabinc/meta-llama-3-tokenizer` and keep the same heuristic trigger (`meta-llama/Llama-3*` model names).

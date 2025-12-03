@@ -479,6 +479,9 @@ defmodule Tinkex.API do
       {:ok, data} ->
         wrap_success(data, response, opts)
 
+      {:error, _} when body in [nil, ""] ->
+        wrap_success(%{}, response, opts)
+
       {:error, reason} ->
         {:error,
          build_error(

@@ -88,7 +88,7 @@ defmodule Tinkex.TrainingClientTokenizerTest do
         )
 
       # Should use the Llama-3 workaround tokenizer
-      assert {:ok, %MockTokenizer{id: "baseten/Meta-Llama-3-tokenizer"}} = result
+      assert {:ok, %MockTokenizer{id: "thinkingmachineslabinc/meta-llama-3-tokenizer"}} = result
     end
 
     test "propagates info fetch errors" do

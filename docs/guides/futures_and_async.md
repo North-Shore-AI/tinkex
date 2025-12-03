@@ -185,6 +185,13 @@ task = Tinkex.ServiceClient.create_training_client_from_state_async(
   "tinker://run-123/weights/0001"
 )
 {:ok, restored_client} = Task.await(task, 60_000)
+
+# Async training client from checkpoint (weights + optimizer)
+task = Tinkex.ServiceClient.create_training_client_from_state_with_optimizer_async(
+  service,
+  "tinker://run-123/weights/0001"
+)
+{:ok, restored_with_opt} = Task.await(task, 60_000)
 ```
 
 See `examples/async_client_creation.exs` for a complete runnable example.

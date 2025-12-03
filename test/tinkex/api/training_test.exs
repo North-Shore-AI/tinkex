@@ -118,4 +118,42 @@ defmodule Tinkex.API.TrainingTest do
       assert {:ok, %{"result" => "ok"}} = Training.forward(%{inputs: []}, config: config)
     end
   end
+
+  describe "forward_future/2 transform handling" do
+    test "drops nil fields by default", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "POST", "/api/v1/forward", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        payload = Jason.decode!(body)
+
+        refute Map.has_key?(payload, "optional")
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"request_id":"fw-nil"}))
+      end)
+
+      assert {:ok, %{"request_id" => "fw-nil"}} =
+               Training.forward_future(%{model_id: "m", optional: nil}, config: config)
+    end
+
+    test "respects caller-provided transform options", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "POST", "/api/v1/forward", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        payload = Jason.decode!(body)
+
+        assert Map.has_key?(payload, "optional")
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"request_id":"fw-keep-nil"}))
+      end)
+
+      assert {:ok, %{"request_id" => "fw-keep-nil"}} =
+               Training.forward_future(
+                 %{model_id: "m", optional: nil},
+                 config: config,
+                 transform: [drop_nil?: false]
+               )
+    end
+  end
 end

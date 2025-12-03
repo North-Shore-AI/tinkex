@@ -25,7 +25,10 @@ EXAMPLES=(
   "model_info_and_unload.exs"
   "live_capabilities_and_logprobs.exs"
   "file_upload_multipart.exs"
+  "llama3_tokenizer_override_live.exs"
+  "multimodal_resume_and_cleanup.exs"
   "training_persistence_live.exs"
+  "checkpoint_multi_delete_live.exs"
   "save_weights_and_sample.exs"
   "queue_state_observer_demo.exs"
 )

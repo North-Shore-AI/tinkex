@@ -13,10 +13,13 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.13 Highlights
+## 0.1.14 Highlights
 
-- **Disclaimer and attribution**: Clarified that Tinkex is an independent, community-maintained project not affiliated with or endorsed by Thinking Machines Lab.
-- **Official documentation links**: Added links to the official [Tinker documentation](https://tinker-docs.thinkingmachines.ai/) and [Thinking Machines Lab](https://thinkingmachines.ai/) homepage.
+- **Image chunk parity**: `ImageChunk` / `ImageAssetPointerChunk` now use `expected_tokens` only; `.length/1` raises when missing and batching counts images by base64/location length.
+- **Retry tuning**: Default progress timeout raised to 120 minutes and retries run until the timeout (no attempt cap by default); keep per-request caps by setting `max_retries`.
+- **Optimizer resume helpers**: `ServiceClient.create_training_client_from_state_with_optimizer/3` (+ async) wraps weight+optimizer restore; new example covers multimodal payloads and optimizer resume.
+- **CLI multi-delete**: `tinkex checkpoint delete` accepts multiple paths with a single confirmation (`--yes` to skip) and reports partial failures.
+- **Tokenizer override**: Llama-3 models now map to `thinkingmachineslabinc/meta-llama-3-tokenizer` to avoid gated downloads.
 
 ## Features
 
@@ -60,7 +63,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.13"}
+    {:tinkex, "~> 0.1.14"}
   ]
 end
 ```
@@ -175,11 +178,11 @@ Sampling clients now accept a `retry_config` to tune high-level retries and limi
 ```elixir
 retry_config =
   Tinkex.RetryConfig.new(
-    max_retries: 5,
     base_delay_ms: 750,
     max_delay_ms: 15_000,
     jitter_pct: 0.25,
-    max_connections: 25
+    max_connections: 25,
+    progress_timeout_ms: 120_000
   )
 
 {:ok, sampling_client} =
@@ -196,7 +199,7 @@ retry_config =
   )
 ```
 
-Defaults mirror the Python SDK (0.5s base, 10s cap, 25% jitter, 30m progress timeout, 100 max connections). Retries run at the SamplingClient layer; HTTP sampling still defaults to 0 low-level retries.
+Defaults mirror the Python SDK (0.5s base, 10s cap, 25% jitter, 120m progress timeout, unbounded retries until the timeout, 100 max connections). Retries run at the SamplingClient layer; HTTP sampling still defaults to 0 low-level retries.
 
 ### Environment configuration
 
@@ -240,6 +243,11 @@ See `examples/metrics_live.exs` for an end-to-end live sampling + metrics printo
 ## Examples
 
 Self-contained workflows live in the `examples/` directory. Browse `examples/README.md` for per-script docs or export `TINKER_API_KEY` and run `examples/run_all.sh` to execute the curated collection sequentially.
+
+Highlighted live flows:
+- `mix run examples/multimodal_resume_and_cleanup.exs` (multimodal with `expected_tokens`, optimizer resume helper, default checkpoint cache)
+- `mix run examples/checkpoint_multi_delete_live.exs` (create two checkpoints then delete both with a single CLI call)
+- `mix run examples/llama3_tokenizer_override_live.exs` (Llama-3 tokenizer override via live encode/decode)
 
 ### Live example
 

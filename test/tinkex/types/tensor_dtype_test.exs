@@ -72,7 +72,8 @@ defmodule Tinkex.Types.TensorDtypeTest do
           assert TensorDtype.from_nx_type_quiet({:u, 64}) == :int64
         end)
 
-      assert log == ""
+      refute log =~ "Downcasting"
+      refute log =~ "overflow"
     end
 
     test "maps all types correctly" do

@@ -204,21 +204,27 @@ Remove public access from a checkpoint:
 
 ### Delete Checkpoint
 
-Permanently delete a checkpoint:
+Permanently delete one or more checkpoints with a single confirmation:
 
 ```bash
-./tinkex checkpoint delete <tinker_path>
+./tinkex checkpoint delete <tinker_path> [<tinker_path> ...] [--yes]
 ```
 
-**Warning:** This operation is irreversible. Ensure you have backups if needed.
+**Warning:** This operation is irreversible. Ensure you have backups if needed. Use `--yes` to
+skip the interactive confirmation prompt.
 
 **Example:**
 
 ```bash
-./tinkex checkpoint delete tinker://run-old/weights/0001 \
+./tinkex checkpoint delete tinker://run-old/weights/0001 tinker://run-old/weights/0002 \
   --api-key "$TINKER_API_KEY"
-# Output: Deleted tinker://run-old/weights/0001
+# Output: Preparing to delete 2 checkpoints...
+#         Deleted tinker://run-old/weights/0001
+#         Deleted tinker://run-old/weights/0002
 ```
+
+For an end-to-end live flow that creates two checkpoints and deletes both with a
+single `--yes` confirmation, see `examples/checkpoint_multi_delete_live.exs`.
 
 ### Download Checkpoint
 

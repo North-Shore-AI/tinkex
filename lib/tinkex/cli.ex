@@ -942,17 +942,115 @@ defmodule Tinkex.CLI do
   end
 
   defp checkpoint_delete(config, options, deps) do
-    path = Map.fetch!(options, :path)
+    paths =
+      options
+      |> Map.get(:paths, [])
+      |> case do
+        [] -> List.wrap(Map.get(options, :path))
+        list -> list
+      end
+      |> Enum.reject(&is_nil/1)
 
-    case deps.rest_api_module.delete_checkpoint(config, path) do
-      {:ok, _} ->
-        IO.puts("Deleted #{path}")
-        {:ok, %{command: :checkpoint, action: :delete, path: path}}
+    with :ok <- validate_checkpoint_paths(paths),
+         true <- confirm_delete?(paths, Map.get(options, :yes, false)) do
+      total = length(paths)
 
+      results =
+        paths
+        |> Enum.with_index(1)
+        |> Enum.map(fn {path, idx} ->
+          IO.puts("Deleting #{idx}/#{total}: #{path}")
+
+          case deps.rest_api_module.delete_checkpoint(config, path) do
+            {:ok, _} ->
+              IO.puts("Deleted #{path}")
+              {:ok, path}
+
+            {:error, %Error{} = error} ->
+              IO.puts(:stderr, "Delete failed for #{path}: #{Error.format(error)}")
+              {:error, {path, error}}
+
+            {:error, reason} ->
+              error =
+                Error.new(:request_failed, "Delete failed for #{path}", data: %{reason: reason})
+
+              IO.puts(:stderr, "Delete failed for #{path}: #{Error.format(error)}")
+              {:error, {path, error}}
+          end
+        end)
+
+      summary = summarize_deletes(results, paths)
+
+      if summary.failed > 0 do
+        {:error, summary}
+      else
+        {:ok, summary}
+      end
+    else
       {:error, %Error{} = error} ->
         IO.puts(:stderr, "Delete failed: #{Error.format(error)}")
         {:error, error}
+
+      false ->
+        IO.puts("Aborted delete of #{length(paths)} checkpoint(s).")
+
+        {:ok,
+         %{
+           command: :checkpoint,
+           action: :delete,
+           cancelled: true,
+           paths: paths
+         }}
     end
+  end
+
+  defp validate_checkpoint_paths([]) do
+    {:error, Error.new(:validation, "Checkpoint path is required", category: :user)}
+  end
+
+  defp validate_checkpoint_paths(paths) do
+    invalid = Enum.reject(paths, &String.starts_with?(&1, "tinker://"))
+
+    if invalid == [] do
+      :ok
+    else
+      {:error,
+       Error.new(
+         :validation,
+         "Checkpoint paths must start with tinker://, got: #{Enum.join(invalid, ", ")}",
+         category: :user
+       )}
+    end
+  end
+
+  defp confirm_delete?(_paths, true), do: true
+
+  defp confirm_delete?(paths, false) do
+    count = length(paths)
+    IO.puts("Preparing to delete #{count} checkpoint#{if count == 1, do: "", else: "s"}:")
+    Enum.each(paths, &IO.puts("  - #{&1}"))
+
+    case IO.gets("Proceed? [y/N] ") do
+      :eof -> false
+      {:error, _reason} -> false
+      input -> String.downcase(String.trim(to_string(input))) in ["y", "yes"]
+    end
+  end
+
+  defp summarize_deletes(results, paths) do
+    failures =
+      for {:error, {path, error}} <- results do
+        %{path: path, error: error}
+      end
+
+    %{
+      command: :checkpoint,
+      action: :delete,
+      paths: paths,
+      deleted: Enum.count(results, &match?({:ok, _}, &1)),
+      failed: length(failures),
+      failures: failures
+    }
   end
 
   defp checkpoint_download(config, options, deps) do
@@ -1077,6 +1175,14 @@ defmodule Tinkex.CLI do
       action in [:info, :publish, :unpublish, :delete, :download] and remaining == [] ->
         {:error, "Checkpoint path is required\n\n" <> checkpoint_management_help()}
 
+      action in [:info, :publish, :unpublish, :download] and length(remaining) > 1 ->
+        {:error,
+         unexpected_args_message(
+           {:checkpoint, action},
+           Enum.drop(remaining, 1),
+           &checkpoint_management_help/0
+         )}
+
       remaining != [] and action == :list ->
         {:error,
          unexpected_args_message({:checkpoint, action}, remaining, &checkpoint_management_help/0)}
@@ -1084,6 +1190,7 @@ defmodule Tinkex.CLI do
       true ->
         parsed_map =
           case {action, remaining} do
+            {:delete, paths} -> Map.put(parsed_map, :paths, paths)
             {_act, [path | _]} -> Map.put(parsed_map, :path, path)
             _ -> parsed_map
           end
@@ -1232,7 +1339,7 @@ defmodule Tinkex.CLI do
       tinkex checkpoint info <tinker_path>
       tinkex checkpoint publish <tinker_path>
       tinkex checkpoint unpublish <tinker_path>
-      tinkex checkpoint delete <tinker_path>
+      tinkex checkpoint delete <tinker_path> [<tinker_path> ...] [--yes]
       tinkex checkpoint download <tinker_path> [--output <dir>] [--force]
 
     Common options:
@@ -1240,6 +1347,12 @@ defmodule Tinkex.CLI do
       --base-url <url>        API base URL
       --timeout <ms>          Request timeout in milliseconds
       -h, --help              Show this help text
+
+    Delete options:
+      --yes                   Skip confirmation prompt (delete is otherwise interactive)
+
+    Download options:
+      --force                 Overwrite existing files in the destination directory
     """
   end
 
@@ -1339,6 +1452,7 @@ defmodule Tinkex.CLI do
   defp checkpoint_management_switches(_action) do
     [
       help: :boolean,
+      yes: :boolean,
       api_key: :string,
       base_url: :string,
       timeout: :integer,

@@ -2,9 +2,9 @@ defmodule Tinkex.RetryConfig do
   @moduledoc """
   User-facing retry configuration for sampling operations.
 
-  Mirrors the Python SDK surface (max retries, backoff tuning, progress
-  timeout, connection limiting, enable/disable toggle). The struct is designed
-  to be lightweight and easy to pass through opts.
+  Mirrors the Python SDK surface (time-bounded retries with progress timeout,
+  backoff tuning, connection limiting, enable/disable toggle). The struct is
+  designed to be lightweight and easy to pass through opts.
   """
 
   @enforce_keys []
@@ -19,7 +19,7 @@ defmodule Tinkex.RetryConfig do
   ]
 
   @type t :: %__MODULE__{
-          max_retries: non_neg_integer(),
+          max_retries: non_neg_integer() | :infinity,
           base_delay_ms: pos_integer(),
           max_delay_ms: pos_integer(),
           jitter_pct: float(),
@@ -28,11 +28,11 @@ defmodule Tinkex.RetryConfig do
           enable_retry_logic: boolean()
         }
 
-  @default_max_retries 10
+  @default_max_retries :infinity
   @default_base_delay_ms 500
   @default_max_delay_ms 10_000
   @default_jitter_pct 0.25
-  @default_progress_timeout_ms 1_800_000
+  @default_progress_timeout_ms 7_200_000
   @default_max_connections 100
   @default_enable_retry_logic true
 
@@ -40,7 +40,8 @@ defmodule Tinkex.RetryConfig do
   Build a retry configuration.
 
   Accepts keyword options overriding defaults that match the Python RetryConfig
-  defaults (0.5s base delay, 10s cap, 25% jitter, 30m progress timeout).
+  defaults (0.5s base delay, 10s cap, 25% jitter, 120m progress timeout, and
+  no retry cap unless explicitly provided).
   """
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
@@ -67,9 +68,10 @@ defmodule Tinkex.RetryConfig do
   """
   @spec validate!(t()) :: t()
   def validate!(%__MODULE__{} = config) do
-    unless is_integer(config.max_retries) and config.max_retries >= 0 do
+    unless (is_integer(config.max_retries) and config.max_retries >= 0) or
+             config.max_retries == :infinity do
       raise ArgumentError,
-            "max_retries must be a non-negative integer, got: #{inspect(config.max_retries)}"
+            "max_retries must be a non-negative integer or :infinity, got: #{inspect(config.max_retries)}"
     end
 
     unless is_integer(config.base_delay_ms) and config.base_delay_ms > 0 do

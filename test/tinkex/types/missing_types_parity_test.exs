@@ -128,17 +128,13 @@ defmodule Tinkex.Types.MissingTypesParityTest do
       assert %Tinkex.Types.ImageChunk{
         data: "test",
         format: :png,
-        height: 512,
-        width: 512,
-        tokens: 100
+        expected_tokens: nil
       }
 
       assert %Tinkex.Types.ImageAssetPointerChunk{
         location: "asset://test",
         format: :png,
-        height: 512,
-        width: 512,
-        tokens: 100
+        expected_tokens: nil
       }
     end
 

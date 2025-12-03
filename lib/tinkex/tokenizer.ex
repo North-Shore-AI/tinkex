@@ -13,7 +13,7 @@ defmodule Tinkex.Tokenizer do
   alias Tinkex.{Error, TrainingClient}
 
   @tokenizer_table :tinkex_tokenizers
-  @llama3_tokenizer "baseten/Meta-Llama-3-tokenizer"
+  @llama3_tokenizer "thinkingmachineslabinc/meta-llama-3-tokenizer"
   @kimi_tokenizer "moonshotai/Kimi-K2-Thinking"
   @kimi_revision "612681931a8c906ddb349f8ad0f582cb552189cd"
 
@@ -25,7 +25,7 @@ defmodule Tinkex.Tokenizer do
 
   - If a `training_client` is provided, attempts to fetch `model_data.tokenizer_id`
     via the provided `:info_fun` (defaults to `&TrainingClient.get_info/1`).
-  - Applies the Llama-3 gating workaround (`"baseten/Meta-Llama-3-tokenizer"`).
+  - Applies the Llama-3 gating workaround (`"thinkingmachineslabinc/meta-llama-3-tokenizer"`).
   - Falls back to the provided `model_name`.
   """
   @spec get_tokenizer_id(String.t(), Tinkex.TrainingClient.t() | nil, keyword()) :: tokenizer_id()

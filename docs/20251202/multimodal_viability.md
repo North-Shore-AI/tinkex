@@ -11,10 +11,10 @@
 - Net: Multimodal is fully wired end-to-end in Python (type system, serialization, batching, and client calls).
 
 ## Elixir state vs. Python
-- Types still expose the old shape: `ImageChunk` / `ImageAssetPointerChunk` include `height`, `width`, `tokens`, and use `tokens` for `.length` (`lib/tinkex/types/image_chunk.ex`, `image_asset_pointer_chunk.ex`). No `expected_tokens` field exists.
-- Batching relies on `ModelInput.length/1` → chunk `.length` (uses `tokens`), so once we drop `tokens` the current logic would crash or miscount.
-- Serialization currently sends height/width/tokens; backend + Python now expect `expected_tokens` only and will compute true token counts server-side.
-- Tokenizer override and retry defaults also lag Python (captured in ADR-005/006); not blocking for multimodal but worth aligning.
+- Types now mirror Python: `ImageChunk` / `ImageAssetPointerChunk` carry `data`/`location`, `format`, optional `expected_tokens`, and `.length/1` raises when `expected_tokens` is missing to match Python guardrails.
+- Batching uses Python’s heuristic counting: image chunks are counted by the base64 string length, image asset pointers by `location` length, and other chunks by their `.length`.
+- Serialization now omits legacy `height`/`width`/`tokens` fields and includes `expected_tokens` when provided, matching backend expectations.
+- Tokenizer override and retry defaults are aligned with Python (Llama-3 tokenizer repo updated; progress timeout set to 120 minutes with time-bounded retries).
 
 ## Integration viability
 - Server-side shape matches Python; Elixir can safely align by implementing ADR-002 (image chunks) and ADR-003 (counting heuristics). No backend changes needed.

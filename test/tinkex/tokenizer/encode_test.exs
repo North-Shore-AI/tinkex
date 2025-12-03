@@ -40,7 +40,7 @@ defmodule Tinkex.Tokenizer.EncodeTest do
   end
 
   test "get_tokenizer_id applies Llama-3 hack" do
-    assert "baseten/Meta-Llama-3-tokenizer" ==
+    assert "thinkingmachineslabinc/meta-llama-3-tokenizer" ==
              Tokenizer.get_tokenizer_id("meta-llama/Llama-3-8B-Instruct")
   end
 

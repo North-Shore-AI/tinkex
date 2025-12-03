@@ -36,11 +36,12 @@ defmodule Tinkex.API.Training do
   @spec forward_backward_future(map(), keyword()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def forward_backward_future(request, opts) do
-    Tinkex.API.post(
-      "/api/v1/forward_backward",
-      request,
-      Keyword.put(opts, :pool_type, :training)
-    )
+    opts =
+      opts
+      |> Keyword.put(:pool_type, :training)
+      |> Keyword.put_new(:transform, drop_nil?: true)
+
+    Tinkex.API.post("/api/v1/forward_backward", request, opts)
   end
 
   @doc """
@@ -60,11 +61,12 @@ defmodule Tinkex.API.Training do
   @spec optim_step_future(map(), keyword()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def optim_step_future(request, opts) do
-    Tinkex.API.post(
-      "/api/v1/optim_step",
-      request,
-      Keyword.put(opts, :pool_type, :training)
-    )
+    opts =
+      opts
+      |> Keyword.put(:pool_type, :training)
+      |> Keyword.put_new(:transform, drop_nil?: true)
+
+    Tinkex.API.post("/api/v1/optim_step", request, opts)
   end
 
   @doc """
@@ -90,11 +92,12 @@ defmodule Tinkex.API.Training do
   @spec forward_future(map(), keyword()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def forward_future(request, opts) do
-    Tinkex.API.post(
-      "/api/v1/forward",
-      request,
-      Keyword.put(opts, :pool_type, :training)
-    )
+    opts =
+      opts
+      |> Keyword.put(:pool_type, :training)
+      |> Keyword.put_new(:transform, drop_nil?: true)
+
+    Tinkex.API.post("/api/v1/forward", request, opts)
   end
 
   defp poll_opts(opts) do

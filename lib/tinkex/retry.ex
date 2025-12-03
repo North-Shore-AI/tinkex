@@ -80,7 +80,6 @@ defmodule Tinkex.Retry do
       handler =
         handler
         |> RetryHandler.increment_attempt()
-        |> RetryHandler.record_progress()
 
       do_retry(fun, handler, metadata)
     else
@@ -95,7 +94,7 @@ defmodule Tinkex.Retry do
   end
 
   defp handle_exception(fun, exception, handler, metadata, attempt_metadata, duration) do
-    if handler.attempt < handler.max_retries do
+    if RetryHandler.retry?(handler, exception) do
       delay = RetryHandler.next_delay(handler)
 
       :telemetry.execute(
@@ -109,7 +108,6 @@ defmodule Tinkex.Retry do
       handler =
         handler
         |> RetryHandler.increment_attempt()
-        |> RetryHandler.record_progress()
 
       do_retry(fun, handler, metadata)
     else

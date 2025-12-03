@@ -8,10 +8,7 @@ defmodule Tinkex.Types.ImageChunk do
 
   - `data` - Base64-encoded image data
   - `format` - Image format (`:png` or `:jpeg`)
-  - `height` - Image height in pixels
-  - `width` - Image width in pixels
-  - `tokens` - Number of tokens this image represents
-  - `expected_tokens` - Advisory expected token count (optional)
+  - `expected_tokens` - Advisory expected token count (optional, required for `.length/1`)
   - `type` - Always "image"
 
   ## Expected Tokens
@@ -20,15 +17,15 @@ defmodule Tinkex.Types.ImageChunk do
   token count from the image. If `expected_tokens` is provided and doesn't match,
   the request will fail quickly rather than processing the full request.
 
+  Calling `length/1` will raise if `expected_tokens` is `nil`; this mirrors the
+  Python SDK guardrails to avoid silently miscounting tokens.
+
   ## Wire Format
 
   ```json
   {
     "data": "base64-encoded-data",
     "format": "png",
-    "height": 512,
-    "width": 512,
-    "tokens": 256,
     "expected_tokens": 256,
     "type": "image"
   }
@@ -37,16 +34,13 @@ defmodule Tinkex.Types.ImageChunk do
   CRITICAL: Field names are `data` and `format`, NOT `image_data` and `image_format`.
   """
 
-  @enforce_keys [:data, :format, :height, :width, :tokens]
-  defstruct [:data, :format, :height, :width, :tokens, :expected_tokens, type: "image"]
+  @enforce_keys [:data, :format]
+  defstruct [:data, :format, :expected_tokens, type: "image"]
 
   @type format :: :png | :jpeg
   @type t :: %__MODULE__{
           data: String.t(),
           format: format(),
-          height: pos_integer(),
-          width: pos_integer(),
-          tokens: non_neg_integer(),
           expected_tokens: non_neg_integer() | nil,
           type: String.t()
         }
@@ -60,30 +54,20 @@ defmodule Tinkex.Types.ImageChunk do
 
   - `image_binary` - Raw image bytes
   - `format` - Image format (`:png` or `:jpeg`)
-  - `height` - Image height in pixels
-  - `width` - Image width in pixels
-  - `tokens` - Number of tokens this image represents
   - `opts` - Optional keyword list:
     - `:expected_tokens` - Advisory expected token count
 
   ## Examples
 
-      iex> chunk = ImageChunk.new(<<1, 2, 3>>, :png, 512, 512, 256)
-      iex> chunk.tokens
-      256
-
-      iex> chunk = ImageChunk.new(<<1, 2, 3>>, :png, 512, 512, 256, expected_tokens: 256)
+      iex> chunk = ImageChunk.new(<<1, 2, 3>>, :png, expected_tokens: 256)
       iex> chunk.expected_tokens
       256
   """
-  @spec new(binary(), format(), pos_integer(), pos_integer(), non_neg_integer(), keyword()) :: t()
-  def new(image_binary, format, height, width, tokens, opts \\ []) do
+  @spec new(binary(), format(), keyword()) :: t()
+  def new(image_binary, format, opts \\ []) do
     %__MODULE__{
       data: Base.encode64(image_binary),
       format: format,
-      height: height,
-      width: width,
-      tokens: tokens,
       expected_tokens: Keyword.get(opts, :expected_tokens),
       type: "image"
     }
@@ -93,7 +77,11 @@ defmodule Tinkex.Types.ImageChunk do
   Get the length (number of tokens) consumed by this image.
   """
   @spec length(t()) :: non_neg_integer()
-  def length(%__MODULE__{tokens: tokens}), do: tokens
+  def length(%__MODULE__{expected_tokens: nil}) do
+    raise ArgumentError, "expected_tokens is required to compute image length"
+  end
+
+  def length(%__MODULE__{expected_tokens: expected_tokens}), do: expected_tokens
 end
 
 defimpl Jason.Encoder, for: Tinkex.Types.ImageChunk do
@@ -103,17 +91,14 @@ defimpl Jason.Encoder, for: Tinkex.Types.ImageChunk do
     base_map = %{
       data: chunk.data,
       format: format_str,
-      height: chunk.height,
-      width: chunk.width,
-      tokens: chunk.tokens,
       type: chunk.type
     }
 
     map =
-      if chunk.expected_tokens do
-        Map.put(base_map, :expected_tokens, chunk.expected_tokens)
-      else
+      if is_nil(chunk.expected_tokens) do
         base_map
+      else
+        Map.put(base_map, :expected_tokens, chunk.expected_tokens)
       end
 
     Jason.Encode.map(map, opts)

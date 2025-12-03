@@ -41,7 +41,11 @@ defmodule Tinkex.CLIManagementTest do
 
     def delete_checkpoint(_config, path) do
       send(self(), {:delete, path})
-      {:ok, %{}}
+
+      case Process.get({:delete, path}) do
+        :fail -> {:error, Tinkex.Error.new(:api_status, "failed delete", status: 500)}
+        _ -> {:ok, %{}}
+      end
     end
 
     def list_training_runs(_config, limit, offset) do
@@ -138,6 +142,115 @@ defmodule Tinkex.CLIManagementTest do
     end)
 
     assert_received {:unpublish, "tinker://run-1/weights/0001"}
+  end
+
+  test "checkpoint delete supports multiple paths with a single confirmation" do
+    output =
+      capture_io("y\n", fn ->
+        assert {:ok, %{command: :checkpoint, action: :delete, deleted: 2, failed: 0}} =
+                 CLI.run([
+                   "checkpoint",
+                   "delete",
+                   "tinker://run-1/weights/0001",
+                   "tinker://run-2/weights/0002",
+                   "--api-key",
+                   "k"
+                 ])
+      end)
+
+    assert output =~ "Preparing to delete 2 checkpoints"
+    assert output =~ "Deleting 1/2: tinker://run-1/weights/0001"
+    assert output =~ "Deleting 2/2: tinker://run-2/weights/0002"
+
+    assert_received {:delete, "tinker://run-1/weights/0001"}
+    assert_received {:delete, "tinker://run-2/weights/0002"}
+  end
+
+  test "checkpoint delete aggregates failures while continuing" do
+    Process.put({:delete, "tinker://run-2/weights/0002"}, :fail)
+
+    stderr =
+      capture_io(:stderr, fn ->
+        _output =
+          capture_io("y\n", fn ->
+            assert {:error,
+                    %{
+                      command: :checkpoint,
+                      action: :delete,
+                      deleted: 1,
+                      failed: 1,
+                      failures: [%{path: "tinker://run-2/weights/0002"}]
+                    }} =
+                     CLI.run([
+                       "checkpoint",
+                       "delete",
+                       "tinker://run-1/weights/0001",
+                       "tinker://run-2/weights/0002",
+                       "--api-key",
+                       "k"
+                     ])
+          end)
+      end)
+
+    assert stderr =~
+             "Delete failed for tinker://run-2/weights/0002: [api_status (500)] failed delete"
+
+    assert_received {:delete, "tinker://run-1/weights/0001"}
+    assert_received {:delete, "tinker://run-2/weights/0002"}
+
+    Process.delete({:delete, "tinker://run-2/weights/0002"})
+  end
+
+  test "checkpoint delete validates tinker:// paths" do
+    stderr =
+      capture_io(:stderr, fn ->
+        assert {:error, %Tinkex.Error{type: :validation}} =
+                 CLI.run([
+                   "checkpoint",
+                   "delete",
+                   "/not-a-tinker-path",
+                   "--api-key",
+                   "k"
+                 ])
+      end)
+
+    assert stderr =~ "Checkpoint paths must start with tinker://"
+    refute_received {:delete, _}
+  end
+
+  test "checkpoint delete aborts when confirmation is declined" do
+    output =
+      capture_io("n\n", fn ->
+        assert {:ok, %{action: :delete, cancelled: true, paths: ["tinker://run-1/weights/0001"]}} =
+                 CLI.run([
+                   "checkpoint",
+                   "delete",
+                   "tinker://run-1/weights/0001",
+                   "--api-key",
+                   "k"
+                 ])
+      end)
+
+    assert output =~ "Aborted delete of 1 checkpoint"
+    refute_received {:delete, _}
+  end
+
+  test "checkpoint delete --yes skips confirmation" do
+    output =
+      capture_io(fn ->
+        assert {:ok, %{action: :delete, deleted: 1, failed: 0}} =
+                 CLI.run([
+                   "checkpoint",
+                   "delete",
+                   "tinker://run-1/weights/0001",
+                   "--api-key",
+                   "k",
+                   "--yes"
+                 ])
+      end)
+
+    refute output =~ "Proceed?"
+    assert_received {:delete, "tinker://run-1/weights/0001"}
   end
 
   test "run list prints entries" do

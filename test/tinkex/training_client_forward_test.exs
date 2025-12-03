@@ -9,7 +9,7 @@ defmodule Tinkex.TrainingClientForwardTest do
   use Tinkex.HTTPCase, async: false
 
   alias Tinkex.TrainingClient
-  alias Tinkex.Types.{Datum, ModelInput, TensorData}
+  alias Tinkex.Types.{Datum, ImageAssetPointerChunk, ImageChunk, ModelInput, TensorData}
 
   setup :setup_http_client
 
@@ -149,6 +149,163 @@ defmodule Tinkex.TrainingClientForwardTest do
       # Should have processed 2 chunks (seq_ids start at 1 since 0 is used by create_model)
       assert Agent.get(chunk_order, & &1) == [1, 2]
       assert length(output.loss_fn_outputs) == 2
+    end
+
+    test "chunks large image and pointer inputs using size heuristics without expected_tokens", %{
+      bypass: bypass,
+      config: config
+    } do
+      forward_calls = start_supervised!({Agent, fn -> [] end})
+
+      Bypass.expect(bypass, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        case conn.request_path do
+          "/api/v1/create_model" ->
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(200, ~s({"model_id":"model-fwd-chunk-size"}))
+
+          "/api/v1/forward" ->
+            payload = Jason.decode!(body)
+            [datum] = payload["forward_input"]["data"]
+
+            Agent.update(forward_calls, fn acc ->
+              [%{seq_id: payload["seq_id"], datum: datum} | acc]
+            end)
+
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(200, ~s({"request_id":"fwd-size-#{payload["seq_id"]}"}))
+
+          "/api/v1/retrieve_future" ->
+            _payload = Jason.decode!(body)
+
+            result = %{
+              "loss_fn_output_type" => "logprobs",
+              "loss_fn_outputs" => [%{"logprobs" => %{"data" => [-0.1], "dtype" => "float32"}}],
+              "metrics" => %{}
+            }
+
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(200, Jason.encode!(%{status: "completed", result: result}))
+        end
+      end)
+
+      {:ok, client} =
+        TrainingClient.start_link(
+          session_id: "sess-fwd-chunk-size",
+          model_seq_id: 0,
+          base_model: "base",
+          config: config
+        )
+
+      large_image = ImageChunk.new(String.duplicate("a", 260_000), :png)
+
+      pointer_chunk = %ImageAssetPointerChunk{
+        location: String.duplicate("b", 300_000),
+        format: :png
+      }
+
+      data = [
+        %Datum{model_input: %ModelInput{chunks: [large_image]}},
+        %Datum{model_input: %ModelInput{chunks: [pointer_chunk]}}
+      ]
+
+      {:ok, task} = TrainingClient.forward(client, data, :cross_entropy)
+      assert {:ok, _output} = Task.await(task, 5_000)
+
+      calls =
+        Agent.get(forward_calls, fn call_list ->
+          Enum.sort_by(call_list, fn call -> call.seq_id end)
+        end)
+
+      assert length(calls) == 2
+
+      assert Enum.all?(calls, fn %{datum: datum} ->
+               length(datum["model_input"]["chunks"]) == 1
+             end)
+
+      GenServer.stop(client)
+    end
+
+    test "handles image chunks without expected_tokens using counting heuristics", %{
+      bypass: bypass,
+      config: config
+    } do
+      Bypass.expect(bypass, fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+        case conn.request_path do
+          "/api/v1/create_model" ->
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(200, ~s({"model_id":"model-fwd-image"}))
+
+          "/api/v1/forward" ->
+            payload = Jason.decode!(body)
+            [datum] = payload["forward_input"]["data"]
+            assert payload["model_id"] == "model-fwd-image"
+
+            chunks = get_in(datum, ["model_input", "chunks"])
+            assert length(chunks) == 2
+
+            image_chunk = Enum.find(chunks, &(&1["type"] == "image"))
+            pointer_chunk = Enum.find(chunks, &(&1["type"] == "image_asset_pointer"))
+
+            assert image_chunk["format"] == "png"
+            assert is_binary(image_chunk["data"])
+            refute Map.has_key?(image_chunk, "expected_tokens")
+            refute Map.has_key?(image_chunk, "tokens")
+            refute Map.has_key?(image_chunk, "height")
+            refute Map.has_key?(image_chunk, "width")
+
+            assert pointer_chunk["location"] == "tinker://asset/one.png"
+            assert pointer_chunk["format"] == "png"
+            refute Map.has_key?(pointer_chunk, "expected_tokens")
+            refute Map.has_key?(pointer_chunk, "tokens")
+            refute Map.has_key?(pointer_chunk, "height")
+            refute Map.has_key?(pointer_chunk, "width")
+
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(200, ~s({"request_id":"fwd-image-#{payload["seq_id"]}"}))
+
+          "/api/v1/retrieve_future" ->
+            _payload = Jason.decode!(body)
+
+            result = %{
+              "loss_fn_output_type" => "logprobs",
+              "loss_fn_outputs" => [%{"logprobs" => %{"data" => [-0.1], "dtype" => "float32"}}],
+              "metrics" => %{}
+            }
+
+            conn
+            |> Plug.Conn.put_resp_content_type("application/json")
+            |> Plug.Conn.resp(200, Jason.encode!(%{status: "completed", result: result}))
+        end
+      end)
+
+      {:ok, client} =
+        TrainingClient.start_link(
+          session_id: "sess-fwd-image",
+          model_seq_id: 0,
+          base_model: "base",
+          config: config
+        )
+
+      image_chunk = ImageChunk.new("img-bytes", :png)
+
+      pointer_chunk = %ImageAssetPointerChunk{
+        location: "tinker://asset/one.png",
+        format: :png
+      }
+
+      data = [%Datum{model_input: %ModelInput{chunks: [image_chunk, pointer_chunk]}}]
+
+      {:ok, task} = TrainingClient.forward(client, data, :cross_entropy)
+      assert {:ok, _output} = Task.await(task, 5_000)
     end
 
     test "returns ForwardBackwardOutput with loss_fn_outputs", %{

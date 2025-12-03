@@ -31,10 +31,13 @@ The examples are organized by functionality and complexity, ranging from simple 
 - `training_persistence_live.exs` – save a checkpoint, reload it with optimizer state, and spin up a fresh training client from the saved weights (requires only `TINKER_API_KEY`)
 - `save_weights_and_sample.exs` – use the synchronous helper to save sampler weights and immediately create a SamplingClient, then run a sample with the freshly saved weights (requires `TINKER_API_KEY`)
 - `file_upload_multipart.exs` – demonstrates multipart/form-data encoding capability (file transformation, form serialization, boundary generation); uses `examples/uploads/sample_upload.bin` by default (override via `TINKER_UPLOAD_FILE`). Note: runs without API key to demo encoding; set `TINKER_API_KEY` and `TINKER_UPLOAD_ENDPOINT` to test live uploads
+- `multimodal_resume_and_cleanup.exs` – builds a multimodal payload with `expected_tokens`, tries to pick a vision-capable model from live capabilities (override via `TINKER_BASE_MODEL`), runs a live sampling request when a vision model is available (otherwise logs and skips), then restores a training client with optimizer state (uses `TINKER_CHECKPOINT_PATH` override or caches the first checkpoint at `tmp/checkpoints/default.path`; only `TINKER_API_KEY` is required) and prints the CLI multi-delete usage
+- `checkpoint_multi_delete_live.exs` – creates two live checkpoints, caches their `tinker://` paths under `tmp/checkpoints/default.path`, and deletes both with a single CLI invocation (one confirmation via `--yes`; only `TINKER_API_KEY` is required)
+- `llama3_tokenizer_override_live.exs` – runs a live sample on Llama-3 and demonstrates the tokenizer override (`thinkingmachineslabinc/meta-llama-3-tokenizer`) via encode/decode around the live output (only `TINKER_API_KEY` is required)
 - Sampling retry tuning is supported in any sampling example via `retry_config` (e.g., pass
-  `retry_config: [max_retries: 5, max_connections: 20]` to
+  `retry_config: [max_connections: 20, progress_timeout_ms: 120_000]` to
   `ServiceClient.create_sampling_client/2` inside `sampling_basic.exs` if you want to see the
-  new semaphore-based limiter in action).
+  time-bounded retries and semaphore-based limiter in action).
 - `examples/run_all.sh` – helper script that runs each example sequentially
 
 ## Prerequisites
@@ -60,6 +63,7 @@ All examples use environment variables for configuration. The following variable
 - `TINKER_MAX_TOKENS` - Maximum tokens to generate in sampling operations
 - `TINKER_TEMPERATURE` - Temperature parameter for sampling (controls randomness)
 - `TINKER_NUM_SAMPLES` - Number of sequences to generate
+- `TINKER_CHECKPOINT_PATH` - Optional override for optimizer resume path in `multimodal_resume_and_cleanup.exs`; falls back to cached `tmp/checkpoints/default.path` or the first checkpoint discovered via API
 
 ## Running Examples
 
@@ -1388,7 +1392,7 @@ Final result: "succeeded on attempt 3"
 [tinkex] model_id=be224b9d-8c94-58da-827b-c05a8d85a5a7:train:0
 - model_name: meta-llama/Llama-3.1-8B
 - arch: unknown
-- tokenizer_id: baseten/Meta-Llama-3-tokenizer
+- tokenizer_id: thinkingmachineslabinc/meta-llama-3-tokenizer
 - is_lora: true
 - lora_rank: 32
 [tinkex] unload_model

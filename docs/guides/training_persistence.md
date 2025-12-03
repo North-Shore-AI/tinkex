@@ -44,16 +44,29 @@ Use to resume training exactly where it left off:
 
 ## Create a Training Client From a Checkpoint
 
-Let the ServiceClient derive model config from checkpoint metadata and load it:
+Let the ServiceClient derive model config from checkpoint metadata and load it.
+`create_training_client_from_state/3` loads weights only by default to mirror the
+Python SDK contract:
 
 ```elixir
 {:ok, training_client} =
   Tinkex.ServiceClient.create_training_client_from_state(
     service_client,
-    "tinker://run-id/weights/checkpoint-001",
-    load_optimizer: true
+    "tinker://run-id/weights/checkpoint-001"
   )
 ```
+
+To restore optimizer state as well, use the dedicated helper:
+
+```elixir
+{:ok, training_client} =
+  Tinkex.ServiceClient.create_training_client_from_state_with_optimizer(
+    service_client,
+    "tinker://run-id/weights/checkpoint-001"
+  )
+```
+
+Async variants are also available (`*_async/3`).
 
 What happens:
 1) Fetch checkpoint metadata (`base_model`, LoRA rank).
