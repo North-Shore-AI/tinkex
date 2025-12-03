@@ -146,7 +146,7 @@ defmodule Tinkex.Examples.CheckpointsManagement do
 
     case RestClient.list_user_checkpoints(rest_client, limit: 20) do
       {:ok, response} ->
-        total = if response.cursor, do: response.cursor["total_count"], else: length(response.checkpoints)
+        total = if response.cursor, do: response.cursor.total_count, else: length(response.checkpoints)
         IO.puts("Found #{length(response.checkpoints)} of #{total} checkpoints:\n")
 
         Enum.each(response.checkpoints, fn ckpt ->

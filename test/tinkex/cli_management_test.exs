@@ -6,27 +6,111 @@ defmodule Tinkex.CLIManagementTest do
   alias Tinkex.CLI
 
   defmodule RestStub do
+    @checkpoints [
+      %{
+        "checkpoint_id" => "ckpt-run-a-1",
+        "checkpoint_type" => "weights",
+        "tinker_path" => "tinker://run-a/weights/0001",
+        "public" => true,
+        "size_bytes" => 1_024,
+        "time" => "2025-11-26T00:00:00Z"
+      },
+      %{
+        "checkpoint_id" => "ckpt-run-a-2",
+        "checkpoint_type" => "weights",
+        "tinker_path" => "tinker://run-a/weights/0002",
+        "public" => false,
+        "size_bytes" => 2_048,
+        "time" => "2025-11-26T00:01:00Z"
+      },
+      %{
+        "checkpoint_id" => "ckpt-run-b-1",
+        "checkpoint_type" => "sampler_weights",
+        "tinker_path" => "tinker://run-b/sampler_weights/0001",
+        "public" => false,
+        "size_bytes" => 512,
+        "time" => "2025-11-26T00:02:00Z"
+      }
+    ]
+
+    @runs [
+      %{
+        "training_run_id" => "run-a",
+        "base_model" => "meta-llama/Llama",
+        "model_owner" => "owner-a",
+        "is_lora" => true,
+        "lora_rank" => 4,
+        "corrupted" => false,
+        "last_request_time" => "2025-11-26T00:00:00Z",
+        "last_checkpoint" => Enum.at(@checkpoints, 0),
+        "last_sampler_checkpoint" => Enum.at(@checkpoints, 1),
+        "user_metadata" => %{"stage" => "prod"}
+      },
+      %{
+        "training_run_id" => "run-b",
+        "base_model" => "meta-llama/Llama",
+        "model_owner" => "owner-b",
+        "is_lora" => true,
+        "lora_rank" => 8,
+        "corrupted" => true,
+        "last_request_time" => "2025-11-26T00:05:00Z",
+        "last_checkpoint" => Enum.at(@checkpoints, 1),
+        "last_sampler_checkpoint" => Enum.at(@checkpoints, 2),
+        "user_metadata" => %{"stage" => "dev"}
+      },
+      %{
+        "training_run_id" => "run-c",
+        "base_model" => "meta-llama/Llama",
+        "model_owner" => "owner-c",
+        "is_lora" => false,
+        "corrupted" => false,
+        "last_request_time" => "2025-11-26T00:10:00Z",
+        "last_checkpoint" => nil,
+        "last_sampler_checkpoint" => nil,
+        "user_metadata" => nil
+      }
+    ]
+
     def list_user_checkpoints(_config, limit, offset) do
       send(self(), {:list_user, limit, offset})
 
+      slice =
+        @checkpoints
+        |> Enum.drop(offset)
+        |> Enum.take(limit)
+
       {:ok,
        %{
-         "checkpoints" => [
-           %{
-             "checkpoint_id" => "ckpt-1",
-             "checkpoint_type" => "weights",
-             "tinker_path" => "tinker://run-1/weights/0001",
-             "public" => false,
-             "time" => "2025-11-26T00:00:00Z"
-           }
-         ],
-         "cursor" => %{"total_count" => 1, "offset" => offset}
+         "checkpoints" => slice,
+         "cursor" => %{
+           "total_count" => length(@checkpoints),
+           "offset" => offset,
+           "limit" => limit
+         }
+       }}
+    end
+
+    def list_checkpoints(_config, run_id) do
+      send(self(), {:list_run, run_id})
+
+      {:ok,
+       %{
+         "checkpoints" =>
+           Enum.filter(@checkpoints, fn ckpt ->
+             String.starts_with?(ckpt["tinker_path"], "tinker://#{run_id}/")
+           end)
        }}
     end
 
     def get_weights_info_by_tinker_path(_config, path) do
       send(self(), {:weights_info, path})
-      {:ok, %{"base_model" => "Qwen/Qwen2.5-7B", "is_lora" => true, "lora_rank" => 16}}
+
+      {:ok,
+       %{
+         "base_model" => "meta-llama/Llama-3.1-8B",
+         "is_lora" => true,
+         "lora_rank" => 16
+       }}
     end
 
     def publish_checkpoint(_config, path) do
@@ -51,35 +135,26 @@ defmodule Tinkex.CLIManagementTest do
     def list_training_runs(_config, limit, offset) do
       send(self(), {:runs, limit, offset})
 
+      slice =
+        @runs
+        |> Enum.drop(offset)
+        |> Enum.take(limit)
+
       {:ok,
        %{
-         "training_runs" => [
-           %{
-             "training_run_id" => "run-1",
-             "base_model" => "meta-llama/Llama",
-             "model_owner" => "owner",
-             "is_lora" => false,
-             "corrupted" => false,
-             "last_request_time" => "2025-11-26T00:00:00Z"
-           }
-         ],
-         "cursor" => %{"total_count" => 1, "offset" => offset}
+         "training_runs" => slice,
+         "cursor" => %{
+           "total_count" => length(@runs),
+           "offset" => offset,
+           "limit" => limit
+         }
        }}
     end
 
     def get_training_run(_config, run_id) do
       send(self(), {:run_info, run_id})
 
-      {:ok,
-       %{
-         "training_run_id" => run_id,
-         "base_model" => "meta-llama/Llama",
-         "model_owner" => "owner",
-         "is_lora" => true,
-         "lora_rank" => 8,
-         "corrupted" => false,
-         "last_request_time" => "2025-11-26T00:00:00Z"
-       }}
+      {:ok, Enum.find(@runs, fn run -> run["training_run_id"] == run_id end)}
     end
   end
 
@@ -87,39 +162,104 @@ defmodule Tinkex.CLIManagementTest do
     Application.put_env(:tinkex, :cli_management_deps, %{
       rest_api_module: RestStub,
       config_module: Tinkex.Config,
-      json_module: Jason
+      json_module: Jason,
+      checkpoint_page_size: 2,
+      run_page_size: 2
     })
 
     on_exit(fn -> Application.delete_env(:tinkex, :cli_management_deps) end)
   end
 
-  test "checkpoint list prints checkpoints and returns ok" do
-    output =
-      capture_io(fn ->
-        assert {:ok, %{command: :checkpoint, action: :list, count: 1}} =
-                 CLI.run(["checkpoint", "list", "--api-key", "k", "--base-url", "http://example"])
+  test "checkpoint list paginates with progress, limit=0, and json format" do
+    stderr =
+      capture_io(:stderr, fn ->
+        stdout =
+          capture_io(fn ->
+            assert {:ok, %{command: :checkpoint, action: :list, count: 3, total: 3}} =
+                     CLI.run([
+                       "checkpoint",
+                       "list",
+                       "--limit",
+                       "0",
+                       "--api-key",
+                       "k",
+                       "--format",
+                       "json"
+                     ])
+          end)
+
+        send(self(), {:stdout, stdout})
       end)
 
-    assert output =~ "ckpt-1"
-    assert output =~ "tinker://run-1/weights/0001"
-    assert_received {:list_user, 20, 0}
+    assert_receive {:stdout, stdout}
+    assert stderr =~ "Fetching checkpoints"
+    assert stderr =~ "3/3"
+
+    data = Jason.decode!(stdout)
+    assert data["total"] == 3
+    assert data["shown"] == 3
+    assert length(data["checkpoints"]) == 3
+    assert_received {:list_user, 2, 0}
+    assert_received {:list_user, 1, 2}
   end
 
-  test "checkpoint info fetches weights info" do
-    output =
+  test "checkpoint list supports run filter and json output" do
+    stdout =
+      capture_io(fn ->
+        assert {:ok, %{command: :checkpoint, action: :list, count: 2, run_id: "run-a"}} =
+                 CLI.run([
+                   "checkpoint",
+                   "list",
+                   "--run-id",
+                   "run-a",
+                   "--api-key",
+                   "k",
+                   "--format",
+                   "json"
+                 ])
+      end)
+
+    data = Jason.decode!(stdout)
+    assert data["run_id"] == "run-a"
+    assert length(data["checkpoints"]) == 2
+
+    assert Enum.all?(
+             data["checkpoints"],
+             &String.starts_with?(&1["tinker_path"], "tinker://run-a/")
+           )
+
+    assert_received {:list_run, "run-a"}
+    refute_received {:list_user, _, _}
+  end
+
+  test "checkpoint info returns metadata merged with weights info" do
+    stdout =
       capture_io(fn ->
         assert {:ok, %{command: :checkpoint, action: :info}} =
                  CLI.run([
                    "checkpoint",
                    "info",
-                   "tinker://run-1/weights/0001",
+                   "tinker://run-a/weights/0001",
                    "--api-key",
-                   "k"
+                   "k",
+                   "--format",
+                   "json"
                  ])
       end)
 
-    assert output =~ "Qwen/Qwen2.5-7B"
-    assert_received {:weights_info, "tinker://run-1/weights/0001"}
+    data = Jason.decode!(stdout)
+
+    assert data["checkpoint_id"] == "ckpt-run-a-1"
+    assert data["checkpoint_type"] == "weights"
+    assert data["training_run_id"] == "run-a"
+    assert data["size_bytes"] == 1024
+    assert data["public"] == true
+    assert data["time"] == "2025-11-26T00:00:00Z"
+    assert data["base_model"] == "meta-llama/Llama-3.1-8B"
+    assert data["is_lora"] == true
+    assert data["lora_rank"] == 16
+
+    assert_received {:weights_info, "tinker://run-a/weights/0001"}
   end
 
   test "checkpoint publish and unpublish dispatch to API" do
@@ -253,26 +393,57 @@ defmodule Tinkex.CLIManagementTest do
     assert_received {:delete, "tinker://run-1/weights/0001"}
   end
 
-  test "run list prints entries" do
-    output =
-      capture_io(fn ->
-        assert {:ok, %{command: :run, action: :list, count: 1}} =
-                 CLI.run(["run", "list", "--api-key", "k", "--base-url", "http://example"])
+  test "run list paginates with progress and emits json" do
+    stderr =
+      capture_io(:stderr, fn ->
+        stdout =
+          capture_io(fn ->
+            assert {:ok, %{command: :run, action: :list, count: 3, total: 3}} =
+                     CLI.run([
+                       "run",
+                       "list",
+                       "--limit",
+                       "0",
+                       "--api-key",
+                       "k",
+                       "--format",
+                       "json"
+                     ])
+          end)
+
+        send(self(), {:stdout, stdout})
       end)
 
-    assert output =~ "run-1"
-    assert_received {:runs, 20, 0}
+    assert_receive {:stdout, stdout}
+    assert stderr =~ "Fetching training runs"
+    assert stderr =~ "3/3"
+
+    data = Jason.decode!(stdout)
+    assert length(data["runs"]) == 3
+
+    first = hd(data["runs"])
+    assert first["model_owner"]
+    assert Map.has_key?(first, "user_metadata")
+    assert first["last_checkpoint"]["checkpoint_id"] == "ckpt-run-a-1"
+    assert first["last_sampler_checkpoint"]["checkpoint_id"] == "ckpt-run-a-2"
+
+    assert_received {:runs, 2, 0}
+    assert_received {:runs, 1, 2}
   end
 
-  test "run info fetches a training run" do
+  test "run info surfaces owner, lora rank, status, checkpoints, and metadata" do
     output =
       capture_io(fn ->
-        assert {:ok, %{command: :run, action: :info, run_id: "run-1"}} =
-                 CLI.run(["run", "info", "run-1", "--api-key", "k"])
+        assert {:ok, %{command: :run, action: :info, run_id: "run-b"}} =
+                 CLI.run(["run", "info", "run-b", "--api-key", "k"])
       end)
 
-    assert output =~ "run-1"
-    assert output =~ "meta-llama/Llama"
-    assert_received {:run_info, "run-1"}
+    assert output =~ "run-b"
+    assert output =~ "Owner: owner-b"
+    assert output =~ "LoRA rank: 8"
+    assert output =~ "Status: Failed"
+    assert output =~ "Last training checkpoint: ckpt-run-a-2"
+    assert output =~ "Metadata: stage=dev"
+    assert_received {:run_info, "run-b"}
   end
 end

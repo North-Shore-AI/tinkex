@@ -13,12 +13,12 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.15 Highlights
+## 0.1.16 Highlights
 
-- **Checkpoint archive metadata**: Archive URL responses now include `expires`; RestClient gains ID-based archive/delete helpers and `list_user_checkpoints/2` defaults to 100 items.
-- **Sampling backpressure parity**: SamplingClient adds a dispatch semaphore (default 400) and applies a 1s shared backoff on 429s without `Retry-After`, matching the Python SDK.
-- **Retry concurrency parity**: `RetryConfig` now defaults `max_connections` to 1000 to align with Python connection limits.
-- **Service validation**: Creating sampling clients now requires `base_model` or `model_path`; training clients must enable at least one of `train_mlp`/`train_attn`/`train_unembed`.
+- **CLI parity for checkpoints/runs**: `tinkex checkpoint/run list` now paginate with progress, support `--limit 0` for "all", and emit JSON (`--format json`/`--json`) with `total`/`shown` counts plus run filters for checkpoint listing.
+- **Richer checkpoint info**: `tinkex checkpoint info` surfaces size, visibility, timestamps, training run IDs, and base model/LoRA metadata in both table and JSON formats.
+- **Run visibility**: `tinkex run list/info` include owners, LoRA flags/ranks, statuses, last training/sampler checkpoints, and user metadata with JSON output for scripting.
+- **Cursor typing**: Checkpoint pagination cursors now use the typed `Tinkex.Types.Cursor` struct for consistent access (`cursor.total_count/offset/limit`).
 
 ## Features
 
@@ -62,7 +62,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.15"}
+    {:tinkex, "~> 0.1.16"}
   ]
 end
 ```

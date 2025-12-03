@@ -10,6 +10,7 @@ defmodule Tinkex.CLI do
   alias Tinkex.Error
 
   alias Tinkex.Types.{
+    Checkpoint,
     CheckpointsListResponse,
     LoraConfig,
     ModelInput,
@@ -179,7 +180,9 @@ defmodule Tinkex.CLI do
       rest_client_module: Tinkex.RestClient,
       checkpoint_download_module: Tinkex.CheckpointDownload,
       config_module: Tinkex.Config,
-      json_module: Jason
+      json_module: Jason,
+      checkpoint_page_size: 1000,
+      run_page_size: 100
     }
     |> Map.merge(env_overrides)
     |> Map.merge(overrides)
@@ -864,63 +867,119 @@ defmodule Tinkex.CLI do
   end
 
   defp checkpoint_list(config, options, deps) do
-    limit = Map.get(options, :limit, 20)
-    offset = Map.get(options, :offset, 0)
-
-    case deps.rest_api_module.list_user_checkpoints(config, limit, offset) do
-      {:ok, %CheckpointsListResponse{} = resp} ->
-        Enum.each(resp.checkpoints, fn ckpt ->
-          IO.puts("#{ckpt.checkpoint_id}\t#{ckpt.tinker_path}")
-        end)
-
-        {:ok, %{command: :checkpoint, action: :list, count: length(resp.checkpoints)}}
-
-      {:ok, data} when is_map(data) ->
-        resp = CheckpointsListResponse.from_map(data)
-
-        Enum.each(resp.checkpoints, fn ckpt ->
-          IO.puts("#{ckpt.checkpoint_id}\t#{ckpt.tinker_path}")
-        end)
-
-        {:ok, %{command: :checkpoint, action: :list, count: length(resp.checkpoints)}}
-
+    with {:ok, format} <- management_format(options),
+         {:ok, response} <- do_checkpoint_list(config, options, deps) do
+      render_checkpoint_list(response, format, deps)
+    else
       {:error, %Error{} = error} ->
         IO.puts(:stderr, "Checkpoint list failed: #{Error.format(error)}")
         {:error, error}
+
+      {:error, reason} ->
+        IO.puts(:stderr, "Checkpoint list failed: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  defp do_checkpoint_list(config, options, deps) do
+    run_id = Map.get(options, :run_id)
+    limit = options |> Map.get(:limit, 20) |> max(0)
+    offset = max(Map.get(options, :offset, 0), 0)
+    page_size = Map.get(deps, :checkpoint_page_size, 1000)
+
+    if run_id do
+      with {:ok, resp} <-
+             normalize_checkpoint_response(deps.rest_api_module.list_checkpoints(config, run_id)) do
+        checkpoints = resp.checkpoints
+
+        {:ok,
+         %{
+           checkpoints: checkpoints,
+           total: length(checkpoints),
+           shown: length(checkpoints),
+           run_id: run_id
+         }}
+      end
+    else
+      paginate_checkpoints(config, deps, limit, offset, page_size)
+    end
+  end
+
+  defp paginate_checkpoints(config, deps, limit, offset, page_size) do
+    initial_limit = initial_page_limit(limit, page_size)
+
+    with {:ok, resp} <-
+           normalize_checkpoint_response(
+             deps.rest_api_module.list_user_checkpoints(config, initial_limit, offset)
+           ),
+         {:ok, %{items: checkpoints, total: total}} <-
+           paginate_with(
+             fn req_limit, req_offset ->
+               case normalize_checkpoint_response(
+                      deps.rest_api_module.list_user_checkpoints(config, req_limit, req_offset)
+                    ) do
+                 {:ok, %CheckpointsListResponse{} = response} ->
+                   {:ok, {response.checkpoints, response.cursor}}
+
+                 {:error, _} = error ->
+                   error
+               end
+             end,
+             resp.checkpoints,
+             offset + length(resp.checkpoints),
+             page_size,
+             pagination_target(limit, cursor_total(resp.cursor), offset),
+             cursor_total(resp.cursor),
+             offset,
+             "checkpoints"
+           ) do
+      shown = length(checkpoints)
+      final_total = total || cursor_total(resp.cursor) || offset + shown
+
+      {:ok,
+       %{
+         checkpoints: checkpoints,
+         total: final_total,
+         shown: shown,
+         run_id: nil
+       }}
     end
   end
 
   defp checkpoint_info(config, options, deps) do
     path = Map.fetch!(options, :path)
 
-    case deps.rest_api_module.get_weights_info_by_tinker_path(config, path) do
-      {:ok, %WeightsInfoResponse{} = info} ->
-        IO.puts("Base model: #{info.base_model}")
-        IO.puts("LoRA: #{info.is_lora}")
-        if info.lora_rank, do: IO.puts("LoRA rank: #{info.lora_rank}")
-        {:ok, %{command: :checkpoint, action: :info, path: path}}
-
-      {:ok, data} ->
-        info = WeightsInfoResponse.from_json(data)
-        IO.puts("Base model: #{info.base_model}")
-        IO.puts("LoRA: #{info.is_lora}")
-        if info.lora_rank, do: IO.puts("LoRA rank: #{info.lora_rank}")
-        {:ok, %{command: :checkpoint, action: :info, path: path}}
-
+    with :ok <- validate_checkpoint_paths([path]),
+         {:ok, format} <- management_format(options),
+         {:ok, checkpoint} <- fetch_checkpoint_by_path(config, path, deps),
+         {:ok, weights_info} <- fetch_weights_info(config, path, deps) do
+      render_checkpoint_info(checkpoint, weights_info, format, deps)
+    else
       {:error, %Error{} = error} ->
         IO.puts(:stderr, "Checkpoint info failed: #{Error.format(error)}")
         {:error, error}
+
+      {:error, reason} ->
+        IO.puts(:stderr, "Checkpoint info failed: #{inspect(reason)}")
+        {:error, reason}
     end
   end
 
   defp checkpoint_publish(config, options, deps) do
     path = Map.fetch!(options, :path)
 
-    case deps.rest_api_module.publish_checkpoint(config, path) do
-      {:ok, _} ->
-        IO.puts("Published #{path}")
-        {:ok, %{command: :checkpoint, action: :publish, path: path}}
+    with {:ok, format} <- management_format(options) do
+      case deps.rest_api_module.publish_checkpoint(config, path) do
+        {:ok, _} ->
+          maybe_print_json(format, deps.json_module, %{action: :publish, path: path})
+          if format == :table, do: IO.puts("Published #{path}")
+          {:ok, %{command: :checkpoint, action: :publish, path: path}}
 
+        {:error, %Error{} = error} ->
+          IO.puts(:stderr, "Publish failed: #{Error.format(error)}")
+          {:error, error}
+      end
+    else
       {:error, %Error{} = error} ->
         IO.puts(:stderr, "Publish failed: #{Error.format(error)}")
         {:error, error}
@@ -930,13 +989,119 @@ defmodule Tinkex.CLI do
   defp checkpoint_unpublish(config, options, deps) do
     path = Map.fetch!(options, :path)
 
-    case deps.rest_api_module.unpublish_checkpoint(config, path) do
-      {:ok, _} ->
-        IO.puts("Unpublished #{path}")
-        {:ok, %{command: :checkpoint, action: :unpublish, path: path}}
+    with {:ok, format} <- management_format(options) do
+      case deps.rest_api_module.unpublish_checkpoint(config, path) do
+        {:ok, _} ->
+          maybe_print_json(format, deps.json_module, %{action: :unpublish, path: path})
+          if format == :table, do: IO.puts("Unpublished #{path}")
+          {:ok, %{command: :checkpoint, action: :unpublish, path: path}}
 
+        {:error, %Error{} = error} ->
+          IO.puts(:stderr, "Unpublish failed: #{Error.format(error)}")
+          {:error, error}
+      end
+    else
       {:error, %Error{} = error} ->
         IO.puts(:stderr, "Unpublish failed: #{Error.format(error)}")
+        {:error, error}
+    end
+  end
+
+  defp checkpoint_download(config, options, deps) do
+    path = Map.fetch!(options, :path)
+    output_dir = Map.get(options, :output)
+    force = Map.get(options, :force, false)
+    rest_client = deps.rest_client_module.new("cli", config)
+
+    with {:ok, format} <- management_format(options) do
+      case deps.checkpoint_download_module.download(rest_client, path,
+             output_dir: output_dir,
+             force: force
+           ) do
+        {:ok, result} ->
+          if format == :json do
+            maybe_print_json(format, deps.json_module, %{
+              path: path,
+              destination: result.destination
+            })
+          else
+            IO.puts("Downloaded to #{result.destination}")
+          end
+
+          {:ok,
+           %{command: :checkpoint, action: :download, path: path, destination: result.destination}}
+
+        {:error, reason} ->
+          IO.puts(:stderr, "Download failed: #{inspect(reason)}")
+          {:error, reason}
+      end
+    else
+      {:error, %Error{} = error} ->
+        IO.puts(:stderr, "Download failed: #{Error.format(error)}")
+        {:error, error}
+    end
+  end
+
+  defp run_list(config, options, deps) do
+    limit = options |> Map.get(:limit, 20) |> max(0)
+    offset = max(Map.get(options, :offset, 0), 0)
+    page_size = Map.get(deps, :run_page_size, 100)
+
+    with {:ok, format} <- management_format(options),
+         {:ok, resp} <-
+           normalize_run_response(
+             deps.rest_api_module.list_training_runs(
+               config,
+               initial_page_limit(limit, page_size),
+               offset
+             )
+           ),
+         {:ok, %{items: runs, total: total}} <-
+           paginate_with(
+             fn req_limit, req_offset ->
+               case normalize_run_response(
+                      deps.rest_api_module.list_training_runs(config, req_limit, req_offset)
+                    ) do
+                 {:ok, %TrainingRunsResponse{} = response} ->
+                   {:ok, {response.training_runs, response.cursor}}
+
+                 {:error, _} = error ->
+                   error
+               end
+             end,
+             resp.training_runs,
+             offset + length(resp.training_runs),
+             page_size,
+             pagination_target(limit, cursor_total(resp.cursor), offset),
+             cursor_total(resp.cursor),
+             offset,
+             "training runs"
+           ) do
+      render_run_list(
+        %{
+          runs: runs,
+          total: total || cursor_total(resp.cursor) || offset + length(runs),
+          shown: length(runs)
+        },
+        format,
+        deps
+      )
+    else
+      {:error, %Error{} = error} ->
+        IO.puts(:stderr, "Run list failed: #{Error.format(error)}")
+        {:error, error}
+    end
+  end
+
+  defp run_info(config, options, deps) do
+    run_id = Map.fetch!(options, :run_id)
+
+    with {:ok, format} <- management_format(options),
+         {:ok, run} <- fetch_run(config, run_id, deps) do
+      render_run_info(run, format, deps)
+    else
+      {:error, %Error{} = error} ->
+        IO.puts(:stderr, "Run info failed: #{Error.format(error)}")
         {:error, error}
     end
   end
@@ -951,56 +1116,71 @@ defmodule Tinkex.CLI do
       end
       |> Enum.reject(&is_nil/1)
 
-    with :ok <- validate_checkpoint_paths(paths),
-         true <- confirm_delete?(paths, Map.get(options, :yes, false)) do
-      total = length(paths)
+    with {:ok, format} <- management_format(options),
+         :ok <- validate_checkpoint_paths(paths) do
+      case confirm_delete?(paths, Map.get(options, :yes, false)) do
+        true ->
+          total = length(paths)
 
-      results =
-        paths
-        |> Enum.with_index(1)
-        |> Enum.map(fn {path, idx} ->
-          IO.puts("Deleting #{idx}/#{total}: #{path}")
+          results =
+            paths
+            |> Enum.with_index(1)
+            |> Enum.map(fn {path, idx} ->
+              IO.puts("Deleting #{idx}/#{total}: #{path}")
 
-          case deps.rest_api_module.delete_checkpoint(config, path) do
-            {:ok, _} ->
-              IO.puts("Deleted #{path}")
-              {:ok, path}
+              case deps.rest_api_module.delete_checkpoint(config, path) do
+                {:ok, _} ->
+                  IO.puts("Deleted #{path}")
+                  {:ok, path}
 
-            {:error, %Error{} = error} ->
-              IO.puts(:stderr, "Delete failed for #{path}: #{Error.format(error)}")
-              {:error, {path, error}}
+                {:error, %Error{} = error} ->
+                  IO.puts(:stderr, "Delete failed for #{path}: #{Error.format(error)}")
+                  {:error, {path, error}}
 
-            {:error, reason} ->
-              error =
-                Error.new(:request_failed, "Delete failed for #{path}", data: %{reason: reason})
+                {:error, reason} ->
+                  error =
+                    Error.new(:request_failed, "Delete failed for #{path}",
+                      data: %{reason: reason}
+                    )
 
-              IO.puts(:stderr, "Delete failed for #{path}: #{Error.format(error)}")
-              {:error, {path, error}}
+                  IO.puts(:stderr, "Delete failed for #{path}: #{Error.format(error)}")
+                  {:error, {path, error}}
+              end
+            end)
+
+          summary = summarize_deletes(results, paths)
+
+          json_summary =
+            Map.update(summary, :failures, [], fn failures ->
+              Enum.map(failures, fn %{path: path, error: error} ->
+                %{path: path, error: Error.format(error)}
+              end)
+            end)
+
+          maybe_print_json(format, deps.json_module, json_summary)
+
+          if summary.failed > 0 do
+            {:error, summary}
+          else
+            {:ok, summary}
           end
-        end)
 
-      summary = summarize_deletes(results, paths)
+        false ->
+          result = %{
+            command: :checkpoint,
+            action: :delete,
+            cancelled: true,
+            paths: paths
+          }
 
-      if summary.failed > 0 do
-        {:error, summary}
-      else
-        {:ok, summary}
+          IO.puts("Aborted delete of #{length(paths)} checkpoint(s).")
+          maybe_print_json(format, deps.json_module, result)
+          {:ok, result}
       end
     else
       {:error, %Error{} = error} ->
         IO.puts(:stderr, "Delete failed: #{Error.format(error)}")
         {:error, error}
-
-      false ->
-        IO.puts("Aborted delete of #{length(paths)} checkpoint(s).")
-
-        {:ok,
-         %{
-           command: :checkpoint,
-           action: :delete,
-           cancelled: true,
-           paths: paths
-         }}
     end
   end
 
@@ -1053,73 +1233,525 @@ defmodule Tinkex.CLI do
     }
   end
 
-  defp checkpoint_download(config, options, deps) do
-    path = Map.fetch!(options, :path)
-    output_dir = Map.get(options, :output)
-    force = Map.get(options, :force, false)
-    rest_client = deps.rest_client_module.new("cli", config)
+  defp fetch_checkpoint_by_path(config, path, deps) do
+    with {:ok, run_id} <- checkpoint_run_id(path),
+         {:ok, %CheckpointsListResponse{} = resp} <-
+           normalize_checkpoint_response(deps.rest_api_module.list_checkpoints(config, run_id)) do
+      case Enum.find(resp.checkpoints, &(&1.tinker_path == path)) do
+        nil ->
+          {:error,
+           Error.new(:validation, "Checkpoint not found for #{to_string(path)}", category: :user)}
 
-    case deps.checkpoint_download_module.download(rest_client, path,
-           output_dir: output_dir,
-           force: force
-         ) do
-      {:ok, result} ->
-        IO.puts("Downloaded to #{result.destination}")
-
-        {:ok,
-         %{command: :checkpoint, action: :download, path: path, destination: result.destination}}
-
-      {:error, reason} ->
-        IO.puts(:stderr, "Download failed: #{inspect(reason)}")
-        {:error, reason}
+        checkpoint ->
+          {:ok, checkpoint}
+      end
     end
   end
 
-  defp run_list(config, options, deps) do
-    limit = Map.get(options, :limit, 20)
-    offset = Map.get(options, :offset, 0)
-
-    case deps.rest_api_module.list_training_runs(config, limit, offset) do
-      {:ok, %TrainingRunsResponse{} = resp} ->
-        Enum.each(resp.training_runs, fn run ->
-          IO.puts("#{run.training_run_id}\t#{run.base_model}")
-        end)
-
-        {:ok, %{command: :run, action: :list, count: length(resp.training_runs)}}
+  defp fetch_weights_info(config, path, deps) do
+    case deps.rest_api_module.get_weights_info_by_tinker_path(config, path) do
+      {:ok, %WeightsInfoResponse{} = info} ->
+        {:ok, info}
 
       {:ok, data} ->
-        resp = TrainingRunsResponse.from_map(data)
-
-        Enum.each(resp.training_runs, fn run ->
-          IO.puts("#{run.training_run_id}\t#{run.base_model}")
-        end)
-
-        {:ok, %{command: :run, action: :list, count: length(resp.training_runs)}}
+        {:ok, WeightsInfoResponse.from_json(data)}
 
       {:error, %Error{} = error} ->
-        IO.puts(:stderr, "Run list failed: #{Error.format(error)}")
         {:error, error}
     end
   end
 
-  defp run_info(config, options, deps) do
-    run_id = Map.fetch!(options, :run_id)
-
+  defp fetch_run(config, run_id, deps) do
     case deps.rest_api_module.get_training_run(config, run_id) do
       {:ok, %TrainingRun{} = run} ->
-        IO.puts("#{run.training_run_id} (#{run.base_model})")
-        IO.puts("Owner: #{run.model_owner}")
-        {:ok, %{command: :run, action: :info, run_id: run.training_run_id}}
+        {:ok, run}
 
-      {:ok, data} ->
-        run = TrainingRun.from_map(data)
-        IO.puts("#{run.training_run_id} (#{run.base_model})")
-        {:ok, %{command: :run, action: :info, run_id: run.training_run_id}}
+      {:ok, data} when is_map(data) ->
+        {:ok, TrainingRun.from_map(data)}
 
       {:error, %Error{} = error} ->
-        IO.puts(:stderr, "Run info failed: #{Error.format(error)}")
         {:error, error}
     end
+  end
+
+  defp render_checkpoint_list(
+         %{checkpoints: checkpoints, total: total, shown: shown} = resp,
+         format,
+         deps
+       ) do
+    run_id = Map.get(resp, :run_id)
+
+    case format do
+      :json ->
+        payload =
+          %{
+            "checkpoints" => Enum.map(checkpoints, &checkpoint_to_map/1),
+            "total" => total,
+            "shown" => shown
+          }
+          |> maybe_put_run_id(run_id)
+
+        IO.puts(deps.json_module.encode!(payload))
+
+      :table ->
+        header =
+          if run_id do
+            "Checkpoints for #{run_id} (#{shown}/#{total})"
+          else
+            "Checkpoints (#{shown}/#{total})"
+          end
+
+        IO.puts(header)
+        IO.puts("Checkpoint ID\tType\tSize\tPublic\tCreated\tPath")
+
+        Enum.each(checkpoints, fn ckpt ->
+          map = checkpoint_to_map(ckpt)
+
+          IO.puts(
+            Enum.join(
+              [
+                map["checkpoint_id"],
+                map["checkpoint_type"],
+                format_size(map["size_bytes"]),
+                to_string(map["public"]),
+                format_datetime(map["time"]),
+                map["tinker_path"]
+              ],
+              "\t"
+            )
+          )
+        end)
+    end
+
+    {:ok,
+     %{
+       command: :checkpoint,
+       action: :list,
+       count: shown,
+       total: total,
+       run_id: run_id
+     }}
+  end
+
+  defp render_checkpoint_info(checkpoint, weights_info, format, deps) do
+    map = checkpoint_to_map(checkpoint)
+    weights_map = weights_info_to_map(weights_info)
+
+    case format do
+      :json ->
+        IO.puts(deps.json_module.encode!(Map.merge(map, weights_map)))
+
+      :table ->
+        props =
+          [
+            {"Checkpoint ID", map["checkpoint_id"]},
+            {"Training run ID", map["training_run_id"]},
+            {"Type", map["checkpoint_type"]},
+            {"Path", map["tinker_path"]},
+            {"Size", format_size(map["size_bytes"])},
+            {"Public", to_string(map["public"])},
+            {"Created", format_datetime(map["time"])},
+            {"Base model", weights_map["base_model"]},
+            {"LoRA", to_string(weights_map["is_lora"])}
+          ]
+          |> maybe_append_lora_rank(weights_map["lora_rank"])
+
+        Enum.each(props, fn {label, value} -> IO.puts("#{label}: #{value}") end)
+    end
+
+    {:ok, %{command: :checkpoint, action: :info, path: map["tinker_path"]}}
+  end
+
+  defp render_run_list(%{runs: runs, total: total, shown: shown}, format, deps) do
+    case format do
+      :json ->
+        payload = %{
+          "runs" => Enum.map(runs, &run_to_map/1),
+          "total" => total,
+          "shown" => shown
+        }
+
+        IO.puts(deps.json_module.encode!(payload))
+
+      :table ->
+        IO.puts("Training runs (#{shown}/#{total})")
+        IO.puts("Run ID\tBase Model\tOwner\tLoRA\tStatus\tLast Update")
+
+        Enum.each(runs, fn run ->
+          map = run_to_map(run)
+
+          IO.puts(
+            Enum.join(
+              [
+                map["training_run_id"],
+                map["base_model"],
+                map["model_owner"],
+                format_lora(map),
+                format_status(map),
+                format_datetime(map["last_request_time"])
+              ],
+              "\t"
+            )
+          )
+        end)
+    end
+
+    {:ok, %{command: :run, action: :list, count: shown, total: total}}
+  end
+
+  defp render_run_info(run, format, deps) do
+    map = run_to_map(run)
+
+    case format do
+      :json ->
+        IO.puts(deps.json_module.encode!(map))
+
+      :table ->
+        IO.puts("#{map["training_run_id"]} (#{map["base_model"]})")
+        IO.puts("Owner: #{map["model_owner"]}")
+        IO.puts("LoRA: #{if(map["is_lora"], do: "Yes", else: "No")}")
+        if map["lora_rank"], do: IO.puts("LoRA rank: #{map["lora_rank"]}")
+        IO.puts("Status: #{format_status(map)}")
+        IO.puts("Last update: #{format_datetime(map["last_request_time"])}")
+
+        if map["last_checkpoint"] do
+          IO.puts("Last training checkpoint: #{map["last_checkpoint"]["checkpoint_id"]}")
+          IO.puts("  Time: #{format_datetime(map["last_checkpoint"]["time"])}")
+          IO.puts("  Path: #{map["last_checkpoint"]["tinker_path"]}")
+        end
+
+        if map["last_sampler_checkpoint"] do
+          IO.puts("Last sampler checkpoint: #{map["last_sampler_checkpoint"]["checkpoint_id"]}")
+          IO.puts("  Time: #{format_datetime(map["last_sampler_checkpoint"]["time"])}")
+          IO.puts("  Path: #{map["last_sampler_checkpoint"]["tinker_path"]}")
+        end
+
+        if map["user_metadata"] do
+          IO.puts(
+            "Metadata: " <>
+              Enum.map_join(map["user_metadata"], ", ", fn {k, v} -> "#{k}=#{v}" end)
+          )
+        end
+    end
+
+    {:ok, %{command: :run, action: :info, run_id: map["training_run_id"]}}
+  end
+
+  defp maybe_append_lora_rank(props, nil), do: props
+  defp maybe_append_lora_rank(props, rank), do: props ++ [{"LoRA rank", to_string(rank)}]
+
+  defp maybe_put_run_id(payload, nil), do: payload
+  defp maybe_put_run_id(payload, run_id), do: Map.put(payload, "run_id", run_id)
+
+  defp maybe_print_json(:json, json_module, payload), do: IO.puts(json_module.encode!(payload))
+  defp maybe_print_json(_format, _json_module, _payload), do: :ok
+
+  defp management_format(options) do
+    format =
+      cond do
+        Map.get(options, :json, false) -> "json"
+        is_binary(Map.get(options, :format)) -> String.downcase(Map.get(options, :format))
+        Map.get(options, :format) == :json -> "json"
+        Map.get(options, :format) == :table -> "table"
+        true -> "table"
+      end
+
+    case format do
+      "json" -> {:ok, :json}
+      "table" -> {:ok, :table}
+      other -> {:error, Error.new(:validation, "Invalid format: #{other}", category: :user)}
+    end
+  end
+
+  defp normalize_checkpoint_response({:ok, %CheckpointsListResponse{} = resp}), do: {:ok, resp}
+
+  defp normalize_checkpoint_response({:ok, data}) when is_map(data) do
+    {:ok, CheckpointsListResponse.from_map(data)}
+  end
+
+  defp normalize_checkpoint_response({:error, _} = error), do: error
+
+  defp normalize_run_response({:ok, %TrainingRunsResponse{} = resp}), do: {:ok, resp}
+
+  defp normalize_run_response({:ok, data}) when is_map(data) do
+    {:ok, TrainingRunsResponse.from_map(data)}
+  end
+
+  defp normalize_run_response({:error, _} = error), do: error
+
+  defp paginate_with(
+         _fetch_fun,
+         acc,
+         _offset,
+         _page_size,
+         target,
+         total_count,
+         initial_offset,
+         label
+       )
+       when target != :all and length(acc) >= target do
+    progress_total = progress_total(target, total_count, initial_offset)
+    maybe_log_progress(label, min(length(acc), target), progress_total)
+
+    final_total =
+      total_count || (progress_total && progress_total + initial_offset) ||
+        length(acc) + initial_offset
+
+    {:ok, %{items: Enum.take(acc, target), total: final_total}}
+  end
+
+  defp paginate_with(
+         fetch_fun,
+         acc,
+         offset,
+         page_size,
+         target,
+         total_count,
+         initial_offset,
+         label
+       ) do
+    progress_total = progress_total(target, total_count, initial_offset)
+    maybe_log_progress(label, length(acc), progress_total)
+    request_limit = requested_limit(page_size, target, length(acc))
+
+    case fetch_fun.(request_limit, offset) do
+      {:ok, {items, cursor}} ->
+        new_total = total_count || cursor_total(cursor)
+        new_target = update_target(target, new_total, initial_offset)
+        new_acc = acc ++ items
+        new_offset = offset + length(items)
+
+        cond do
+          new_target != :all and length(new_acc) >= new_target ->
+            final_total = new_total || new_target + initial_offset
+
+            maybe_log_progress(
+              label,
+              min(length(new_acc), new_target),
+              progress_total(new_target, new_total, initial_offset)
+            )
+
+            {:ok, %{items: Enum.take(new_acc, new_target), total: final_total}}
+
+          new_target == :all and length(items) < request_limit and is_nil(new_total) ->
+            maybe_log_progress(
+              label,
+              length(new_acc),
+              progress_total(new_target, new_total, initial_offset)
+            )
+
+            {:ok, %{items: new_acc, total: new_offset}}
+
+          new_target == :all and is_integer(progress_total(new_target, new_total, initial_offset)) and
+              length(new_acc) >= progress_total(new_target, new_total, initial_offset) ->
+            final_total = new_total || length(new_acc) + initial_offset
+
+            maybe_log_progress(
+              label,
+              length(new_acc),
+              progress_total(new_target, new_total, initial_offset)
+            )
+
+            {:ok, %{items: new_acc, total: final_total}}
+
+          true ->
+            paginate_with(
+              fetch_fun,
+              new_acc,
+              new_offset,
+              page_size,
+              new_target,
+              new_total,
+              initial_offset,
+              label
+            )
+        end
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  defp initial_page_limit(limit, page_size) when is_integer(limit) and limit > 0,
+    do: min(limit, page_size)
+
+  defp initial_page_limit(_limit, page_size), do: page_size
+
+  defp pagination_target(limit, total_count, offset) do
+    available = if is_integer(total_count), do: max(total_count - offset, 0), else: nil
+
+    cond do
+      limit == 0 and is_integer(available) -> available
+      limit == 0 -> :all
+      is_integer(available) -> min(limit, available)
+      true -> limit
+    end
+  end
+
+  defp cursor_total(%Tinkex.Types.Cursor{total_count: total}), do: total
+
+  defp cursor_total(%{total_count: total}) when is_integer(total), do: total
+  defp cursor_total(map) when is_map(map), do: map["total_count"] || map[:total_count]
+  defp cursor_total(_), do: nil
+
+  defp progress_total(target, _total_count, _initial_offset) when is_integer(target), do: target
+
+  defp progress_total(:all, total_count, initial_offset) when is_integer(total_count),
+    do: max(total_count - initial_offset, 0)
+
+  defp progress_total(_target, _total_count, _initial_offset), do: nil
+
+  defp requested_limit(page_size, :all, _current), do: page_size
+
+  defp requested_limit(page_size, target, current) when is_integer(target) do
+    remaining = max(target - current, 0)
+    min(page_size, remaining)
+  end
+
+  defp update_target(:all, total_count, initial_offset) when is_integer(total_count),
+    do: max(total_count - initial_offset, 0)
+
+  defp update_target(target, _total_count, _initial_offset), do: target
+
+  defp maybe_log_progress(_label, _current, nil), do: :ok
+
+  defp maybe_log_progress(label, current, total) do
+    if is_integer(total) do
+      IO.puts(:stderr, "Fetching #{label}: #{current}/#{total}")
+    else
+      IO.puts(:stderr, "Fetching #{label}: #{current}")
+    end
+  end
+
+  defp checkpoint_run_id("tinker://" <> rest) do
+    case String.split(rest, "/") do
+      [run_id | _] -> {:ok, run_id}
+      _ -> {:error, Error.new(:validation, "Invalid checkpoint path: #{rest}", category: :user)}
+    end
+  end
+
+  defp checkpoint_run_id(other) do
+    {:error,
+     Error.new(
+       :validation,
+       "Checkpoint path must start with tinker://, got: #{other}",
+       category: :user
+     )}
+  end
+
+  defp checkpoint_to_map(%Checkpoint{} = checkpoint) do
+    training_run_id =
+      checkpoint.training_run_id ||
+        case checkpoint_run_id(checkpoint.tinker_path) do
+          {:ok, run_id} -> run_id
+          _ -> nil
+        end
+
+    %{
+      "checkpoint_id" => checkpoint.checkpoint_id,
+      "checkpoint_type" => checkpoint.checkpoint_type,
+      "tinker_path" => checkpoint.tinker_path,
+      "training_run_id" => training_run_id,
+      "size_bytes" => checkpoint.size_bytes,
+      "public" => checkpoint.public,
+      "time" => format_datetime(checkpoint.time)
+    }
+  end
+
+  defp checkpoint_to_map(map) when is_map(map) do
+    map
+    |> Checkpoint.from_map()
+    |> checkpoint_to_map()
+  end
+
+  defp weights_info_to_map(%WeightsInfoResponse{} = info) do
+    base = %{
+      "base_model" => info.base_model,
+      "is_lora" => info.is_lora
+    }
+
+    if info.lora_rank do
+      Map.put(base, "lora_rank", info.lora_rank)
+    else
+      base
+    end
+  end
+
+  defp maybe_checkpoint_map(nil), do: nil
+  defp maybe_checkpoint_map(%Checkpoint{} = checkpoint), do: checkpoint_to_map(checkpoint)
+
+  defp maybe_checkpoint_map(map) when is_map(map) do
+    map
+    |> Checkpoint.from_map()
+    |> checkpoint_to_map()
+  end
+
+  defp run_to_map(%TrainingRun{} = run) do
+    %{
+      "training_run_id" => run.training_run_id,
+      "base_model" => run.base_model,
+      "model_owner" => run.model_owner,
+      "is_lora" => run.is_lora,
+      "lora_rank" => run.lora_rank,
+      "corrupted" => run.corrupted,
+      "last_request_time" => format_datetime(run.last_request_time),
+      "last_checkpoint" => maybe_checkpoint_map(run.last_checkpoint),
+      "last_sampler_checkpoint" => maybe_checkpoint_map(run.last_sampler_checkpoint),
+      "user_metadata" => run.user_metadata
+    }
+  end
+
+  defp run_to_map(map) when is_map(map) do
+    map
+    |> TrainingRun.from_map()
+    |> run_to_map()
+  end
+
+  defp format_size(nil), do: "N/A"
+
+  defp format_size(bytes) when is_integer(bytes) do
+    units = ["B", "KB", "MB", "GB", "TB"]
+
+    {value, unit} =
+      Enum.reduce_while(units, {bytes * 1.0, "B"}, fn unit, {val, _} ->
+        if abs(val) < 1024 do
+          {:halt, {val, unit}}
+        else
+          {:cont, {val / 1024, unit}}
+        end
+      end)
+
+    if unit == "B" do
+      "#{trunc(value)} #{unit}"
+    else
+      :erlang.float_to_binary(value, decimals: 1) <> " #{unit}"
+    end
+  end
+
+  defp format_size(other), do: to_string(other || "N/A")
+
+  defp format_datetime(nil), do: "N/A"
+
+  defp format_datetime(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+  defp format_datetime(%NaiveDateTime{} = dt), do: NaiveDateTime.to_iso8601(dt)
+  defp format_datetime(value) when is_binary(value), do: value
+  defp format_datetime(other), do: to_string(other)
+
+  defp format_lora(map) do
+    is_lora = Map.get(map, "is_lora") || Map.get(map, :is_lora)
+    rank = Map.get(map, "lora_rank") || Map.get(map, :lora_rank)
+
+    cond do
+      is_lora == true and is_integer(rank) -> "Yes (rank #{rank})"
+      is_lora == true -> "Yes"
+      true -> "No"
+    end
+  end
+
+  defp format_status(map) do
+    corrupted = Map.get(map, "corrupted") || Map.get(map, :corrupted)
+
+    if corrupted, do: "Failed", else: "Active"
   end
 
   defp parse([]), do: {:help, global_help()}
@@ -1335,7 +1967,7 @@ defmodule Tinkex.CLI do
   defp checkpoint_management_help do
     """
     Usage:
-      tinkex checkpoint list [--limit <int>] [--offset <int>]
+      tinkex checkpoint list [--run-id <id>] [--limit <int>] [--offset <int>] [--format table|json]
       tinkex checkpoint info <tinker_path>
       tinkex checkpoint publish <tinker_path>
       tinkex checkpoint unpublish <tinker_path>
@@ -1346,7 +1978,14 @@ defmodule Tinkex.CLI do
       --api-key <key>         API key
       --base-url <url>        API base URL
       --timeout <ms>          Request timeout in milliseconds
+      --format <table|json>   Output format (default: table)
+      --json                  Shortcut for --format json
       -h, --help              Show this help text
+
+    List options:
+      --run-id <id>           Filter checkpoints for a single run
+      --limit <int>           Maximum checkpoints to fetch (0 = all, default: 20)
+      --offset <int>          Offset for pagination (default: 0)
 
     Delete options:
       --yes                   Skip confirmation prompt (delete is otherwise interactive)
@@ -1392,6 +2031,10 @@ defmodule Tinkex.CLI do
       --api-key <key>         API key
       --base-url <url>        API base URL
       --timeout <ms>          Request timeout in milliseconds
+      --limit <int>           Maximum runs to fetch (0 = all, default: 20)
+      --offset <int>          Offset for pagination (default: 0)
+      --format <table|json>   Output format (default: table)
+      --json                  Shortcut for --format json
       -h, --help              Show this help text
     """
   end
@@ -1459,7 +2102,10 @@ defmodule Tinkex.CLI do
       limit: :integer,
       offset: :integer,
       output: :string,
-      force: :boolean
+      force: :boolean,
+      format: :string,
+      json: :boolean,
+      run_id: :string
     ]
   end
 
@@ -1470,7 +2116,9 @@ defmodule Tinkex.CLI do
       base_url: :string,
       timeout: :integer,
       limit: :integer,
-      offset: :integer
+      offset: :integer,
+      format: :string,
+      json: :boolean
     ]
   end
 
@@ -1495,6 +2143,6 @@ defmodule Tinkex.CLI do
   end
 
   defp aliases do
-    [h: :help]
+    [h: :help, f: :format]
   end
 end

@@ -5,11 +5,11 @@ defmodule Tinkex.Types.CheckpointsListResponse do
   Contains a list of checkpoints and optional cursor for pagination.
   """
 
-  alias Tinkex.Types.Checkpoint
+  alias Tinkex.Types.{Checkpoint, Cursor}
 
   @type t :: %__MODULE__{
           checkpoints: [Checkpoint.t()],
-          cursor: map() | nil
+          cursor: Cursor.t() | nil
         }
 
   defstruct [:checkpoints, :cursor]
@@ -25,7 +25,7 @@ defmodule Tinkex.Types.CheckpointsListResponse do
 
     %__MODULE__{
       checkpoints: checkpoints,
-      cursor: map["cursor"] || map[:cursor]
+      cursor: (map["cursor"] || map[:cursor]) |> Cursor.from_map()
     }
   end
 end

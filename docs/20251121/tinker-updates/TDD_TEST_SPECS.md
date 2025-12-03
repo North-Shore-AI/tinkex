@@ -126,7 +126,7 @@ defmodule Tinkex.Types.CheckpointTest do
       }
 
       assert length(response.checkpoints) == 1
-      assert response.cursor["total_count"] == 100
+      assert response.cursor.total_count == 100
     end
   end
 
@@ -274,7 +274,7 @@ defmodule Tinkex.RestClientTest do
       client = RestClient.new("session-123", config)
       {:ok, response} = RestClient.list_user_checkpoints(client)
 
-      assert response.cursor["total_count"] == 150
+      assert response.cursor.total_count == 150
     end
   end
 

@@ -119,49 +119,76 @@ The checkpoint command writes a JSON metadata file to the specified `--output` p
 
 ### List Checkpoints
 
-List all user checkpoints with pagination:
+List all user checkpoints with pagination and JSON output, or filter by training run:
 
 ```bash
-./tinkex checkpoint list [--limit <int>] [--offset <int>]
+./tinkex checkpoint list [--run-id <id>] [--limit <int>] [--offset <int>] [--format table|json]
 ```
 
 **Options:**
-- `--limit <int>` - Maximum number of checkpoints to return (default: 20)
+- `--run-id <id>` - Restrict results to a single training run
+- `--limit <int>` - Maximum number of checkpoints to return (`0` = fetch all; default: 20)
 - `--offset <int>` - Number of checkpoints to skip (default: 0)
+- `--format table|json` / `--json` - Output format (default: table); JSON includes `total` and `shown` counts
 
-**Output Format:**
-```
-checkpoint-id-1    tinker://run-123/weights/0001
-checkpoint-id-2    tinker://run-124/weights/0002
-```
+When multiple pages are fetched (`--limit 0` or large lists), progress is printed to stderr while stdout remains clean for piping/JSON.
 
-**Example:**
+**Examples:**
 
 ```bash
-# List first 10 checkpoints
-./tinkex checkpoint list --limit 10 --api-key "$TINKER_API_KEY"
+# Fetch all checkpoints with JSON output
+./tinkex checkpoint list --limit 0 --format json --api-key "$TINKER_API_KEY"
 
-# List next page
-./tinkex checkpoint list --limit 10 --offset 10 --api-key "$TINKER_API_KEY"
+# List checkpoints for a single run
+./tinkex checkpoint list --run-id run-123 --limit 5 --api-key "$TINKER_API_KEY"
+```
+
+**JSON shape (truncated):**
+
+```json
+{
+  "total": 3,
+  "shown": 3,
+  "checkpoints": [
+    {
+      "checkpoint_id": "ckpt-1",
+      "checkpoint_type": "weights",
+      "training_run_id": "run-123",
+      "size_bytes": 1024,
+      "public": true,
+      "time": "2025-11-26T00:00:00Z",
+      "tinker_path": "tinker://run-123/weights/0001"
+    }
+  ]
+}
 ```
 
 ### Get Checkpoint Info
 
-Retrieve detailed information about a specific checkpoint:
+Retrieve detailed information about a specific checkpoint, including size, visibility, timestamps, training run ID, and base model/LoRA metadata:
 
 ```bash
-./tinkex checkpoint info <tinker_path>
+./tinkex checkpoint info <tinker_path> [--format table|json]
 ```
 
 **Arguments:**
 - `<tinker_path>` - Checkpoint path (e.g., `tinker://run-123/weights/0001`)
 
-**Output:**
+**Example output (table):**
 ```
+Checkpoint ID: ckpt-1
+Training run ID: run-123
+Type: weights
+Path: tinker://run-123/weights/0001
+Size: 1.0 KB
+Public: true
+Created: 2025-11-26T00:00:00Z
 Base model: meta-llama/Llama-3.1-8B
 LoRA: true
 LoRA rank: 32
 ```
+
+Pass `--format json` (or `--json`) to receive the full checkpoint + weights metadata as a JSON object.
 
 **Example:**
 
@@ -451,26 +478,44 @@ Sampling complete (3 sequences)
 
 ### List Training Runs
 
-List all training runs with pagination:
+List all training runs with pagination and JSON output:
 
 ```bash
-./tinkex run list [--limit <int>] [--offset <int>]
+./tinkex run list [--limit <int>] [--offset <int>] [--format table|json]
 ```
 
 **Options:**
-- `--limit <int>` - Maximum number of runs to return (default: 20)
+- `--limit <int>` - Maximum number of runs to return (`0` = fetch all; default: 20)
 - `--offset <int>` - Number of runs to skip (default: 0)
+- `--format table|json` / `--json` - Output format (default: table); JSON includes `total`/`shown` plus full run objects
 
-**Output Format:**
-```
-run-123    meta-llama/Llama-3.1-8B
-run-124    Qwen/Qwen2.5-7B
-```
+Progress is printed to stderr when multiple pages are fetched (e.g., `--limit 0`).
 
-**Example:**
+**Example (JSON):**
 
 ```bash
-./tinkex run list --limit 10 --api-key "$TINKER_API_KEY"
+./tinkex run list --limit 0 --format json --api-key "$TINKER_API_KEY"
+```
+
+```json
+{
+  "total": 3,
+  "shown": 3,
+  "runs": [
+    {
+      "training_run_id": "run-123",
+      "base_model": "meta-llama/Llama-3.1-8B",
+      "model_owner": "owner@example.com",
+      "is_lora": true,
+      "lora_rank": 16,
+      "corrupted": false,
+      "last_request_time": "2025-11-26T00:00:00Z",
+      "last_checkpoint": {...},
+      "last_sampler_checkpoint": {...},
+      "user_metadata": {"stage": "prod"}
+    }
+  ]
+}
 ```
 
 ### Get Training Run Info
@@ -478,23 +523,27 @@ run-124    Qwen/Qwen2.5-7B
 Retrieve detailed information about a specific training run:
 
 ```bash
-./tinkex run info <run_id>
+./tinkex run info <run_id> [--format table|json]
 ```
 
 **Arguments:**
 - `<run_id>` - Training run identifier
 
-**Output:**
+**Table output:**
 ```
 run-abc123 (meta-llama/Llama-3.1-8B)
 Owner: user@example.com
+LoRA: Yes
+LoRA rank: 16
+Status: Active
+Last update: 2025-11-26T00:00:00Z
+Last training checkpoint: ckpt-123
+  Time: 2025-11-26T00:00:00Z
+  Path: tinker://run-abc123/weights/0001
+Metadata: stage=prod
 ```
 
-**Example:**
-
-```bash
-./tinkex run info run-abc123 --api-key "$TINKER_API_KEY"
-```
+`--format json` (or `--json`) returns the full training run object, including owner, LoRA rank, last training/sampler checkpoints, and user metadata.
 
 ### Help for Run Commands
 
@@ -857,7 +906,7 @@ fi
    wait
    ```
 
-4. **Output Formats**: Use `--json` when you need to parse output programmatically. Plain text is more efficient for human reading.
+4. **Output Formats**: Use `--format json` (or `--json`) on checkpoint/run management commands when you need to parse output programmatically; `--json` remains available on sampling commands. Plain text is more efficient for human reading.
 
 ## Troubleshooting
 

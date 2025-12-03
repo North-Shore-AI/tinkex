@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.16] - 2025-12-03
+
+### Added
+- CLI parity for checkpoint/run management: `--format json`/`--json` output with `total`/`shown` counts, checkpoint list run filters, `--limit 0` fetch-all semantics, and pagination progress indicators for lists.
+- Checkpoint info now surfaces checkpoint type, size, visibility, timestamps, and training run IDs alongside base model/LoRA metadata; run list/info surface owner, LoRA rank, statuses, last checkpoints, and user metadata in both table and JSON formats.
+
+### Changed
+- Checkpoint pagination cursors now use the typed `Tinkex.Types.Cursor` struct; CLI table outputs include the richer checkpoint/run fields.
+- Examples and docs updated for new CLI flags and cursor accessors; version bumped to 0.1.16 in mix/README/getting_started.
+
 ## [0.1.15] - 2025-12-03
 
 ### Added

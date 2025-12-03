@@ -272,7 +272,7 @@ defmodule Tinkex.RestClientTest do
       {:ok, response} = RestClient.list_user_checkpoints(client)
 
       assert length(response.checkpoints) == 1
-      assert response.cursor["total_count"] == 150
+      assert response.cursor.total_count == 150
     end
 
     test "supports custom pagination", %{bypass: bypass, config: config} do

@@ -23,6 +23,8 @@ The examples are organized by functionality and complexity, ranging from simple 
 - `async_client_creation.exs` – parallel sampling client creation via Task-based flows
 - `cli_run_text.exs` – programmatic `tinkex run` invocation with inline prompts
 - `cli_run_prompt_file.exs` – CLI sampling with prompt files and JSON output capture
+- `tinkex checkpoint list --limit 0 --format json --api-key "$TINKER_API_KEY"` – fetch all checkpoints via the CLI with progress to stderr and JSON totals/shown counts for automation
+- `tinkex run list --limit 0 --format json --api-key "$TINKER_API_KEY"` – emit JSON run listings (owner/LoRA/status/checkpoints/user_metadata) with pagination progress for scripting
 - `metrics_live.exs` – live sampling + metrics snapshot (counters and latency percentiles)
 - `telemetry_live.exs` – live telemetry with custom events and sampling
 - `telemetry_reporter_demo.exs` – comprehensive telemetry reporter demo with all features
@@ -1018,7 +1020,157 @@ Samplers: 0
 === Tinkex Checkpoint Management Example ===
 
 --- All User Checkpoints ---
-Found 20 of 92 checkpoints:
+Found 20 of 93 checkpoints:
+
+  weights/async_demo_checkpoint
+    Path: tinker://9677c040-d833-5325-8a9d-4c3a1f816328:train:0/weights/async_demo_checkpoint
+    Type: training
+    Size: 153.0 MB
+    Public: false
+    Created: 2025-12-03T20:35:36.090807Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-12-03T20:32:09.677474Z
+
+  weights/async_demo_checkpoint
+    Path: tinker://170beeb9-9fa9-5011-b896-ba0616c7e94d:train:0/weights/async_demo_checkpoint
+    Type: training
+    Size: 153.0 MB
+    Public: false
+    Created: 2025-11-28T02:43:17.958810Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://50398661-7150-5042-9891-5611cb535340:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-28T02:40:09.047757Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://a5d5031a-72a5-5180-8417-e32c5c0a9598:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-28T02:32:20.546936Z
+
+  weights/async_demo_checkpoint
+    Path: tinker://47f7276e-454e-5dde-9188-1c1e3c3536b5:train:0/weights/async_demo_checkpoint
+    Type: training
+    Size: 153.0 MB
+    Public: false
+    Created: 2025-11-28T02:31:18.060463Z
+
+  sampler_weights/async_demo_weights
+    Path: tinker://a7517405-527c-571e-9fe2-c94e6b3cf548:train:0/sampler_weights/async_demo_weights
+    Type: sampler
+    Size: 51.0 MB
+    Public: false
+    Created: 2025-11-28T02:30:25.465448Z
+
+  sampler_weights/async_demo_weights
+    Path: tinker://73c466d3-b063-56a2-86d0-d035a1392c23:train:0/sampler_weights/async_demo_weights
+    Type: sampler
+    Size: 51.0 MB
+    Public: false
+    Created: 2025-11-28T02:29:56.731159Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://53f0586d-3f98-58e5-b04e-297ea717378e:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-27T18:58:37.961274Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://f4521144-ef58-53ec-950c-29260c9b1a41:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-27T18:44:47.285732Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://1ec257a9-28bf-559c-aa73-e54a09cce5bd:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-27T18:37:23.205082Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://046c91d9-d9f4-5dd6-ac42-0135bbde947e:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-27T18:15:50.316094Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://fdf7af94-bcce-5bf7-847b-a159e8bfb025:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-27T18:11:28.567500Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://8eba0a5a-0dcf-57f3-9d0d-65ec6ef22a1f:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-27T17:53:03.197669Z
+
+  sampler_weights/checkpoint_1764230891.2048833.pt
+    Path: tinker://fa0ecefc-83b2-5e26-a2a9-aee483b913ba:train:0/sampler_weights/checkpoint_1764230891.2048833.pt
+    Type: sampler
+    Size: 5.77 GB
+    Public: false
+    Created: 2025-11-27T08:09:13.441453Z
+
+  sampler_weights/checkpoint_1764230289.3815918.pt
+    Path: tinker://bc33563e-6730-5cbe-9a25-43e11dbe5095:train:0/sampler_weights/checkpoint_1764230289.3815918.pt
+    Type: sampler
+    Size: 5.77 GB
+    Public: false
+    Created: 2025-11-27T07:59:06.047243Z
+
+  sampler_weights/checkpoint_1764229717.8670213.pt
+    Path: tinker://bfc7c5e5-0b90-55a1-8c97-fc8bdac649c9:train:0/sampler_weights/checkpoint_1764229717.8670213.pt
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-27T07:48:41.184106Z
+
+  sampler_weights/checkpoint_1764229539.9387324.pt
+    Path: tinker://9922175e-533d-52e3-a433-5e0fa645462c:train:0/sampler_weights/checkpoint_1764229539.9387324.pt
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-27T07:45:42.982073Z
+
+  weights/demo-checkpoint-1764228622
+    Path: tinker://8c4cfd17-df85-5634-badf-e12068d2efc8:train:0/weights/demo-checkpoint-1764228622
+    Type: training
+    Size: 126.3 MB
+    Public: false
+    Created: 2025-11-27T07:30:37.300885Z
+
+  sampler_weights/checkpoint_1764215477.2502818.pt
+    Path: tinker://daba87c6-4e86-5797-81d5-efe038b44524:train:0/sampler_weights/checkpoint_1764215477.2502818.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-27T03:51:18.921217Z
+
+
+--- All User Checkpoints (paginated) ---
+Fetched 50 (93 total)
+  weights/async_demo_checkpoint
+    Path: tinker://9677c040-d833-5325-8a9d-4c3a1f816328:train:0/weights/async_demo_checkpoint
+    Type: training
+    Size: 153.0 MB
+    Public: false
+    Created: 2025-12-03T20:35:36.090807Z
 
   sampler_weights/sampler-weights
     Path: tinker://39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0/sampler_weights/sampler-weights
@@ -1159,6 +1311,511 @@ Found 20 of 92 checkpoints:
     Size: 84.1 MB
     Public: false
     Created: 2025-11-26T03:22:37.215881Z
+
+  sampler_weights/checkpoint_1764127169.5448663.pt
+    Path: tinker://64c07d46-5af8-5290-b146-8b3b72fcd412:train:0/sampler_weights/checkpoint_1764127169.5448663.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-26T03:19:31.522096Z
+
+  sampler_weights/checkpoint_1764126259.022441.pt
+    Path: tinker://8ffd2ac2-df28-5c6d-959f-ca1f3b993f38:train:0/sampler_weights/checkpoint_1764126259.022441.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-26T03:04:20.853521Z
+
+  sampler_weights/eval-checkpoint
+    Path: tinker://1a518dcd-98f2-5dbb-8ce1-97659577228e:train:0/sampler_weights/eval-checkpoint
+    Type: sampler
+    Size: 12.8 MB
+    Public: false
+    Created: 2025-11-23T23:43:55.884275Z
+
+  sampler_weights/eval-checkpoint
+    Path: tinker://4f34e47f-b6c1-5acd-9939-2e87cfd516ac:train:0/sampler_weights/eval-checkpoint
+    Type: sampler
+    Size: 12.8 MB
+    Public: false
+    Created: 2025-11-23T23:43:13.608804Z
+
+  sampler_weights/eval-checkpoint
+    Path: tinker://4e5865b6-dc04-576a-9776-98935107b89a:train:0/sampler_weights/eval-checkpoint
+    Type: sampler
+    Size: 12.8 MB
+    Public: false
+    Created: 2025-11-23T23:42:41.563024Z
+
+  sampler_weights/eval-checkpoint
+    Path: tinker://79772ba6-f047-5446-b82f-3467b5cb36c7:train:0/sampler_weights/eval-checkpoint
+    Type: sampler
+    Size: 12.8 MB
+    Public: false
+    Created: 2025-11-23T23:41:53.766834Z
+
+  sampler_weights/eval-checkpoint
+    Path: tinker://c8874248-0e9b-5aba-9724-82c52ee91ec1:train:0/sampler_weights/eval-checkpoint
+    Type: sampler
+    Size: 12.8 MB
+    Public: false
+    Created: 2025-11-23T23:41:01.481661Z
+
+  sampler_weights/eval-checkpoint
+    Path: tinker://c9ad0180-7655-50c2-a957-6fd241e7103d:train:0/sampler_weights/eval-checkpoint
+    Type: sampler
+    Size: 12.8 MB
+    Public: false
+    Created: 2025-11-23T23:40:13.515136Z
+
+  sampler_weights/eval-checkpoint
+    Path: tinker://bbccf257-c3fd-5c91-a2d1-73fbbb8fd00e:train:0/sampler_weights/eval-checkpoint
+    Type: sampler
+    Size: 12.8 MB
+    Public: false
+    Created: 2025-11-23T23:38:23.104113Z
+
+  sampler_weights/eval-checkpoint
+    Path: tinker://b9102c50-fbff-5f74-a06b-a3dee4d14131:train:0/sampler_weights/eval-checkpoint
+    Type: sampler
+    Size: 12.8 MB
+    Public: false
+    Created: 2025-11-23T23:37:12.980263Z
+
+  sampler_weights/eval-checkpoint
+    Path: tinker://9e55e0f8-63df-5ea0-aa16-8621bdb9109c:train:0/sampler_weights/eval-checkpoint
+    Type: sampler
+    Size: 12.8 MB
+    Public: false
+    Created: 2025-11-23T23:33:52.872673Z
+
+  sampler_weights/checkpoint_1763771890.680426.pt
+    Path: tinker://0478a1ab-95af-5eae-bd70-d3d3b441c021:train:0/sampler_weights/checkpoint_1763771890.680426.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-22T00:38:16.947541Z
+
+  sampler_weights/checkpoint_1763771611.2195318.pt
+    Path: tinker://f620a60b-7b30-5e7e-bc11-da12b0fb0765:train:0/sampler_weights/checkpoint_1763771611.2195318.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-22T00:33:35.488576Z
+
+  sampler_weights/checkpoint_1763771585.3579679.pt
+    Path: tinker://0ad21c1d-0eeb-5518-a6c8-1c497af7c5d5:train:0/sampler_weights/checkpoint_1763771585.3579679.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-22T00:33:06.824152Z
+
+  sampler_weights/checkpoint_1763769127.646869.pt
+    Path: tinker://5a3335fe-65fe-5afa-a6b4-d1294887e5bc:train:0/sampler_weights/checkpoint_1763769127.646869.pt
+    Type: sampler
+    Size: 42.1 MB
+    Public: false
+    Created: 2025-11-21T23:52:11.116436Z
+
+  sampler_weights/checkpoint_1763768362.9477212.pt
+    Path: tinker://bf88076d-f29e-5366-9ab6-80e0c5f2995a:train:0/sampler_weights/checkpoint_1763768362.9477212.pt
+    Type: sampler
+    Size: 42.1 MB
+    Public: false
+    Created: 2025-11-21T23:39:24.802998Z
+
+  sampler_weights/checkpoint_1763767972.2357357.pt
+    Path: tinker://f9bc9e13-1901-5818-99bd-b2b01ee8bb5b:train:0/sampler_weights/checkpoint_1763767972.2357357.pt
+    Type: sampler
+    Size: 42.1 MB
+    Public: false
+    Created: 2025-11-21T23:32:53.740553Z
+
+  sampler_weights/checkpoint_1763767641.9865937.pt
+    Path: tinker://d32bb9c6-04c0-5cd1-9793-745e7043e1dc:train:0/sampler_weights/checkpoint_1763767641.9865937.pt
+    Type: sampler
+    Size: 42.1 MB
+    Public: false
+    Created: 2025-11-21T23:27:23.422596Z
+
+  sampler_weights/checkpoint_1763766626.1265566.pt
+    Path: tinker://e5dfefc6-65fc-57bb-9a90-1bb3ef61f003:train:0/sampler_weights/checkpoint_1763766626.1265566.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-21T23:10:27.549888Z
+
+  sampler_weights/checkpoint_1763765822.8686664.pt
+    Path: tinker://96e6f7ba-426a-5854-ae78-0ce919ac48ec:train:0/sampler_weights/checkpoint_1763765822.8686664.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-21T22:57:05.276026Z
+
+  sampler_weights/checkpoint_1763674749.0143857.pt
+    Path: tinker://c3ebbb74-61f2-5be9-9f6b-aa8c70d60cb2:train:0/sampler_weights/checkpoint_1763674749.0143857.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-20T21:39:11.188934Z
+
+  sampler_weights/checkpoint_1763674591.9668543.pt
+    Path: tinker://3784f9f8-0ac3-5596-9b11-0b2c154954e1:train:0/sampler_weights/checkpoint_1763674591.9668543.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-20T21:36:33.769394Z
+
+  sampler_weights/checkpoint_1763674539.0671499.pt
+    Path: tinker://492f6734-8b07-5c76-82d9-23501232c523:train:0/sampler_weights/checkpoint_1763674539.0671499.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-20T21:35:41.390717Z
+
+  sampler_weights/checkpoint_1763674470.2715266.pt
+    Path: tinker://ca2be487-be03-5b7e-aead-b9baab3c2aa0:train:0/sampler_weights/checkpoint_1763674470.2715266.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-20T21:34:32.076428Z
+
+  sampler_weights/checkpoint_1763674428.9740841.pt
+    Path: tinker://a886468c-bc20-5257-ad57-abaf0c4c6b7b:train:0/sampler_weights/checkpoint_1763674428.9740841.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-20T21:33:51.074219Z
+
+  sampler_weights/checkpoint_1763674248.9320633.pt
+    Path: tinker://7921b3ab-d30f-5c76-a574-376e8cd3c12f:train:0/sampler_weights/checkpoint_1763674248.9320633.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-20T21:30:50.657760Z
+
+  sampler_weights/checkpoint_1763674208.8772275.pt
+    Path: tinker://457e528f-d601-565e-b1a6-5c7914fcc3f2:train:0/sampler_weights/checkpoint_1763674208.8772275.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-20T21:30:10.982809Z
+
+  sampler_weights/checkpoint_1763674139.0204463.pt
+    Path: tinker://eff1740d-a0bb-5d01-a42c-94e95342bb82:train:0/sampler_weights/checkpoint_1763674139.0204463.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-20T21:29:00.808793Z
+
+  sampler_weights/checkpoint_1763674099.0486119.pt
+    Path: tinker://8cdb2b79-83c0-5c53-a025-1e7a83d2239f:train:0/sampler_weights/checkpoint_1763674099.0486119.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-20T21:28:20.577549Z
+
+Fetched 43 (93 total)
+  sampler_weights/claim-extractor-scifact-20251119T041117
+    Path: tinker://554bb03e-1d71-58cc-824d-1625d267f8be:train:0/sampler_weights/claim-extractor-scifact-20251119T041117
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-19T04:25:05.755741Z
+
+  sampler_weights/claim-extractor-scifact-micro-20251119T023422
+    Path: tinker://b484da35-1b57-5519-8e20-74ac4ec6776f:train:0/sampler_weights/claim-extractor-scifact-micro-20251119T023422
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-19T02:34:46.769328Z
+
+  sampler_weights/claim-extractor-scifact-micro-20251119T000437
+    Path: tinker://d459b31c-3f66-59dd-8fbc-500f9570b022:train:0/sampler_weights/claim-extractor-scifact-micro-20251119T000437
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-19T00:04:42.381541Z
+
+  sampler_weights/claim-extractor-scifact-20251118T220454
+    Path: tinker://8ff091db-2061-5279-ac9d-1dbf50acb114:train:0/sampler_weights/claim-extractor-scifact-20251118T220454
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-18T22:22:12.903958Z
+
+  sampler_weights/claim-extractor-scifact-20251118T173307
+    Path: tinker://ad9b0497-d1d0-5338-b603-fece00234d86:train:0/sampler_weights/claim-extractor-scifact-20251118T173307
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-18T17:48:19.509993Z
+
+  sampler_weights/claim-extractor-scifact-20251112T070048
+    Path: tinker://c0e9f526-4398-486e-bb03-755037abd8a7/sampler_weights/claim-extractor-scifact-20251112T070048
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-12T07:07:48.144064Z
+
+  sampler_weights/claim-extractor-scifact-debug-20251112T064537
+    Path: tinker://4c2d7d55-723d-421c-be56-2e3e71950f73/sampler_weights/claim-extractor-scifact-debug-20251112T064537
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-12T06:46:48.975254Z
+
+  sampler_weights/claim-extractor-scifact-debug-20251112T064537-step20
+    Path: tinker://4c2d7d55-723d-421c-be56-2e3e71950f73/sampler_weights/claim-extractor-scifact-debug-20251112T064537-step20
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-12T06:46:20.681625Z
+
+  sampler_weights/claim-extractor-scifact-debug-20251112T004313
+    Path: tinker://61541b24-18f0-4e27-a698-40e979fe0fb7/sampler_weights/claim-extractor-scifact-debug-20251112T004313
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-12T00:45:01.525748Z
+
+  sampler_weights/claim-extractor-scifact-debug-20251112T004313-step20
+    Path: tinker://61541b24-18f0-4e27-a698-40e979fe0fb7/sampler_weights/claim-extractor-scifact-debug-20251112T004313-step20
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-12T00:44:29.092184Z
+
+  sampler_weights/claim-extractor-scifact-20251111T225459
+    Path: tinker://3d88c2d0-ec2e-4f37-90f6-ad8855e1f5bd/sampler_weights/claim-extractor-scifact-20251111T225459
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-11T23:04:09.346257Z
+
+  sampler_weights/claim-extractor-scifact-debug-20251111T220611
+    Path: tinker://12d00816-3c6a-4fbd-b792-f30f66c1f6e2/sampler_weights/claim-extractor-scifact-debug-20251111T220611
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-11T22:08:09.959762Z
+
+  sampler_weights/claim-extractor-scifact-debug-20251111T220611-step20
+    Path: tinker://12d00816-3c6a-4fbd-b792-f30f66c1f6e2/sampler_weights/claim-extractor-scifact-debug-20251111T220611-step20
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-11T22:07:05.943612Z
+
+  sampler_weights/claim-extractor-scifact-debug-20251111T213557
+    Path: tinker://89aa268e-9532-4e5f-97aa-c228d7f86cbf/sampler_weights/claim-extractor-scifact-debug-20251111T213557
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-11T21:37:56.986377Z
+
+  sampler_weights/claim-extractor-scifact-debug-20251111T213557-step20
+    Path: tinker://89aa268e-9532-4e5f-97aa-c228d7f86cbf/sampler_weights/claim-extractor-scifact-debug-20251111T213557-step20
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-11T21:37:26.498233Z
+
+  sampler_weights/claim-extractor-scifact-debug
+    Path: tinker://7a4a9939-61ec-4982-9240-ecf40f7de451/sampler_weights/claim-extractor-scifact-debug
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-11T21:25:27.074834Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://7808d627-6a6f-4d38-af06-7d7e17662504/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-11T21:00:12.255132Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://9314e28c-6cf6-4b62-9eed-21b24384b2ee/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T19:38:29.156765Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://05d83bde-111d-44da-9f3e-80c63053f5dc/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T19:14:46.853453Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://216c1da7-a40e-481e-9ff1-91664d32df6f/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T19:07:06.230260Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://32e517fc-8980-4244-970a-77598702bb7b/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T18:37:33.121097Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://75f238d9-788a-4b15-ad11-4a27c3b6f2fe/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T18:35:13.649385Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://ae5c9b07-d765-4fb8-aa74-fb4839781eff/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T18:28:36.080161Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://314ca5b7-d1e8-48e7-8e1a-af899f831218/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T18:20:51.042305Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://4ca82d74-9e6d-486c-baf4-610f875bbff6/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T17:37:28.524613Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://952206f4-ceef-43ff-8ee4-f0dd16557955/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T17:34:16.304290Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://7a018085-7ea8-46a2-b070-2e6f64ecc03f/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T17:24:42.000819Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://e2261cbf-571b-44ed-ab1c-fb30bad8cb23/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T17:20:57.823861Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://672ddb08-c00e-40f9-9cd6-75d96d8f3c88/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T17:19:24.871822Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://f8ecb02f-d6a2-4f94-a6e8-90d0e6e0af6e/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T17:02:26.826126Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://f97b057b-a5d4-48d0-abee-288d598b959a/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T17:01:49.882479Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://83934987-0c45-4b62-8f87-b3098edf8bb0/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T16:31:19.498985Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://f781270c-abc7-4eb3-b40d-2b30ba6351d6/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T16:29:02.384505Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://a39cba93-8ae8-4134-b440-8c4e81e07929/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T16:15:45.231432Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://7f1f72c3-7040-4b11-98b6-c1f0e545b7e7/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T16:05:38.226751Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://be882e1a-3bee-42b3-b7c5-e9b41c653dc1/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T15:56:49.115534Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://e123b112-5a4f-4957-bc92-6169b580f6fe/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T15:46:48.628154Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://fb150365-dc79-4166-812b-a941cb35123f/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T15:27:30.872534Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://13fd1023-1433-4b22-bb8d-f2dd78274fc7/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T14:11:49.407842Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://8f51c170-e69b-44a5-98a1-241bc4a8ebfd/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T14:08:34.714697Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://6565b2a7-4123-4325-bb1c-f1dd4b51f4f0/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T13:58:24.829491Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://801ac30a-78b0-4faa-850d-1196f63c38cf/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T06:18:13.847517Z
+
+  sampler_weights/claim-extractor-scifact
+    Path: tinker://702d77bf-7bd3-474d-817a-fbf90575eb6e/sampler_weights/claim-extractor-scifact
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-09T06:13:22.659349Z
 
 
 === Example Complete ===

@@ -29,6 +29,7 @@ Each ServiceClient maintains sequencing counters for per-model operations; Train
 Archive URL responses return both the signed URL and its expiration (`CheckpointArchiveUrlResponse.url` + `expires`).
 
 All methods return typed structs (`ListSessionsResponse`, `GetSessionResponse`, `CheckpointsListResponse`, `CheckpointArchiveUrlResponse`, `TrainingRun`, `WeightsInfoResponse`, `GetSamplerResponse`) to match the Python SDK wire format.
+Pagination cursors now use the typed `Tinkex.Types.Cursor` struct (`total_count`/`offset`/`limit`) for both checkpoint and training run listings.
 
 ## TrainingClient
 

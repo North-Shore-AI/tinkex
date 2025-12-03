@@ -9,6 +9,7 @@ defmodule Tinkex.Types.CheckpointTypesTest do
         checkpoint_id: "ckpt-123",
         checkpoint_type: "weights",
         tinker_path: "tinker://run-1/weights/0001",
+        training_run_id: "run-1",
         size_bytes: 1_000_000,
         public: false,
         time: "2025-11-20T10:00:00Z"
@@ -17,6 +18,7 @@ defmodule Tinkex.Types.CheckpointTypesTest do
       assert checkpoint.checkpoint_id == "ckpt-123"
       assert checkpoint.checkpoint_type == "weights"
       assert checkpoint.tinker_path == "tinker://run-1/weights/0001"
+      assert checkpoint.training_run_id == "run-1"
       assert checkpoint.size_bytes == 1_000_000
       assert checkpoint.public == false
       assert checkpoint.time == "2025-11-20T10:00:00Z"
@@ -27,6 +29,7 @@ defmodule Tinkex.Types.CheckpointTypesTest do
         checkpoint_id: "ckpt-123",
         checkpoint_type: "weights",
         tinker_path: "tinker://run-1/weights/0001",
+        training_run_id: "run-1",
         size_bytes: nil,
         public: true,
         time: "2025-11-20T10:00:00Z"
@@ -50,6 +53,7 @@ defmodule Tinkex.Types.CheckpointTypesTest do
 
       assert checkpoint.checkpoint_id == "ckpt-456"
       assert checkpoint.size_bytes == 2_000_000
+      assert checkpoint.training_run_id == "run-2"
     end
 
     test "from_map/1 handles nil size_bytes" do
@@ -66,6 +70,21 @@ defmodule Tinkex.Types.CheckpointTypesTest do
 
       assert checkpoint.size_bytes == nil
     end
+
+    test "parses training_run_id from tinker_path when missing" do
+      map = %{
+        "checkpoint_id" => "ckpt-456",
+        "checkpoint_type" => "weights",
+        "tinker_path" => "tinker://run-2/weights/0001",
+        "size_bytes" => 2_000_000,
+        "public" => false,
+        "time" => "2025-11-21T12:00:00Z"
+      }
+
+      checkpoint = Checkpoint.from_map(map)
+
+      assert checkpoint.training_run_id == "run-2"
+    end
   end
 
   describe "CheckpointsListResponse" do
@@ -81,11 +100,11 @@ defmodule Tinkex.Types.CheckpointTypesTest do
 
       response = %CheckpointsListResponse{
         checkpoints: [checkpoint],
-        cursor: %{"total_count" => 100, "offset" => 0}
+        cursor: %Tinkex.Types.Cursor{total_count: 100, offset: 0, limit: 2}
       }
 
       assert length(response.checkpoints) == 1
-      assert response.cursor["total_count"] == 100
+      assert response.cursor.total_count == 100
     end
 
     test "cursor can be nil" do
@@ -109,7 +128,7 @@ defmodule Tinkex.Types.CheckpointTypesTest do
             "time" => "2025-11-20T10:00:00Z"
           }
         ],
-        "cursor" => %{"total_count" => 50}
+        "cursor" => %{"total_count" => 50, "limit" => 1, "offset" => 0}
       }
 
       response = CheckpointsListResponse.from_map(map)
@@ -117,7 +136,8 @@ defmodule Tinkex.Types.CheckpointTypesTest do
       assert length(response.checkpoints) == 1
       [ckpt] = response.checkpoints
       assert ckpt.checkpoint_id == "ckpt-1"
-      assert response.cursor["total_count"] == 50
+      assert response.cursor.total_count == 50
+      assert response.cursor.limit == 1
     end
   end
 
