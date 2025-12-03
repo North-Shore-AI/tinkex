@@ -29,6 +29,7 @@ defmodule Tinkex.API.Telemetry do
   @spec send(map(), keyword()) :: :ok
   def send(request, opts) do
     timeout = Keyword.get(opts, :timeout, @default_timeout_ms)
+    client = Tinkex.API.client_module(opts)
 
     case Task.Supervisor.start_child(Tinkex.TaskSupervisor, fn ->
            try do
@@ -38,7 +39,7 @@ defmodule Tinkex.API.Telemetry do
                |> Keyword.put(:max_retries, 1)
                |> Keyword.put(:timeout, timeout)
 
-             case Tinkex.API.post("/api/v1/telemetry", request, opts) do
+             case client.post("/api/v1/telemetry", request, opts) do
                {:ok, _} ->
                  :ok
 
@@ -77,6 +78,7 @@ defmodule Tinkex.API.Telemetry do
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def send_sync(request, opts) do
     timeout = Keyword.get(opts, :timeout, @default_timeout_ms)
+    client = Tinkex.API.client_module(opts)
 
     opts =
       opts
@@ -84,6 +86,6 @@ defmodule Tinkex.API.Telemetry do
       |> Keyword.put(:max_retries, 1)
       |> Keyword.put(:timeout, timeout)
 
-    Tinkex.API.post("/api/v1/telemetry", request, opts)
+    client.post("/api/v1/telemetry", request, opts)
   end
 end

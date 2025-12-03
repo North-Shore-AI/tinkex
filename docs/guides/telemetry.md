@@ -2,6 +2,8 @@
 
 The Tinkex telemetry system provides session-scoped event capture and reporting to the Tinker backend. It automatically tracks HTTP requests, queue state changes, exceptions, and custom application events with built-in batching, retries, and graceful shutdown semantics.
 
+ServiceClient, TrainingClient, and SamplingClient wrap public entrypoints with the telemetry capture layer, so unhandled exceptions are logged automatically and fatal paths emit session-end events without additional instrumentation.
+
 ## Overview
 
 Tinkex telemetry consists of two main components:

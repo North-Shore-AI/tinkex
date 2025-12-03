@@ -19,7 +19,9 @@ defmodule Tinkex.API.Futures do
   @spec retrieve(map(), keyword()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def retrieve(request, opts) do
-    Tinkex.API.post(
+    client = Tinkex.API.client_module(opts)
+
+    client.post(
       "/api/v1/retrieve_future",
       request,
       opts

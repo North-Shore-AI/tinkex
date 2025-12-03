@@ -54,22 +54,46 @@ defmodule Tinkex.PoolKeyTest do
   describe "build/2" do
     test "creates tuple for training pool" do
       assert PoolKey.build("https://example.com:443", :training) ==
-               {:https, "example.com", 443}
+               {{:https, "example.com", 443}, :training}
     end
 
     test "creates tuple for default pool" do
       assert PoolKey.build("https://example.com", :default) ==
-               {:https, "example.com", 443}
+               {{:https, "example.com", 443}, :default}
     end
 
     test "creates tuple for sampling pool" do
       assert PoolKey.build("https://EXAMPLE.COM", :sampling) ==
-               {:https, "example.com", 443}
+               {{:https, "example.com", 443}, :sampling}
     end
 
     test "normalizes URL in pool key" do
       assert PoolKey.build("https://example.com:443", :futures) ==
-               {:https, "example.com", 443}
+               {{:https, "example.com", 443}, :futures}
+    end
+  end
+
+  describe "pool_name/3" do
+    test "derives deterministic pool names" do
+      base = :tinkex_pool
+      base_url = "https://Example.com:443/path"
+      expected = :"#{base}.session.#{:erlang.phash2(PoolKey.normalize_base_url(base_url))}"
+
+      assert PoolKey.pool_name(base, base_url, :session) == expected
+    end
+
+    test "resolve_pool_name falls back to base when typed pool is missing" do
+      base = :tinkex_pool
+      base_url = "https://example.com"
+
+      resolved = PoolKey.resolve_pool_name(base, base_url, :training)
+      assert resolved == base
+
+      typed = PoolKey.pool_name(base, base_url, :training)
+      {:ok, pid} = Agent.start_link(fn -> :ok end, name: typed)
+
+      assert PoolKey.resolve_pool_name(base, base_url, :training) == typed
+      Agent.stop(pid)
     end
   end
 end

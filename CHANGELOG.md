@@ -2,6 +2,21 @@
 
 All notable changes to this project will be documented in this file.
 
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+## [0.1.17] - 2025-12-03
+
+### Added
+- Log-level parity: `TINKER_LOG` / `config :tinkex, :log_level` now set Logger at application start (Python parity) while keeping HTTP header dumps redacted unless explicitly enabled.
+- Telemetry capture: Service/Training/Sampling client entrypoints wrap exceptions through `Tinkex.Telemetry.Capture/Reporter` and emit session-end events on fatal paths.
+- Config knobs: Added `default_headers`, `default_query`, custom `http_client`/`http_pool` overrides, and env keys (`TINKEX_DEFAULT_HEADERS`, `TINKEX_DEFAULT_QUERY`, `TINKEX_HTTP_CLIENT`, `TINKEX_HTTP_POOL`) with opts > app config > env precedence and secret redaction for headers.
+
+### Changed
+- Session heartbeats pin a 10_000ms timeout with `max_retries: 0` for Python parity while preserving debounce/warning semantics.
+- Finch pool isolation now routes per pool type (session/training/sampling/futures/telemetry) with Python-aligned sizes and deterministic pool names derived from `http_pool` + `base_url`.
+
 ## [0.1.16] - 2025-12-03
 
 ### Added

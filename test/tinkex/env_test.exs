@@ -13,7 +13,11 @@ defmodule Tinkex.EnvTest do
       "TINKER_LOG" => "Warning",
       "CLOUDFLARE_ACCESS_CLIENT_ID" => "cf-id",
       "CLOUDFLARE_ACCESS_CLIENT_SECRET" => "cf-secret",
-      "TINKEX_DUMP_HEADERS" => "1"
+      "TINKEX_DUMP_HEADERS" => "1",
+      "TINKEX_DEFAULT_HEADERS" => ~s({"Authorization":"Bearer token","x-extra":"1"}),
+      "TINKEX_DEFAULT_QUERY" => ~s({"mode":"fast","flag":true}),
+      "TINKEX_HTTP_CLIENT" => "Tinkex.API",
+      "TINKEX_HTTP_POOL" => "custom_pool"
     }
 
     snapshot = Env.snapshot(env)
@@ -27,6 +31,10 @@ defmodule Tinkex.EnvTest do
     assert snapshot.cf_access_client_id == "cf-id"
     assert snapshot.cf_access_client_secret == "cf-secret"
     assert snapshot.dump_headers?
+    assert snapshot.default_headers == %{"Authorization" => "Bearer token", "x-extra" => "1"}
+    assert snapshot.default_query == %{"flag" => "true", "mode" => "fast"}
+    assert snapshot.http_client == Tinkex.API
+    assert snapshot.http_pool == :custom_pool
   end
 
   test "defaults and blank values" do
@@ -66,12 +74,14 @@ defmodule Tinkex.EnvTest do
     snapshot = %{
       api_key: "abc",
       cf_access_client_secret: "secret",
+      default_headers: %{"Authorization" => "Bearer token", "x-extra" => "1"},
       tags: ["a"]
     }
 
     redacted = Env.redact(snapshot)
     assert redacted.api_key == "[REDACTED]"
     assert redacted.cf_access_client_secret == "[REDACTED]"
+    assert redacted.default_headers == %{"Authorization" => "[REDACTED]", "x-extra" => "1"}
     assert redacted.tags == ["a"]
   end
 

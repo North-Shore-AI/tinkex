@@ -21,11 +21,9 @@ defmodule Tinkex.API.Session do
   @spec create(map(), keyword()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def create(request, opts) do
-    Tinkex.API.post(
-      "/api/v1/create_session",
-      request,
-      Keyword.put(opts, :pool_type, :session)
-    )
+    client = Tinkex.API.client_module(opts)
+
+    client.post("/api/v1/create_session", request, Keyword.put(opts, :pool_type, :session))
   end
 
   @doc """
@@ -56,10 +54,14 @@ defmodule Tinkex.API.Session do
   @spec heartbeat(map(), keyword()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def heartbeat(request, opts) do
-    Tinkex.API.post(
-      "/api/v1/session_heartbeat",
-      request,
-      Keyword.put(opts, :pool_type, :session)
-    )
+    client = Tinkex.API.client_module(opts)
+
+    opts =
+      opts
+      |> Keyword.put(:pool_type, :session)
+      |> Keyword.put(:timeout, 10_000)
+      |> Keyword.put(:max_retries, 0)
+
+    client.post("/api/v1/session_heartbeat", request, opts)
   end
 end

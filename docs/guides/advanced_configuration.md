@@ -40,12 +40,22 @@ The `Tinkex.Config` struct contains all configuration needed for API requests:
 
 ```elixir
 @type t :: %Tinkex.Config{
-  base_url: String.t(),           # API base URL (required)
-  api_key: String.t(),            # API authentication key (required)
-  http_pool: atom(),              # Finch pool name (default: Tinkex.HTTP.Pool)
-  timeout: pos_integer(),         # Request timeout in milliseconds (default: 120_000)
-  max_retries: non_neg_integer(), # Additional retry attempts (default: 2)
-  user_metadata: map() | nil      # Custom metadata for sessions (optional)
+  base_url: String.t(),            # API base URL (required)
+  api_key: String.t(),             # API authentication key (required)
+  http_pool: atom(),               # Finch pool base name/prefix (default: Tinkex.HTTP.Pool)
+  http_client: module(),           # HTTP client module (default: Tinkex.API)
+  timeout: pos_integer(),          # Request timeout in milliseconds (default: 120_000)
+  max_retries: non_neg_integer(),  # Additional retry attempts (default: 2)
+  telemetry_enabled?: boolean(),   # Toggle client telemetry (default: true)
+  log_level: :debug | :info | :warn | :error | nil, # Logger level (applied at startup)
+  dump_headers?: boolean(),        # Dump HTTP headers (redacted)
+  default_headers: map(),          # Headers merged into every request
+  default_query: map(),            # Query params merged into every request
+  cf_access_client_id: String.t() | nil,
+  cf_access_client_secret: String.t() | nil,
+  tags: [String.t()],              # Session tags (default: ["tinkex-elixir"])
+  feature_gates: [String.t()],     # Feature gates (default: [])
+  user_metadata: map() | nil       # Custom metadata for sessions (optional)
 }
 ```
 
@@ -63,9 +73,14 @@ The `Tinkex.Config` struct contains all configuration needed for API requests:
 - Automatically masked in `inspect/1` output for security
 
 **http_pool** (default: `Tinkex.HTTP.Pool`)
-- Name of the Finch pool process
+- Base name/prefix for Finch pools
 - Must be an atom
-- See [HTTP Pool Configuration](#http-pool-configuration) for custom pools
+- Per-type pools (session/training/sampling/futures/telemetry) derive from this name + `base_url`
+- See [HTTP Pool Configuration](#http-pool-configuration) for custom pools and sizing
+
+**http_client** (default: `Tinkex.API`)
+- Module implementing the `Tinkex.HTTPClient` behaviour
+- Override for custom HTTP adapters or test stubs
 
 **timeout** (default: `120_000` ms = 2 minutes)
 - Maximum time for a single HTTP request
@@ -83,6 +98,16 @@ The `Tinkex.Config` struct contains all configuration needed for API requests:
 - Useful for tracking user IDs, experiment names, etc.
 - Sent to server during session creation
 - Example: `%{user_id: "user-123", experiment: "exp-456"}`
+
+**default_headers / default_query**
+- Maps merged into every request (opts > app config > env > `%{}`)
+- Header values are stringified and secret headers (`x-api-key`, `cf-access-client-secret`, auth headers) are redacted in dumps/inspect
+- Query values are stringified; `nil` entries are dropped
+
+**telemetry_enabled? / log_level / dump_headers?**
+- `telemetry_enabled?` toggles client-side telemetry (default: true)
+- `log_level` sets Logger at application start when provided (`:debug | :info | :warn | :error`)
+- `dump_headers?` enables HTTP request/response dumps with sensitive headers redacted
 
 ## Environment Variables
 
@@ -205,100 +230,44 @@ config :tinkex,
 
 ## HTTP Pool Configuration
 
-Tinkex uses [Finch](https://hexdocs.pm/finch/) for HTTP connection pooling. The application automatically creates a default pool at startup.
+Tinkex uses [Finch](https://hexdocs.pm/finch/) for HTTP connection pooling and now isolates connections per pool type (session, training, sampling, futures, telemetry) to match Python behavior.
 
-### Default Pool
+### Automatic pools
 
-Created automatically by `Tinkex.Application`:
+`Tinkex.Application` starts per-type Finch pools when `:enable_http_pools` is `true` (default). Pool names are derived from `http_pool` + `base_url` via `Tinkex.PoolKey.pool_name/3`. Defaults mirror Python:
 
-```elixir
-{Finch,
- name: Tinkex.HTTP.Pool,
- pools: %{
-   default: [protocols: [:http2, :http1]]
- }}
-```
+- `:session`: size 5, count 1
+- `:training`: size 5, count 2
+- `:sampling`: size/count from `pool_size`/`pool_count` (defaults: 50/20)
+- `:futures`: half of sampling size/count (rounded up)
+- `:telemetry`: size 5, count 1
 
-This pool uses Finch's default settings:
-- Connection reuse via HTTP/2 (fallback to HTTP/1.1)
-- Automatic connection management
-- Default pool size (determined by Finch)
-
-### Custom Pool Configuration
-
-For production deployments, you may want tuned connection pools:
+Example of the generated specs:
 
 ```elixir
-# In your application supervisor
-children = [
-  {Finch,
-   name: Tinkex.HTTP.Pool,
-   pools: %{
-     # Default pool with custom sizing
-     default: [
-       size: 50,                          # Connection pool size
-       count: 4,                          # Number of pools per host
-       protocols: [:http2, :http1],
-       pool_max_idle_time: :timer.seconds(30)
-     ],
+pool_map =
+  Tinkex.Application.build_pool_map(
+    "https://tinker.thinkingmachines.dev/services/tinker-prod",
+    50,
+    20,
+    %{},
+    :my_base_pool
+  )
 
-     # Specific destination tuning
-     {:https, "tinker.thinkingmachines.dev", 443} => [
-       size: 100,                         # Larger pool for main API
-       count: 8,
-       protocols: [:http2],               # HTTP/2 only
-       conn_opts: [
-         transport_opts: [
-           timeout: 30_000
-         ]
-       ]
-     ]
-   }}
-]
+# Start pools manually (Application does this for you when enabled)
+children =
+  Enum.map(pool_map, fn {_type, %{name: name, pools: pools}} ->
+    {Finch, name: name, pools: pools}
+  end)
 ```
 
-### Multi-Tenant Pools
+Requests resolve pool names via `Tinkex.PoolKey.resolve_pool_name/3`, falling back to the base `http_pool` if a typed pool is not running (useful for tests or custom supervisors).
 
-For multi-tenant applications with different base URLs:
+### Customizing pools
 
-```elixir
-# config/config.exs
-config :tinkex,
-  enable_http_pools: false  # Disable automatic pool
-
-# In your application supervisor
-def start(_type, _args) do
-  children = [
-    # Tenant 1 pool
-    {Finch, name: :tenant_1_pool, pools: %{
-      default: [size: 25, protocols: [:http2, :http1]]
-    }},
-
-    # Tenant 2 pool
-    {Finch, name: :tenant_2_pool, pools: %{
-      default: [size: 25, protocols: [:http2, :http1]]
-    }},
-
-    # Rest of your supervision tree
-    # ...
-  ]
-
-  Supervisor.start_link(children, strategy: :one_for_one)
-end
-
-# Usage
-tenant_1_config = Tinkex.Config.new(
-  api_key: "tenant-1-key",
-  base_url: "https://tenant1.api.example.com",
-  http_pool: :tenant_1_pool
-)
-
-tenant_2_config = Tinkex.Config.new(
-  api_key: "tenant-2-key",
-  base_url: "https://tenant2.api.example.com",
-  http_pool: :tenant_2_pool
-)
-```
+- Override per-type sizing with `config :tinkex, pool_overrides: %{training: %{size: 10, count: 4}}`.
+- Change the base name/prefix with `config :tinkex, :http_pool, :my_pool_prefix`.
+- Set `config :tinkex, :enable_http_pools, false` to manage Finch pools yourself (still use `PoolKey.pool_name/3` for consistent naming).
 
 ### Pool Sizing Guidelines
 
@@ -400,6 +369,8 @@ config :tinkex, heartbeat_interval_ms: 5_000   # 5 seconds
 # Reduce API calls
 config :tinkex, heartbeat_interval_ms: 30_000  # 30 seconds
 ```
+
+Heartbeat requests use a fixed 10_000ms timeout with `max_retries: 0` (Python parity); warnings are debounced to avoid log spam when connectivity is impaired.
 
 ### Session Lifecycle
 

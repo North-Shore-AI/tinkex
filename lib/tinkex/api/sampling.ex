@@ -29,6 +29,7 @@ defmodule Tinkex.API.Sampling do
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def sample_async(request, opts) do
     max_retries = Keyword.get(opts, :max_retries, 0)
+    client = Tinkex.API.client_module(opts)
 
     opts =
       opts
@@ -38,6 +39,6 @@ defmodule Tinkex.API.Sampling do
       # Drop nil values - server rejects null for optional fields like prompt_logprobs
       |> Keyword.put_new(:transform, drop_nil?: true)
 
-    Tinkex.API.post("/api/v1/asample", request, opts)
+    client.post("/api/v1/asample", request, opts)
   end
 end

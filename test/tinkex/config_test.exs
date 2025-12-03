@@ -3,6 +3,14 @@ defmodule Tinkex.ConfigTest do
 
   alias Tinkex.Config
 
+  defmodule StubHTTPClient do
+    @behaviour Tinkex.HTTPClient
+
+    def post(_path, _body, _opts), do: {:ok, %{}}
+    def get(_path, _opts), do: {:ok, %{}}
+    def delete(_path, _opts), do: {:ok, %{}}
+  end
+
   describe "new/1" do
     test "creates config with defaults" do
       config = Config.new(api_key: "test-key")
@@ -12,10 +20,13 @@ defmodule Tinkex.ConfigTest do
       assert config.timeout == 120_000
       assert config.max_retries == 2
       assert config.http_pool == Tinkex.HTTP.Pool
+      assert config.http_client == Tinkex.API
       assert config.tags == ["tinkex-elixir"]
       assert config.feature_gates == []
       refute config.telemetry_enabled?
       refute config.dump_headers?
+      assert config.default_headers == %{}
+      assert config.default_query == %{}
     end
 
     test "overrides defaults with options" do
@@ -61,7 +72,7 @@ defmodule Tinkex.ConfigTest do
     test "applies opts > app config > env > defaults for shared fields" do
       env_snapshot =
         snapshot_env(
-          ~w[TINKER_API_KEY TINKER_BASE_URL TINKER_TELEMETRY TINKER_LOG TINKEX_DUMP_HEADERS]
+          ~w[TINKER_API_KEY TINKER_BASE_URL TINKER_TELEMETRY TINKER_LOG TINKEX_DUMP_HEADERS TINKEX_DEFAULT_HEADERS TINKEX_DEFAULT_QUERY TINKEX_HTTP_CLIENT TINKEX_HTTP_POOL]
         )
 
       app_snapshot =
@@ -70,7 +81,11 @@ defmodule Tinkex.ConfigTest do
           :base_url,
           :telemetry_enabled?,
           :log_level,
-          :dump_headers?
+          :dump_headers?,
+          :default_headers,
+          :default_query,
+          :http_client,
+          :http_pool
         ])
 
       on_exit(fn ->
@@ -83,12 +98,20 @@ defmodule Tinkex.ConfigTest do
       System.put_env("TINKER_TELEMETRY", "1")
       System.put_env("TINKER_LOG", "debug")
       System.put_env("TINKEX_DUMP_HEADERS", "1")
+      System.put_env("TINKEX_DEFAULT_HEADERS", ~s({"x-env":"1"}))
+      System.put_env("TINKEX_DEFAULT_QUERY", ~s({"env":"1"}))
+      System.put_env("TINKEX_HTTP_CLIENT", "Tinkex.API")
+      System.put_env("TINKEX_HTTP_POOL", "env_pool")
 
       Application.put_env(:tinkex, :api_key, "app-key")
       Application.put_env(:tinkex, :base_url, "https://app.example.com/base")
       Application.put_env(:tinkex, :telemetry_enabled?, false)
       Application.put_env(:tinkex, :log_level, :warn)
       Application.put_env(:tinkex, :dump_headers?, false)
+      Application.put_env(:tinkex, :default_headers, %{"x-app" => "1"})
+      Application.put_env(:tinkex, :default_query, %{"app" => "1"})
+      Application.put_env(:tinkex, :http_client, StubHTTPClient)
+      Application.put_env(:tinkex, :http_pool, :app_pool)
 
       config = Config.new()
       assert config.api_key == "app-key"
@@ -96,6 +119,10 @@ defmodule Tinkex.ConfigTest do
       refute config.telemetry_enabled?
       assert config.log_level == :warn
       refute config.dump_headers?
+      assert config.default_headers == %{"x-app" => "1"}
+      assert config.default_query == %{"app" => "1"}
+      assert config.http_client == StubHTTPClient
+      assert config.http_pool == :app_pool
 
       config =
         Config.new(
@@ -103,7 +130,11 @@ defmodule Tinkex.ConfigTest do
           base_url: "https://opt.example.com/base",
           telemetry_enabled?: true,
           log_level: :error,
-          dump_headers?: true
+          dump_headers?: true,
+          default_headers: %{"x-opt" => "1"},
+          default_query: %{"opt" => "1"},
+          http_client: Tinkex.API,
+          http_pool: :opt_pool
         )
 
       assert config.api_key == "opt-key"
@@ -111,12 +142,20 @@ defmodule Tinkex.ConfigTest do
       assert config.telemetry_enabled?
       assert config.log_level == :error
       assert config.dump_headers?
+      assert config.default_headers == %{"x-opt" => "1"}
+      assert config.default_query == %{"opt" => "1"}
+      assert config.http_client == Tinkex.API
+      assert config.http_pool == :opt_pool
 
       Application.delete_env(:tinkex, :api_key)
       Application.delete_env(:tinkex, :base_url)
       Application.delete_env(:tinkex, :telemetry_enabled?)
       Application.delete_env(:tinkex, :log_level)
       Application.delete_env(:tinkex, :dump_headers?)
+      Application.delete_env(:tinkex, :default_headers)
+      Application.delete_env(:tinkex, :default_query)
+      Application.delete_env(:tinkex, :http_client)
+      Application.delete_env(:tinkex, :http_pool)
 
       config = Config.new()
       assert config.api_key == "env-key"
@@ -124,6 +163,10 @@ defmodule Tinkex.ConfigTest do
       assert config.telemetry_enabled?
       assert config.log_level == :debug
       assert config.dump_headers?
+      assert config.default_headers == %{"x-env" => "1"}
+      assert config.default_query == %{"env" => "1"}
+      assert config.http_client == Tinkex.API
+      assert config.http_pool == :env_pool
     end
 
     test "pulls cloudflare credentials from env" do
@@ -158,6 +201,24 @@ defmodule Tinkex.ConfigTest do
     test "raises with invalid max_retries" do
       assert_raise ArgumentError, ~r/max_retries must be a non-negative integer/, fn ->
         Config.new(api_key: "key", max_retries: -1)
+      end
+    end
+
+    test "normalizes default headers and query" do
+      config =
+        Config.new(
+          api_key: "key",
+          default_headers: [foo: 1, bar: :baz],
+          default_query: %{limit: 10, mode: :fast}
+        )
+
+      assert config.default_headers == %{"bar" => "baz", "foo" => "1"}
+      assert config.default_query == %{"limit" => "10", "mode" => "fast"}
+    end
+
+    test "validates http_client modules" do
+      assert_raise ArgumentError, ~r/http_client must implement/, fn ->
+        Config.new(api_key: "key", http_client: String)
       end
     end
   end

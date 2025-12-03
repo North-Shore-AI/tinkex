@@ -45,6 +45,8 @@ defmodule Tinkex.SamplingClient do
   }
 
   alias Tinkex.Telemetry.Reporter
+  alias Tinkex.Telemetry.Capture, as: TelemetryCapture
+  require TelemetryCapture
 
   alias Tinkex.Types.{
     CreateSamplingSessionRequest,
@@ -95,7 +97,12 @@ defmodule Tinkex.SamplingClient do
   """
   @spec sample(t(), map(), map(), keyword()) :: {:ok, Task.t()} | {:error, Error.t()}
   def sample(client, prompt, sampling_params, opts \\ []) do
-    {:ok, Task.async(fn -> do_sample(client, prompt, sampling_params, opts) end)}
+    reporter = telemetry_reporter_for(client)
+
+    {:ok,
+     TelemetryCapture.async_capture reporter: reporter, fatal?: true do
+       do_sample(client, prompt, sampling_params, opts)
+     end}
   end
 
   @doc """
@@ -106,9 +113,10 @@ defmodule Tinkex.SamplingClient do
   @spec compute_logprobs(t(), map(), keyword()) :: {:ok, Task.t()} | {:error, Error.t()}
   def compute_logprobs(client, prompt, opts \\ []) do
     params = %SamplingParams{max_tokens: 1}
+    reporter = telemetry_reporter_for(client)
 
     {:ok,
-     Task.async(fn ->
+     TelemetryCapture.async_capture reporter: reporter, fatal?: true do
        case do_sample(client, prompt, params,
               num_samples: 1,
               prompt_logprobs: true,
@@ -120,7 +128,7 @@ defmodule Tinkex.SamplingClient do
          {:error, %Error{} = error} ->
            {:error, error}
        end
-     end)}
+     end}
   end
 
   @impl true
@@ -215,6 +223,14 @@ defmodule Tinkex.SamplingClient do
 
   def get_telemetry(client) when is_pid(client) do
     GenServer.call(client, :get_telemetry)
+  end
+
+  defp telemetry_reporter_for(client) do
+    try do
+      get_telemetry(client)
+    catch
+      _, _ -> nil
+    end
   end
 
   @impl true

@@ -11,7 +11,9 @@ defmodule Tinkex.API.Models do
   @spec get_info(map(), keyword()) ::
           {:ok, GetInfoResponse.t()} | {:error, Tinkex.Error.t()}
   def get_info(request, opts) do
-    case Tinkex.API.post(
+    client = Tinkex.API.client_module(opts)
+
+    case client.post(
            "/api/v1/get_info",
            request,
            Keyword.put(opts, :pool_type, :training)
@@ -27,7 +29,9 @@ defmodule Tinkex.API.Models do
   @spec unload_model(map(), keyword()) ::
           {:ok, UnloadModelResponse.t() | map()} | {:error, Tinkex.Error.t()}
   def unload_model(request, opts) do
-    case Tinkex.API.post(
+    client = Tinkex.API.client_module(opts)
+
+    case client.post(
            "/api/v1/unload_model",
            request,
            Keyword.put(opts, :pool_type, :training)

@@ -31,6 +31,8 @@ defmodule Tinkex.Application do
   use Application
 
   alias Tinkex.Env
+  alias Tinkex.Logging
+  alias Tinkex.PoolKey
 
   # Python SDK parity: max_connections=1000, max_keepalive_connections=20
   # Finch: size=50, count=20 gives 50*20=1000 total connections per destination
@@ -42,6 +44,7 @@ defmodule Tinkex.Application do
     ensure_ets_tables()
 
     env = Env.snapshot()
+    apply_log_level(env)
 
     enable_http_pools? = Application.get_env(:tinkex, :enable_http_pools, true)
     heartbeat_interval_ms = Application.get_env(:tinkex, :heartbeat_interval_ms, 10_000)
@@ -56,14 +59,27 @@ defmodule Tinkex.Application do
         "https://tinker.thinkingmachines.dev/services/tinker-prod"
       )
 
+    base_pool_name =
+      Application.get_env(
+        :tinkex,
+        :http_pool,
+        env.http_pool || Tinkex.HTTP.Pool
+      )
+
     # Pool configuration: env > app config > defaults (Python parity defaults)
     pool_size = env.pool_size || Application.get_env(:tinkex, :pool_size, @default_pool_size)
     pool_count = env.pool_count || Application.get_env(:tinkex, :pool_count, @default_pool_count)
 
-    destination = Tinkex.PoolKey.destination(base_url)
+    pool_overrides =
+      case Application.get_env(:tinkex, :pool_overrides) do
+        value when is_map(value) -> value
+        _ -> %{}
+      end
+
+    pool_map = build_pool_map(base_url, pool_size, pool_count, pool_overrides, base_pool_name)
 
     children =
-      maybe_add_http_pool(enable_http_pools?, destination, pool_size, pool_count) ++
+      maybe_add_http_pool(enable_http_pools?, pool_map) ++
         base_children(heartbeat_interval_ms, heartbeat_warning_after_ms)
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Tinkex.Supervisor)
@@ -122,31 +138,59 @@ defmodule Tinkex.Application do
     ]
   end
 
-  defp maybe_add_http_pool(false, _destination, _pool_size, _pool_count), do: []
+  defp maybe_add_http_pool(false, _pool_map), do: []
 
-  defp maybe_add_http_pool(true, _destination, pool_size, pool_count) do
-    # Python SDK parity: max_connections=1000, max_keepalive_connections=20
-    # Finch pool config: size=connections per pool, count=number of pools
-    # Total connections per destination = size * count
-    pool_config = build_pool_config(pool_size, pool_count)
-
-    [
-      {Finch,
-       name: Tinkex.HTTP.Pool,
-       pools: %{
-         default: pool_config
-       }}
-    ]
+  defp maybe_add_http_pool(true, pool_map) do
+    Enum.map(pool_map, fn {_type, %{name: name, pools: pools}} ->
+      {Finch, name: name, pools: pools}
+    end)
   end
 
-  defp build_pool_config(pool_size, pool_count) do
+  @doc false
+  def build_pool_map(
+        base_url,
+        pool_size,
+        pool_count,
+        pool_overrides,
+        base_pool_name \\ Tinkex.HTTP.Pool
+      ) do
+    conn_opts = build_conn_opts()
+    sampling_opts = pool_opts(pool_size, pool_count, conn_opts)
+    destination = PoolKey.destination(base_url)
+
+    pools =
+      %{
+        session: override_pool_opts(pool_opts(5, 1, conn_opts), pool_overrides[:session]),
+        training: override_pool_opts(pool_opts(5, 2, conn_opts), pool_overrides[:training]),
+        sampling: override_pool_opts(sampling_opts, pool_overrides[:sampling]),
+        futures:
+          override_pool_opts(
+            pool_opts(max(div(pool_size, 2), 1), max(div(pool_count, 2), 1), conn_opts),
+            pool_overrides[:futures]
+          ),
+        telemetry: override_pool_opts(pool_opts(5, 1, conn_opts), pool_overrides[:telemetry]),
+        default: sampling_opts
+      }
+
+    Enum.into(pools, %{}, fn
+      {:default, opts} ->
+        {:default, %{name: base_pool_name, pools: %{destination => opts}}}
+
+      {type, opts} ->
+        {type,
+         %{
+           name: PoolKey.pool_name(base_pool_name, base_url, type),
+           pools: %{destination => opts}
+         }}
+    end)
+  end
+
+  defp pool_opts(size, count, conn_opts) do
     base_opts = [
       protocols: [:http2, :http1],
-      size: pool_size,
-      count: pool_count
+      size: size,
+      count: count
     ]
-
-    conn_opts = build_conn_opts()
 
     if conn_opts == [] do
       base_opts
@@ -154,6 +198,17 @@ defmodule Tinkex.Application do
       Keyword.put(base_opts, :conn_opts, conn_opts)
     end
   end
+
+  defp override_pool_opts(opts, nil), do: opts
+
+  defp override_pool_opts(opts, overrides) when is_map(overrides),
+    do: override_pool_opts(opts, Map.to_list(overrides))
+
+  defp override_pool_opts(opts, overrides) when is_list(overrides) do
+    Keyword.merge(opts, overrides)
+  end
+
+  defp override_pool_opts(opts, _), do: opts
 
   defp build_conn_opts do
     proxy = Application.get_env(:tinkex, :proxy)
@@ -176,4 +231,9 @@ defmodule Tinkex.Application do
   """
   @spec default_pool_count() :: pos_integer()
   def default_pool_count, do: @default_pool_count
+
+  defp apply_log_level(env) do
+    startup_level = Application.get_env(:tinkex, :log_level) || env.log_level
+    Logging.maybe_set_level(startup_level)
+  end
 end

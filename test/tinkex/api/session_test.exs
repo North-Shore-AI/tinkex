@@ -3,6 +3,19 @@ defmodule Tinkex.API.SessionTest do
 
   alias Tinkex.API.Session
   alias Tinkex.Types.CreateSessionResponse
+  alias Tinkex.Config
+
+  defmodule StubHTTPClient do
+    @behaviour Tinkex.HTTPClient
+
+    def post(path, body, opts) do
+      send(self(), {:post_called, path, body, opts})
+      {:ok, %{}}
+    end
+
+    def get(_path, _opts), do: {:error, :unsupported}
+    def delete(_path, _opts), do: {:error, :unsupported}
+  end
 
   setup :setup_http_client
 
@@ -49,6 +62,17 @@ defmodule Tinkex.API.SessionTest do
 
       assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
                       %{pool_type: :session, path: "/api/v1/session_heartbeat"}}
+    end
+
+    test "enforces heartbeat timeout and retries", %{config: config} do
+      config = %Config{config | http_client: StubHTTPClient}
+
+      assert {:ok, _} = Session.heartbeat(%{session_id: "session-123"}, config: config)
+
+      assert_receive {:post_called, "/api/v1/session_heartbeat", _, opts}
+      assert Keyword.get(opts, :timeout) == 10_000
+      assert Keyword.get(opts, :max_retries) == 0
+      assert Keyword.get(opts, :pool_type) == :session
     end
   end
 end

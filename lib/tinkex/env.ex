@@ -35,7 +35,11 @@ defmodule Tinkex.Env do
       pool_size: pool_size(env),
       pool_count: pool_count(env),
       proxy: proxy(env),
-      proxy_headers: proxy_headers(env)
+      proxy_headers: proxy_headers(env),
+      default_headers: default_headers(env),
+      default_query: default_query(env),
+      http_client: http_client(env),
+      http_pool: http_pool(env)
     }
   end
 
@@ -149,6 +153,58 @@ defmodule Tinkex.Env do
     |> parse_proxy_headers()
   end
 
+  @doc """
+  Get default headers map from environment.
+
+  Set `TINKEX_DEFAULT_HEADERS` to a JSON object of header name/value pairs.
+  """
+  @spec default_headers(env_source()) :: map()
+  def default_headers(env \\ :system) do
+    env
+    |> fetch("TINKEX_DEFAULT_HEADERS")
+    |> normalize()
+    |> parse_json_map()
+  end
+
+  @doc """
+  Get default query params map from environment.
+
+  Set `TINKEX_DEFAULT_QUERY` to a JSON object of query name/value pairs.
+  """
+  @spec default_query(env_source()) :: map()
+  def default_query(env \\ :system) do
+    env
+    |> fetch("TINKEX_DEFAULT_QUERY")
+    |> normalize()
+    |> parse_json_map()
+  end
+
+  @doc """
+  Get custom HTTP client module from environment.
+
+  Set `TINKEX_HTTP_CLIENT` to a module name (e.g., `Tinkex.API`).
+  """
+  @spec http_client(env_source()) :: module() | nil
+  def http_client(env \\ :system) do
+    env
+    |> fetch("TINKEX_HTTP_CLIENT")
+    |> normalize()
+    |> parse_module()
+  end
+
+  @doc """
+  Get HTTP pool name from environment.
+
+  Set `TINKEX_HTTP_POOL` to an atom name (e.g., `Tinkex.HTTP.Pool`).
+  """
+  @spec http_pool(env_source()) :: atom() | nil
+  def http_pool(env \\ :system) do
+    env
+    |> fetch("TINKEX_HTTP_POOL")
+    |> normalize()
+    |> parse_atom()
+  end
+
   defp parse_proxy_headers(nil), do: []
 
   defp parse_proxy_headers(value) when is_binary(value) do
@@ -182,6 +238,64 @@ defmodule Tinkex.Env do
   defp parse_parity_mode("PYTHON"), do: :python
   defp parse_parity_mode(_), do: nil
 
+  defp parse_json_map(nil), do: %{}
+
+  defp parse_json_map(value) when is_binary(value) do
+    case Jason.decode(value) do
+      {:ok, map} when is_map(map) ->
+        map
+        |> Enum.reduce(%{}, fn
+          {k, v}, acc when is_binary(k) ->
+            Map.put(acc, k, normalize_value(v))
+
+          {k, v}, acc ->
+            Map.put(acc, to_string(k), normalize_value(v))
+        end)
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp normalize_value(nil), do: nil
+  defp normalize_value(value) when is_binary(value), do: value
+  defp normalize_value(value), do: to_string(value)
+
+  defp parse_module(nil), do: nil
+
+  defp parse_module(value) when is_binary(value) do
+    trimmed = String.trim(value)
+
+    candidate =
+      if String.starts_with?(trimmed, "Elixir.") do
+        trimmed
+      else
+        "Elixir." <> trimmed
+      end
+
+    try do
+      String.to_existing_atom(candidate)
+    rescue
+      ArgumentError -> nil
+    end
+  end
+
+  defp parse_atom(nil), do: nil
+
+  defp parse_atom(value) when is_binary(value) do
+    trimmed = String.trim(value)
+
+    if trimmed == "" do
+      nil
+    else
+      try do
+        String.to_atom(trimmed)
+      rescue
+        ArgumentError -> nil
+      end
+    end
+  end
+
   @doc """
   Redact secrets in a snapshot or map using simple replacement.
   """
@@ -190,6 +304,7 @@ defmodule Tinkex.Env do
     map
     |> maybe_update(:api_key, &mask_secret/1)
     |> maybe_update(:cf_access_client_secret, &mask_secret/1)
+    |> maybe_update(:default_headers, &redact_header_map/1)
   end
 
   @doc """
@@ -252,5 +367,26 @@ defmodule Tinkex.Env do
       {:ok, value} -> Map.put(map, key, fun.(value))
       :error -> map
     end
+  end
+
+  defp redact_header_map(headers) when is_map(headers) do
+    Enum.reduce(headers, %{}, fn {key, value}, acc ->
+      if secret_header?(key) do
+        Map.put(acc, key, mask_secret(value))
+      else
+        Map.put(acc, key, value)
+      end
+    end)
+  end
+
+  defp redact_header_map(other), do: other
+
+  defp secret_header?(key) do
+    key
+    |> to_string()
+    |> String.downcase()
+    |> then(
+      &(&1 in ["x-api-key", "cf-access-client-secret", "authorization", "proxy-authorization"])
+    )
   end
 end

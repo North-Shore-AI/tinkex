@@ -13,23 +13,24 @@ defmodule Tinkex.Config do
   alias Tinkex.Env
 
   @enforce_keys [:base_url, :api_key]
-  defstruct [
-    :base_url,
-    :api_key,
-    :http_pool,
-    :timeout,
-    :max_retries,
-    :user_metadata,
-    :tags,
-    :feature_gates,
-    :telemetry_enabled?,
-    :log_level,
-    :cf_access_client_id,
-    :cf_access_client_secret,
-    :dump_headers?,
-    :proxy,
-    proxy_headers: []
-  ]
+  defstruct base_url: nil,
+            api_key: nil,
+            http_pool: Tinkex.HTTP.Pool,
+            http_client: Tinkex.API,
+            timeout: nil,
+            max_retries: nil,
+            user_metadata: nil,
+            tags: nil,
+            feature_gates: nil,
+            telemetry_enabled?: nil,
+            log_level: nil,
+            cf_access_client_id: nil,
+            cf_access_client_secret: nil,
+            dump_headers?: nil,
+            proxy: nil,
+            proxy_headers: [],
+            default_headers: %{},
+            default_query: %{}
 
   @type proxy ::
           {:http | :https, host :: String.t(), port :: 1..65535, opts :: keyword()} | nil
@@ -38,6 +39,7 @@ defmodule Tinkex.Config do
           base_url: String.t(),
           api_key: String.t(),
           http_pool: atom(),
+          http_client: module(),
           timeout: pos_integer(),
           max_retries: non_neg_integer(),
           user_metadata: map() | nil,
@@ -49,7 +51,9 @@ defmodule Tinkex.Config do
           cf_access_client_secret: String.t() | nil,
           dump_headers?: boolean(),
           proxy: proxy(),
-          proxy_headers: [{String.t(), String.t()}]
+          proxy_headers: [{String.t(), String.t()}],
+          default_headers: map(),
+          default_query: map()
         }
 
   @default_base_url "https://tinker.thinkingmachines.dev/services/tinker-prod"
@@ -117,7 +121,16 @@ defmodule Tinkex.Config do
       )
 
     http_pool =
-      pick([opts[:http_pool], Application.get_env(:tinkex, :http_pool)], Tinkex.HTTP.Pool)
+      pick(
+        [opts[:http_pool], Application.get_env(:tinkex, :http_pool), env.http_pool],
+        Tinkex.HTTP.Pool
+      )
+
+    http_client =
+      pick(
+        [opts[:http_client], Application.get_env(:tinkex, :http_client), env.http_client],
+        Tinkex.API
+      )
 
     timeout = pick([opts[:timeout], Application.get_env(:tinkex, :timeout)], default_timeout)
 
@@ -172,6 +185,20 @@ defmodule Tinkex.Config do
         env.dump_headers?
       )
 
+    default_headers =
+      [
+        opts[:default_headers],
+        Application.get_env(:tinkex, :default_headers),
+        env.default_headers
+      ]
+      |> pick(%{})
+      |> normalize_string_map!(:default_headers)
+
+    default_query =
+      [opts[:default_query], Application.get_env(:tinkex, :default_query), env.default_query]
+      |> pick(%{})
+      |> normalize_string_map!(:default_query)
+
     {proxy, derived_proxy_headers} =
       pick([
         opts[:proxy],
@@ -195,6 +222,7 @@ defmodule Tinkex.Config do
       base_url: base_url,
       api_key: api_key,
       http_pool: http_pool,
+      http_client: http_client,
       timeout: timeout,
       max_retries: max_retries,
       user_metadata: opts[:user_metadata],
@@ -206,7 +234,9 @@ defmodule Tinkex.Config do
       cf_access_client_secret: cf_access_client_secret,
       dump_headers?: dump_headers?,
       proxy: proxy,
-      proxy_headers: proxy_headers
+      proxy_headers: proxy_headers,
+      default_headers: default_headers,
+      default_query: default_query
     }
 
     # Fail fast on malformed URLs so pool creation does not explode deeper in the stack.
@@ -231,6 +261,11 @@ defmodule Tinkex.Config do
 
     unless is_atom(config.http_pool) do
       raise ArgumentError, "http_pool must be an atom, got: #{inspect(config.http_pool)}"
+    end
+
+    unless valid_http_client?(config.http_client) do
+      raise ArgumentError,
+            "http_client must implement Tinkex.HTTPClient callbacks, got: #{inspect(config.http_client)}"
     end
 
     unless is_integer(config.timeout) and config.timeout > 0 do
@@ -267,6 +302,8 @@ defmodule Tinkex.Config do
 
     validate_proxy!(config.proxy)
     validate_proxy_headers!(config.proxy_headers)
+    validate_default_headers!(config.default_headers)
+    validate_default_query!(config.default_query)
 
     maybe_warn_about_base_url(config)
     config
@@ -310,11 +347,92 @@ defmodule Tinkex.Config do
 
   def mask_api_key(other), do: other
 
+  @doc false
+  @spec redact_headers(map()) :: map()
+  def redact_headers(headers) when is_map(headers) do
+    Enum.reduce(headers, %{}, fn {key, value}, acc ->
+      if secret_header?(key) do
+        Map.put(acc, key, Env.mask_secret(value))
+      else
+        Map.put(acc, key, value)
+      end
+    end)
+  end
+
+  defp secret_header?(key) do
+    downcased = key |> to_string() |> String.downcase()
+    downcased in ["x-api-key", "cf-access-client-secret", "authorization", "proxy-authorization"]
+  end
+
   defp pick(values, default \\ nil) do
     case Enum.find(values, &(!is_nil(&1))) do
       nil -> default
       value -> value
     end
+  end
+
+  defp normalize_string_map!(value, field) do
+    case normalize_string_map(value) do
+      {:ok, map} ->
+        map
+
+      {:error, reason} ->
+        raise ArgumentError, "#{field} #{reason}"
+    end
+  end
+
+  defp normalize_string_map(nil), do: {:ok, %{}}
+
+  defp normalize_string_map(map) when is_map(map) do
+    reduce_string_map(map)
+  rescue
+    e in ArgumentError -> {:error, e.message}
+  end
+
+  defp normalize_string_map(list) when is_list(list) do
+    if Enum.all?(list, &match?({_, _}, &1)) do
+      reduce_string_map(Map.new(list))
+    else
+      {:error, "must be a map or keyword list, got: #{inspect(list)}"}
+    end
+  rescue
+    e in ArgumentError -> {:error, e.message}
+  end
+
+  defp normalize_string_map(other),
+    do: {:error, "must be a map or keyword list, got: #{inspect(other)}"}
+
+  defp reduce_string_map(map) do
+    result =
+      Enum.reduce(map, %{}, fn
+        {_k, nil}, acc ->
+          acc
+
+        {k, v}, acc ->
+          key = normalize_string_key(k)
+          value = normalize_string_value(v)
+          Map.put(acc, key, value)
+      end)
+
+    {:ok, result}
+  end
+
+  defp normalize_string_key(key) do
+    key
+    |> to_string()
+    |> String.trim()
+    |> case do
+      "" -> raise ArgumentError, "must use non-empty string keys"
+      value -> value
+    end
+  end
+
+  defp normalize_string_value(value) when is_binary(value), do: value
+  defp normalize_string_value(value) when is_number(value), do: to_string(value)
+  defp normalize_string_value(value) when is_atom(value), do: Atom.to_string(value)
+
+  defp normalize_string_value(value) do
+    raise ArgumentError, "must use string-able values, got: #{inspect(value)}"
   end
 
   defp default_tags([]), do: ["tinkex-elixir"]
@@ -422,6 +540,27 @@ defmodule Tinkex.Config do
   defp valid_header?({name, value}) when is_binary(name) and is_binary(value), do: true
   defp valid_header?(_), do: false
 
+  defp validate_default_headers!(headers) when is_map(headers), do: :ok
+
+  defp validate_default_headers!(other) do
+    raise ArgumentError,
+          "default_headers must be a map or keyword list with string-able values, got: #{inspect(other)}"
+  end
+
+  defp validate_default_query!(headers) when is_map(headers), do: :ok
+
+  defp validate_default_query!(other) do
+    raise ArgumentError,
+          "default_query must be a map or keyword list with string-able values, got: #{inspect(other)}"
+  end
+
+  defp valid_http_client?(client) when is_atom(client) do
+    Code.ensure_loaded?(client) and function_exported?(client, :post, 3) and
+      function_exported?(client, :get, 2) and function_exported?(client, :delete, 2)
+  end
+
+  defp valid_http_client?(_), do: false
+
   @doc """
   Return BEAM-conservative default timeout (120s).
   """
@@ -457,6 +596,7 @@ defimpl Inspect, for: Tinkex.Config do
       |> Map.from_struct()
       |> Map.update(:api_key, nil, &Tinkex.Config.mask_api_key/1)
       |> Map.update(:cf_access_client_secret, nil, &Env.mask_secret/1)
+      |> Map.update(:default_headers, %{}, &Tinkex.Config.redact_headers/1)
 
     concat(["#Tinkex.Config<", to_doc(data, opts), ">"])
   end

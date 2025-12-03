@@ -18,8 +18,12 @@ Centralized environment handling is provided by `Tinkex.Env` and fed into `Tinke
 - `TINKER_TAGS`: Comma-separated tags. Default: `["tinkex-elixir"]`.
 - `TINKER_FEATURE_GATES`: Comma-separated feature gates. Default: `[]`.
 - `TINKER_TELEMETRY`: Telemetry toggle (truthy: `1/true/yes/on`, falsey: `0/false/no/off`). Default: `true`.
-- `TINKER_LOG`: Log level (`debug` | `info` | `warn` | `warning` | `error`). Default: unset.
+- `TINKER_LOG`: Log level (`debug` | `info` | `warn` | `warning` | `error`), applied at application start. Default: unset.
 - `TINKEX_DUMP_HEADERS`: HTTP dump toggle (same truthy/falsey parsing). Default: `false`; sensitive headers are redacted.
+- `TINKEX_DEFAULT_HEADERS`: JSON object of default headers merged into every request (e.g., `{"x-env":"1"}`) with secret headers redacted in dumps/inspect.
+- `TINKEX_DEFAULT_QUERY`: JSON object of default query params merged into every request (e.g., `{"trace":"1"}`).
+- `TINKEX_HTTP_CLIENT`: Custom HTTP client module name (e.g., `Tinkex.API` or a test stub).
+- `TINKEX_HTTP_POOL`: Base Finch pool name/prefix; per-type pools derive from this plus `base_url` (default: `Tinkex.HTTP.Pool`).
 - `TINKEX_PROXY`: Proxy URL for HTTP/HTTPS connections (e.g., `http://proxy.company.com:8080` or `http://user:pass@proxy.company.com:8080`). Default: none.
 - `TINKEX_PROXY_HEADERS`: JSON array of proxy headers (e.g., `[["proxy-authorization", "Basic abc123"]]`). Default: `[]`.
 - `CLOUDFLARE_ACCESS_CLIENT_ID` / `CLOUDFLARE_ACCESS_CLIENT_SECRET`: Forwarded on every request per ADR-002; secret is redacted in logs/inspect.
@@ -41,6 +45,10 @@ config :tinkex,
   telemetry_enabled?: true,
   log_level: :info,
   dump_headers?: false,
+  default_headers: %{"x-env" => "1"},
+  default_query: %{"trace" => "1"},
+  http_client: Tinkex.API,
+  http_pool: Tinkex.HTTP.Pool,
   cf_access_client_id: System.get_env("CLOUDFLARE_ACCESS_CLIENT_ID"),
   cf_access_client_secret: System.get_env("CLOUDFLARE_ACCESS_CLIENT_SECRET"),
   proxy: {:http, "proxy.company.com", 8080, []},
@@ -59,6 +67,8 @@ config = Tinkex.Config.new(
   dump_headers?: true,
   log_level: :debug,
   tags: ["staging", "canary"],
+  default_headers: %{"x-runtime" => "staging"},
+  default_query: %{"trace" => "1"},
   proxy: "http://user:pass@proxy.example.com:8080"
 )
 ```
@@ -144,5 +154,5 @@ Proxy configuration is passed to Finch's connection pool via the `:conn_opts` op
 ## Redaction and logging
 
 - `Inspect` on `Tinkex.Config` masks the API key and Cloudflare secret.
-- HTTP dump logging (`TINKEX_DUMP_HEADERS` or `dump_headers?: true`) redacts `x-api-key` and `cf-access-client-secret`.
+- HTTP dump logging (`TINKEX_DUMP_HEADERS` or `dump_headers?: true`) redacts `x-api-key`, `cf-access-client-secret`, and other auth headers; `default_headers` are redacted using the same rules.
 - Use `Tinkex.Env.mask_secret/1` to redact other secrets when logging snapshots.

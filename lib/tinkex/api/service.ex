@@ -13,7 +13,9 @@ defmodule Tinkex.API.Service do
   @spec get_server_capabilities(keyword()) ::
           {:ok, GetServerCapabilitiesResponse.t()} | {:error, Tinkex.Error.t()}
   def get_server_capabilities(opts) do
-    case Tinkex.API.get(
+    client = Tinkex.API.client_module(opts)
+
+    case client.get(
            "/api/v1/get_server_capabilities",
            Keyword.put(opts, :pool_type, :session)
          ) do
@@ -27,7 +29,9 @@ defmodule Tinkex.API.Service do
   """
   @spec health_check(keyword()) :: {:ok, HealthResponse.t()} | {:error, Tinkex.Error.t()}
   def health_check(opts) do
-    case Tinkex.API.get("/api/v1/healthz", Keyword.put(opts, :pool_type, :session)) do
+    client = Tinkex.API.client_module(opts)
+
+    case client.get("/api/v1/healthz", Keyword.put(opts, :pool_type, :session)) do
       {:ok, json} -> {:ok, HealthResponse.from_json(json)}
       {:error, _} = error -> error
     end
@@ -39,7 +43,9 @@ defmodule Tinkex.API.Service do
   @spec create_model(map(), keyword()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def create_model(request, opts) do
-    Tinkex.API.post(
+    client = Tinkex.API.client_module(opts)
+
+    client.post(
       "/api/v1/create_model",
       request,
       Keyword.put(opts, :pool_type, :session)
@@ -52,7 +58,9 @@ defmodule Tinkex.API.Service do
   @spec create_sampling_session(map(), keyword()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def create_sampling_session(request, opts) do
-    Tinkex.API.post(
+    client = Tinkex.API.client_module(opts)
+
+    client.post(
       "/api/v1/create_sampling_session",
       request,
       Keyword.put(opts, :pool_type, :session)

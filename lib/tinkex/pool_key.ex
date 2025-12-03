@@ -3,7 +3,7 @@ defmodule Tinkex.PoolKey do
   Centralized pool key generation and URL normalization.
 
   Ensures every pool key follows the `{normalized_base_url, pool_type}` convention
-  expected by Finch so connection pools can be tuned per host + operation type.
+  and derives deterministic Finch pool names per host + operation type.
   """
 
   @doc """
@@ -40,10 +40,43 @@ defmodule Tinkex.PoolKey do
   @doc """
   Build the Finch pool key tuple for the given base URL and pool type.
   """
-  @spec build(String.t(), atom()) :: {:http | :https, String.t(), pos_integer()}
+  @spec build(String.t(), atom()) ::
+          {destination :: {:http | :https, String.t(), pos_integer()}, atom()}
   def build(base_url, pool_type) when is_atom(pool_type) do
-    _ = pool_type
-    destination(base_url)
+    {destination(base_url), pool_type}
+  end
+
+  @doc """
+  Derive a Finch pool name for a base pool, base URL, and pool type.
+
+  Names are deterministic per base URL + pool type pair to ensure isolation across
+  session/training/sampling/futures/telemetry pools.
+  """
+  @spec pool_name(atom(), String.t(), atom()) :: atom()
+  def pool_name(base_pool, base_url, pool_type)
+      when is_atom(base_pool) and is_atom(pool_type) and is_binary(base_url) do
+    normalized = normalize_base_url(base_url)
+    :"#{base_pool}.#{pool_type}.#{:erlang.phash2(normalized)}"
+  end
+
+  @doc """
+  Resolve the running Finch pool for a given pool type, falling back to the base
+  pool name if the typed pool has not been started.
+  """
+  @spec resolve_pool_name(atom(), String.t(), atom()) :: atom()
+  def resolve_pool_name(base_pool, base_url, pool_type) do
+    typed_name = pool_name(base_pool, base_url, pool_type)
+
+    cond do
+      Process.whereis(typed_name) ->
+        typed_name
+
+      Process.whereis(base_pool) ->
+        base_pool
+
+      true ->
+        base_pool
+    end
   end
 
   defp parse_base_url(url) do

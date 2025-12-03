@@ -44,6 +44,7 @@ defmodule Tinkex.CheckpointDownload do
 
   require Logger
 
+  alias Tinkex.PoolKey
   alias Tinkex.RestClient
 
   @doc """
@@ -125,6 +126,7 @@ defmodule Tinkex.CheckpointDownload do
     # avoiding loading the entire file into memory. This is critical for
     # large checkpoints (100MB-GBs) that would cause OOM errors.
     request = Finch.build(:get, url, [])
+    pool_name = PoolKey.resolve_pool_name(http_pool, url, :futures)
 
     # Initialize accumulator for streaming
     initial_acc = %{
@@ -138,7 +140,7 @@ defmodule Tinkex.CheckpointDownload do
 
     # Stream the response using stream_while for reducer-style accumulation
     result =
-      Finch.stream_while(request, http_pool, initial_acc, fn
+      Finch.stream_while(request, pool_name, initial_acc, fn
         {:status, status}, acc ->
           {:cont, %{acc | status: status}}
 

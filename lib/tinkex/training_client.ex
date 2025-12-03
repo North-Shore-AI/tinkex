@@ -33,6 +33,8 @@ defmodule Tinkex.TrainingClient do
   alias Tinkex.Future.Combiner
   alias Tinkex.QueueStateLogger
   alias Tinkex.Telemetry.Reporter
+  alias Tinkex.Telemetry.Capture, as: TelemetryCapture
+  require TelemetryCapture
   alias Tinkex.Training.CustomLoss
 
   alias Tinkex.Types.{
@@ -472,424 +474,18 @@ defmodule Tinkex.TrainingClient do
 
   @impl true
   def handle_call(:get_telemetry, _from, state) do
-    {:reply, state.telemetry, state}
+    capture_telemetry(state, fn -> {:reply, state.telemetry, state} end)
   end
 
   @impl true
   def handle_call({:forward_backward, data, loss_fn, opts}, from, state) do
-    chunks = chunk_data(data)
-    {seq_ids, new_counter} = allocate_request_ids(length(chunks), state.request_id_counter)
-
-    send_result =
-      Enum.reduce_while(Enum.zip(seq_ids, chunks), {:ok, []}, fn {seq_id, chunk}, {:ok, acc} ->
-        case send_forward_backward_request(chunk, loss_fn, seq_id, opts, state) do
-          {:ok, future} -> {:cont, {:ok, [future | acc]}}
-          {:error, reason} -> {:halt, {:error, reason}}
-        end
-      end)
-
-    case send_result do
-      {:error, reason} ->
-        {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
-
-      {:ok, futures_rev} ->
-        futures = Enum.reverse(futures_rev)
-
-        start_background_task(
-          fn ->
-            reply =
-              try do
-                polling_tasks =
-                  Enum.map(futures, fn future ->
-                    task =
-                      state.future_module.poll(
-                        future,
-                        poll_opts_with_type(state, opts, "ForwardBackward")
-                      )
-
-                    unlink_task(task)
-                    task
-                  end)
-
-                case await_forward_backward_results(polling_tasks, state.future_module) do
-                  {:ok, outputs} ->
-                    {:ok, Combiner.combine_forward_backward_results(outputs)}
-
-                  {:error, %Error{} = error} ->
-                    {:error, error}
-                end
-              rescue
-                e ->
-                  {:error,
-                   %Error{
-                     message: "Polling failed: #{Exception.message(e)}",
-                     type: :request_failed,
-                     data: %{exception: e, stacktrace: __STACKTRACE__}
-                   }}
-              end
-
-            safe_reply(from, reply)
-          end,
-          from
-        )
-
-        {:noreply, %{state | request_id_counter: new_counter}}
-    end
-  end
-
-  @impl true
-  def handle_call({:forward, data, loss_fn, opts}, from, state) do
-    chunks = chunk_data(data)
-    {seq_ids, new_counter} = allocate_request_ids(length(chunks), state.request_id_counter)
-
-    send_result =
-      Enum.reduce_while(Enum.zip(seq_ids, chunks), {:ok, []}, fn {seq_id, chunk}, {:ok, acc} ->
-        case send_forward_request(chunk, loss_fn, seq_id, opts, state) do
-          {:ok, future} -> {:cont, {:ok, [future | acc]}}
-          {:error, reason} -> {:halt, {:error, reason}}
-        end
-      end)
-
-    case send_result do
-      {:error, reason} ->
-        {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
-
-      {:ok, futures_rev} ->
-        futures = Enum.reverse(futures_rev)
-
-        start_background_task(
-          fn ->
-            reply =
-              try do
-                polling_tasks =
-                  Enum.map(futures, fn future ->
-                    task =
-                      state.future_module.poll(
-                        future,
-                        poll_opts_with_type(state, opts, "Forward")
-                      )
-
-                    unlink_task(task)
-                    task
-                  end)
-
-                case await_forward_results(polling_tasks, state.future_module) do
-                  {:ok, outputs} ->
-                    {:ok, Combiner.combine_forward_backward_results(outputs)}
-
-                  {:error, %Error{} = error} ->
-                    {:error, error}
-                end
-              rescue
-                e ->
-                  {:error,
-                   %Error{
-                     message: "Polling failed: #{Exception.message(e)}",
-                     type: :request_failed,
-                     data: %{exception: e, stacktrace: __STACKTRACE__}
-                   }}
-              end
-
-            safe_reply(from, reply)
-          end,
-          from
-        )
-
-        {:noreply, %{state | request_id_counter: new_counter}}
-    end
-  end
-
-  @impl true
-  def handle_call({:optim_step, adam_params, opts}, from, state) do
-    seq_id = state.request_id_counter
-    new_counter = seq_id + 1
-
-    case send_optim_step_request(adam_params, seq_id, opts, state) do
-      {:error, reason} ->
-        {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
-
-      {:ok, future} ->
-        start_background_task(
-          fn ->
-            reply =
-              try do
-                task =
-                  state.future_module.poll(
-                    future,
-                    poll_opts_with_type(state, opts, "OptimStep")
-                  )
-
-                unlink_task(task)
-
-                case safe_await(state.future_module, task, await_timeout(opts)) do
-                  {:ok, result} ->
-                    {:ok, OptimStepResponse.from_json(result)}
-
-                  {:error, %Error{} = error} ->
-                    {:error, error}
-                end
-              rescue
-                e ->
-                  {:error,
-                   %Error{
-                     message: "Polling failed: #{Exception.message(e)}",
-                     type: :request_failed,
-                     data: %{exception: e, stacktrace: __STACKTRACE__}
-                   }}
-              end
-
-            safe_reply(from, reply)
-          end,
-          from
-        )
-
-        {:noreply, %{state | request_id_counter: new_counter}}
-    end
-  end
-
-  @impl true
-  def handle_call(:get_info, _from, state) do
-    case state.models_api.get_info(
-           %GetInfoRequest{model_id: state.model_id},
-           config: state.config,
-           telemetry_metadata: base_telemetry_metadata(state, %{model_id: state.model_id})
-         ) do
-      {:ok, %GetInfoResponse{} = response} ->
-        {:reply, {:ok, response}, state}
-
-      {:error, %Error{} = error} ->
-        {:reply, {:error, error}, state}
-    end
-  end
-
-  @impl true
-  def handle_call(:unload_model, _from, state) do
-    case state.models_api.unload_model(
-           %UnloadModelRequest{model_id: state.model_id},
-           config: state.config,
-           telemetry_metadata: base_telemetry_metadata(state, %{model_id: state.model_id})
-         ) do
-      {:ok, %{"request_id" => _} = future} ->
-        reply = await_unload_future(future, state)
-        {:reply, reply, state}
-
-      {:ok, %{request_id: _} = future} ->
-        reply = await_unload_future(future, state)
-        {:reply, reply, state}
-
-      {:ok, %UnloadModelResponse{} = response} ->
-        {:reply, {:ok, response}, state}
-
-      {:ok, %{} = payload} ->
-        {:reply, {:ok, UnloadModelResponse.from_json(payload)}, state}
-
-      {:error, %Error{} = error} ->
-        {:reply, {:error, error}, state}
-    end
-  end
-
-  @impl true
-  def handle_call({:save_state, name, opts}, from, state) do
-    seq_id = state.request_id_counter
-    new_counter = seq_id + 1
-
-    case send_save_state_request(name, seq_id, opts, state) do
-      {:error, reason} ->
-        {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
-
-      {:ok, response} ->
-        start_background_task(
-          fn ->
-            reply =
-              try do
-                handle_save_state_response(response, state, opts)
-              rescue
-                e ->
-                  {:error,
-                   %Error{
-                     message: "Save state failed: #{Exception.message(e)}",
-                     type: :request_failed,
-                     data: %{exception: e, stacktrace: __STACKTRACE__}
-                   }}
-              end
-
-            safe_reply(from, reply)
-          end,
-          from
-        )
-
-        {:noreply, %{state | request_id_counter: new_counter}}
-    end
-  end
-
-  @impl true
-  def handle_call({:load_state, path, optimizer, opts}, from, state) do
-    seq_id = state.request_id_counter
-    new_counter = seq_id + 1
-
-    case send_load_state_request(path, optimizer, seq_id, opts, state) do
-      {:error, reason} ->
-        {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
-
-      {:ok, response} ->
-        start_background_task(
-          fn ->
-            reply =
-              try do
-                handle_load_state_response(response, state, opts)
-              rescue
-                e ->
-                  {:error,
-                   %Error{
-                     message: "Load state failed: #{Exception.message(e)}",
-                     type: :request_failed,
-                     data: %{exception: e, stacktrace: __STACKTRACE__}
-                   }}
-              end
-
-            safe_reply(from, reply)
-          end,
-          from
-        )
-
-        {:noreply, %{state | request_id_counter: new_counter}}
-    end
-  end
-
-  @impl true
-  def handle_call({:save_weights_for_sampler, name, opts}, from, state) do
-    seq_id = state.request_id_counter
-    new_counter = seq_id + 1
-
-    # Put name as path in opts for the request
-    opts_with_path = Keyword.put(opts, :path, name)
-    {normalized_opts, next_sampling_counter} = normalize_save_weights_opts(opts_with_path, state)
-
-    case send_save_weights_for_sampler_request(seq_id, normalized_opts, state) do
-      {:error, reason} ->
-        {:reply, {:error, reason},
-         %{
-           state
-           | request_id_counter: new_counter,
-             sampling_session_counter: next_sampling_counter
-         }}
-
-      {:ok, response} ->
-        start_background_task(
-          fn ->
-            reply =
-              try do
-                handle_save_weights_response(response, state, normalized_opts)
-              rescue
-                e ->
-                  {:error,
-                   %Error{
-                     message: "Save weights failed: #{Exception.message(e)}",
-                     type: :request_failed,
-                     data: %{exception: e, stacktrace: __STACKTRACE__}
-                   }}
-              end
-
-            safe_reply(from, reply)
-          end,
-          from
-        )
-
-        {:noreply,
-         %{
-           state
-           | request_id_counter: new_counter,
-             sampling_session_counter: next_sampling_counter
-         }}
-    end
-  end
-
-  @impl true
-  def handle_call({:save_weights_and_get_sampling_client, opts}, from, state) do
-    seq_id = state.request_id_counter
-    new_counter = seq_id + 1
-
-    {normalized_opts, next_sampling_counter} = normalize_save_weights_opts(opts, state)
-
-    case send_save_weights_for_sampler_request(seq_id, normalized_opts, state) do
-      {:error, reason} ->
-        {:reply, {:error, reason},
-         %{
-           state
-           | request_id_counter: new_counter,
-             sampling_session_counter: next_sampling_counter
-         }}
-
-      {:ok, response} ->
-        start_background_task(
-          fn ->
-            reply =
-              with {:ok, save_response} <-
-                     handle_save_weights_response(response, state, normalized_opts),
-                   {:ok, sampling_client} <-
-                     start_sampling_client_from_save(save_response, seq_id, opts, state) do
-                {:ok, sampling_client}
-              else
-                {:error, %Error{} = error} -> {:error, error}
-                {:error, reason} -> {:error, reason}
-              end
-
-            safe_reply(from, reply)
-          end,
-          from
-        )
-
-        {:noreply,
-         %{
-           state
-           | request_id_counter: new_counter,
-             sampling_session_counter: next_sampling_counter
-         }}
-    end
-  end
-
-  @impl true
-  def handle_call({:create_sampling_client, model_path, opts}, _from, state) do
-    # Create a sampling client with the given model_path
-    # Uses the training client's session_id and config
-    child_opts =
-      opts
-      |> Keyword.put(:session_id, state.session_id)
-      |> Keyword.put(:config, state.config)
-      |> Keyword.put(:model_path, model_path)
-      |> Keyword.put(:sampling_client_id, state.request_id_counter)
-
-    case DynamicSupervisor.start_child(
-           state.client_supervisor,
-           {state.sampling_client_module, child_opts}
-         ) do
-      {:ok, pid} ->
-        {:reply, {:ok, pid}, %{state | request_id_counter: state.request_id_counter + 1}}
-
-      {:error, _} = error ->
-        {:reply, error, state}
-    end
-  end
-
-  @impl true
-  def handle_call({:forward_backward_custom, data, loss_fn, opts}, from, state) do
-    with {:ok, placeholder_gradients} <- build_placeholder_gradients(data) do
-      placeholder_linear_data = CustomLoss.build_linear_loss_data(data, placeholder_gradients)
-      linear_chunks = chunk_data(placeholder_linear_data)
+    capture_telemetry(state, fn ->
       chunks = chunk_data(data)
-
-      forward_count = length(chunks)
-      backward_count = length(linear_chunks)
-
-      {seq_ids, new_counter} =
-        allocate_request_ids(forward_count + backward_count, state.request_id_counter)
-
-      {forward_seq_ids, backward_seq_ids} = Enum.split(seq_ids, forward_count)
+      {seq_ids, new_counter} = allocate_request_ids(length(chunks), state.request_id_counter)
 
       send_result =
-        Enum.reduce_while(Enum.zip(forward_seq_ids, chunks), {:ok, []}, fn {seq_id, chunk},
-                                                                           {:ok, acc} ->
-          case send_forward_request(chunk, :cross_entropy, seq_id, opts, state) do
+        Enum.reduce_while(Enum.zip(seq_ids, chunks), {:ok, []}, fn {seq_id, chunk}, {:ok, acc} ->
+          case send_forward_backward_request(chunk, loss_fn, seq_id, opts, state) do
             {:ok, future} -> {:cont, {:ok, [future | acc]}}
             {:error, reason} -> {:halt, {:error, reason}}
           end
@@ -899,42 +495,37 @@ defmodule Tinkex.TrainingClient do
         {:error, reason} ->
           {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
 
-        {:ok, forward_futures_rev} ->
-          forward_futures = Enum.reverse(forward_futures_rev)
+        {:ok, futures_rev} ->
+          futures = Enum.reverse(futures_rev)
 
           start_background_task(
             fn ->
               reply =
                 try do
-                  with {:ok, forward_outputs} <-
-                         poll_forward_custom_loss(forward_futures, opts, state),
-                       {:ok, logprobs} <-
-                         CustomLoss.extract_per_datum_logprobs(forward_outputs),
-                       {:ok, {gradients, metrics}} <-
-                         CustomLoss.compute_gradients(data, logprobs, loss_fn),
-                       {:ok, linear_data} <- build_linear_loss_data_safe(data, gradients),
-                       {:ok, backward_outputs} <-
-                         send_backward_for_custom_loss(
-                           linear_data,
-                           backward_seq_ids,
-                           opts,
-                           state
-                         ) do
-                    combined = Combiner.combine_forward_backward_results(backward_outputs)
-                    {:ok, merge_custom_metrics(combined, metrics)}
-                  else
+                  polling_tasks =
+                    Enum.map(futures, fn future ->
+                      task =
+                        state.future_module.poll(
+                          future,
+                          poll_opts_with_type(state, opts, "ForwardBackward")
+                        )
+
+                      unlink_task(task)
+                      task
+                    end)
+
+                  case await_forward_backward_results(polling_tasks, state.future_module) do
+                    {:ok, outputs} ->
+                      {:ok, Combiner.combine_forward_backward_results(outputs)}
+
                     {:error, %Error{} = error} ->
                       {:error, error}
-
-                    {:error, reason} ->
-                      {:error,
-                       Error.new(:request_failed, "Custom loss failed: #{inspect(reason)}")}
                   end
                 rescue
                   e ->
                     {:error,
                      %Error{
-                       message: "Custom loss failed: #{Exception.message(e)}",
+                       message: "Polling failed: #{Exception.message(e)}",
                        type: :request_failed,
                        data: %{exception: e, stacktrace: __STACKTRACE__}
                      }}
@@ -942,19 +533,461 @@ defmodule Tinkex.TrainingClient do
 
               safe_reply(from, reply)
             end,
-            from
+            from,
+            state.telemetry
           )
 
           {:noreply, %{state | request_id_counter: new_counter}}
       end
-    else
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
-    end
+    end)
   end
 
   @impl true
-  def handle_call(_message, _from, state), do: {:reply, {:error, :unsupported}, state}
+  def handle_call({:forward, data, loss_fn, opts}, from, state) do
+    capture_telemetry(state, fn ->
+      chunks = chunk_data(data)
+      {seq_ids, new_counter} = allocate_request_ids(length(chunks), state.request_id_counter)
+
+      send_result =
+        Enum.reduce_while(Enum.zip(seq_ids, chunks), {:ok, []}, fn {seq_id, chunk}, {:ok, acc} ->
+          case send_forward_request(chunk, loss_fn, seq_id, opts, state) do
+            {:ok, future} -> {:cont, {:ok, [future | acc]}}
+            {:error, reason} -> {:halt, {:error, reason}}
+          end
+        end)
+
+      case send_result do
+        {:error, reason} ->
+          {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
+
+        {:ok, futures_rev} ->
+          futures = Enum.reverse(futures_rev)
+
+          start_background_task(
+            fn ->
+              reply =
+                try do
+                  polling_tasks =
+                    Enum.map(futures, fn future ->
+                      task =
+                        state.future_module.poll(
+                          future,
+                          poll_opts_with_type(state, opts, "Forward")
+                        )
+
+                      unlink_task(task)
+                      task
+                    end)
+
+                  case await_forward_results(polling_tasks, state.future_module) do
+                    {:ok, outputs} ->
+                      {:ok, Combiner.combine_forward_backward_results(outputs)}
+
+                    {:error, %Error{} = error} ->
+                      {:error, error}
+                  end
+                rescue
+                  e ->
+                    {:error,
+                     %Error{
+                       message: "Polling failed: #{Exception.message(e)}",
+                       type: :request_failed,
+                       data: %{exception: e, stacktrace: __STACKTRACE__}
+                     }}
+                end
+
+              safe_reply(from, reply)
+            end,
+            from,
+            state.telemetry
+          )
+
+          {:noreply, %{state | request_id_counter: new_counter}}
+      end
+    end)
+  end
+
+  @impl true
+  def handle_call({:optim_step, adam_params, opts}, from, state) do
+    capture_telemetry(state, fn ->
+      seq_id = state.request_id_counter
+      new_counter = seq_id + 1
+
+      case send_optim_step_request(adam_params, seq_id, opts, state) do
+        {:error, reason} ->
+          {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
+
+        {:ok, future} ->
+          start_background_task(
+            fn ->
+              reply =
+                try do
+                  task =
+                    state.future_module.poll(
+                      future,
+                      poll_opts_with_type(state, opts, "OptimStep")
+                    )
+
+                  unlink_task(task)
+
+                  case safe_await(state.future_module, task, await_timeout(opts)) do
+                    {:ok, result} ->
+                      {:ok, OptimStepResponse.from_json(result)}
+
+                    {:error, %Error{} = error} ->
+                      {:error, error}
+                  end
+                rescue
+                  e ->
+                    {:error,
+                     %Error{
+                       message: "Polling failed: #{Exception.message(e)}",
+                       type: :request_failed,
+                       data: %{exception: e, stacktrace: __STACKTRACE__}
+                     }}
+                end
+
+              safe_reply(from, reply)
+            end,
+            from,
+            state.telemetry
+          )
+
+          {:noreply, %{state | request_id_counter: new_counter}}
+      end
+    end)
+  end
+
+  @impl true
+  def handle_call(:get_info, _from, state) do
+    capture_telemetry(state, fn ->
+      case state.models_api.get_info(
+             %GetInfoRequest{model_id: state.model_id},
+             config: state.config,
+             telemetry_metadata: base_telemetry_metadata(state, %{model_id: state.model_id})
+           ) do
+        {:ok, %GetInfoResponse{} = response} ->
+          {:reply, {:ok, response}, state}
+
+        {:error, %Error{} = error} ->
+          {:reply, {:error, error}, state}
+      end
+    end)
+  end
+
+  @impl true
+  def handle_call(:unload_model, _from, state) do
+    capture_telemetry(state, fn ->
+      case state.models_api.unload_model(
+             %UnloadModelRequest{model_id: state.model_id},
+             config: state.config,
+             telemetry_metadata: base_telemetry_metadata(state, %{model_id: state.model_id})
+           ) do
+        {:ok, %{"request_id" => _} = future} ->
+          reply = await_unload_future(future, state)
+          {:reply, reply, state}
+
+        {:ok, %{request_id: _} = future} ->
+          reply = await_unload_future(future, state)
+          {:reply, reply, state}
+
+        {:ok, %UnloadModelResponse{} = response} ->
+          {:reply, {:ok, response}, state}
+
+        {:ok, %{} = payload} ->
+          {:reply, {:ok, UnloadModelResponse.from_json(payload)}, state}
+
+        {:error, %Error{} = error} ->
+          {:reply, {:error, error}, state}
+      end
+    end)
+  end
+
+  @impl true
+  def handle_call({:save_state, name, opts}, from, state) do
+    capture_telemetry(state, fn ->
+      seq_id = state.request_id_counter
+      new_counter = seq_id + 1
+
+      case send_save_state_request(name, seq_id, opts, state) do
+        {:error, reason} ->
+          {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
+
+        {:ok, response} ->
+          start_background_task(
+            fn ->
+              reply =
+                try do
+                  handle_save_state_response(response, state, opts)
+                rescue
+                  e ->
+                    {:error,
+                     %Error{
+                       message: "Save state failed: #{Exception.message(e)}",
+                       type: :request_failed,
+                       data: %{exception: e, stacktrace: __STACKTRACE__}
+                     }}
+                end
+
+              safe_reply(from, reply)
+            end,
+            from,
+            state.telemetry
+          )
+
+          {:noreply, %{state | request_id_counter: new_counter}}
+      end
+    end)
+  end
+
+  @impl true
+  def handle_call({:load_state, path, optimizer, opts}, from, state) do
+    capture_telemetry(state, fn ->
+      seq_id = state.request_id_counter
+      new_counter = seq_id + 1
+
+      case send_load_state_request(path, optimizer, seq_id, opts, state) do
+        {:error, reason} ->
+          {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
+
+        {:ok, response} ->
+          start_background_task(
+            fn ->
+              reply =
+                try do
+                  handle_load_state_response(response, state, opts)
+                rescue
+                  e ->
+                    {:error,
+                     %Error{
+                       message: "Load state failed: #{Exception.message(e)}",
+                       type: :request_failed,
+                       data: %{exception: e, stacktrace: __STACKTRACE__}
+                     }}
+                end
+
+              safe_reply(from, reply)
+            end,
+            from,
+            state.telemetry
+          )
+
+          {:noreply, %{state | request_id_counter: new_counter}}
+      end
+    end)
+  end
+
+  @impl true
+  def handle_call({:save_weights_for_sampler, name, opts}, from, state) do
+    capture_telemetry(state, fn ->
+      seq_id = state.request_id_counter
+      new_counter = seq_id + 1
+
+      # Put name as path in opts for the request
+      opts_with_path = Keyword.put(opts, :path, name)
+
+      {normalized_opts, next_sampling_counter} =
+        normalize_save_weights_opts(opts_with_path, state)
+
+      case send_save_weights_for_sampler_request(seq_id, normalized_opts, state) do
+        {:error, reason} ->
+          {:reply, {:error, reason},
+           %{
+             state
+             | request_id_counter: new_counter,
+               sampling_session_counter: next_sampling_counter
+           }}
+
+        {:ok, response} ->
+          start_background_task(
+            fn ->
+              reply =
+                try do
+                  handle_save_weights_response(response, state, normalized_opts)
+                rescue
+                  e ->
+                    {:error,
+                     %Error{
+                       message: "Save weights failed: #{Exception.message(e)}",
+                       type: :request_failed,
+                       data: %{exception: e, stacktrace: __STACKTRACE__}
+                     }}
+                end
+
+              safe_reply(from, reply)
+            end,
+            from,
+            state.telemetry
+          )
+
+          {:noreply,
+           %{
+             state
+             | request_id_counter: new_counter,
+               sampling_session_counter: next_sampling_counter
+           }}
+      end
+    end)
+  end
+
+  @impl true
+  def handle_call({:save_weights_and_get_sampling_client, opts}, from, state) do
+    capture_telemetry(state, fn ->
+      seq_id = state.request_id_counter
+      new_counter = seq_id + 1
+
+      {normalized_opts, next_sampling_counter} = normalize_save_weights_opts(opts, state)
+
+      case send_save_weights_for_sampler_request(seq_id, normalized_opts, state) do
+        {:error, reason} ->
+          {:reply, {:error, reason},
+           %{
+             state
+             | request_id_counter: new_counter,
+               sampling_session_counter: next_sampling_counter
+           }}
+
+        {:ok, response} ->
+          start_background_task(
+            fn ->
+              reply =
+                with {:ok, save_response} <-
+                       handle_save_weights_response(response, state, normalized_opts),
+                     {:ok, sampling_client} <-
+                       start_sampling_client_from_save(save_response, seq_id, opts, state) do
+                  {:ok, sampling_client}
+                else
+                  {:error, %Error{} = error} -> {:error, error}
+                  {:error, reason} -> {:error, reason}
+                end
+
+              safe_reply(from, reply)
+            end,
+            from,
+            state.telemetry
+          )
+
+          {:noreply,
+           %{
+             state
+             | request_id_counter: new_counter,
+               sampling_session_counter: next_sampling_counter
+           }}
+      end
+    end)
+  end
+
+  @impl true
+  def handle_call({:create_sampling_client, model_path, opts}, _from, state) do
+    capture_telemetry(state, fn ->
+      child_opts =
+        opts
+        |> Keyword.put(:session_id, state.session_id)
+        |> Keyword.put(:config, state.config)
+        |> Keyword.put(:model_path, model_path)
+        |> Keyword.put(:sampling_client_id, state.request_id_counter)
+
+      case DynamicSupervisor.start_child(
+             state.client_supervisor,
+             {state.sampling_client_module, child_opts}
+           ) do
+        {:ok, pid} ->
+          {:reply, {:ok, pid}, %{state | request_id_counter: state.request_id_counter + 1}}
+
+        {:error, _} = error ->
+          {:reply, error, state}
+      end
+    end)
+  end
+
+  @impl true
+  def handle_call({:forward_backward_custom, data, loss_fn, opts}, from, state) do
+    capture_telemetry(state, fn ->
+      with {:ok, placeholder_gradients} <- build_placeholder_gradients(data) do
+        placeholder_linear_data = CustomLoss.build_linear_loss_data(data, placeholder_gradients)
+        linear_chunks = chunk_data(placeholder_linear_data)
+        chunks = chunk_data(data)
+
+        forward_count = length(chunks)
+        backward_count = length(linear_chunks)
+
+        {seq_ids, new_counter} =
+          allocate_request_ids(forward_count + backward_count, state.request_id_counter)
+
+        {forward_seq_ids, backward_seq_ids} = Enum.split(seq_ids, forward_count)
+
+        send_result =
+          Enum.reduce_while(Enum.zip(forward_seq_ids, chunks), {:ok, []}, fn {seq_id, chunk},
+                                                                             {:ok, acc} ->
+            case send_forward_request(chunk, :cross_entropy, seq_id, opts, state) do
+              {:ok, future} -> {:cont, {:ok, [future | acc]}}
+              {:error, reason} -> {:halt, {:error, reason}}
+            end
+          end)
+
+        case send_result do
+          {:error, reason} ->
+            {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
+
+          {:ok, forward_futures_rev} ->
+            forward_futures = Enum.reverse(forward_futures_rev)
+
+            start_background_task(
+              fn ->
+                reply =
+                  try do
+                    with {:ok, forward_outputs} <-
+                           poll_forward_custom_loss(forward_futures, opts, state),
+                         {:ok, logprobs} <-
+                           CustomLoss.extract_per_datum_logprobs(forward_outputs),
+                         {:ok, {gradients, metrics}} <-
+                           CustomLoss.compute_gradients(data, logprobs, loss_fn),
+                         {:ok, linear_data} <- build_linear_loss_data_safe(data, gradients),
+                         {:ok, backward_outputs} <-
+                           send_backward_for_custom_loss(
+                             linear_data,
+                             backward_seq_ids,
+                             opts,
+                             state
+                           ) do
+                      combined = Combiner.combine_forward_backward_results(backward_outputs)
+                      {:ok, merge_custom_metrics(combined, metrics)}
+                    else
+                      {:error, %Error{} = error} ->
+                        {:error, error}
+
+                      {:error, reason} ->
+                        {:error,
+                         Error.new(:request_failed, "Custom loss failed: #{inspect(reason)}")}
+                    end
+                  rescue
+                    e ->
+                      {:error,
+                       %Error{
+                         message: "Custom loss failed: #{Exception.message(e)}",
+                         type: :request_failed,
+                         data: %{exception: e, stacktrace: __STACKTRACE__}
+                       }}
+                  end
+
+                safe_reply(from, reply)
+              end,
+              from,
+              state.telemetry
+            )
+
+            {:noreply, %{state | request_id_counter: new_counter}}
+        end
+      else
+        {:error, reason} ->
+          {:reply, {:error, reason}, state}
+      end
+    end)
+  end
+
+  @impl true
+  def handle_call(_message, _from, state),
+    do: capture_telemetry(state, fn -> {:reply, {:error, :unsupported}, state} end)
 
   @impl true
   def handle_info(_msg, state), do: {:noreply, state}
@@ -1338,9 +1371,26 @@ defmodule Tinkex.TrainingClient do
     end
   end
 
-  defp start_background_task(fun, from) when is_function(fun, 0) do
+  defp capture_telemetry(state, fun) when is_function(fun, 0) do
+    TelemetryCapture.capture_exceptions reporter: state.telemetry, fatal?: true do
+      fun.()
+    end
+  end
+
+  defp start_background_task(fun, from, reporter) when is_function(fun, 0) do
+    wrapped_fun =
+      if reporter do
+        fn ->
+          TelemetryCapture.capture_exceptions reporter: reporter, fatal?: true do
+            fun.()
+          end
+        end
+      else
+        fun
+      end
+
     try do
-      case Task.Supervisor.async_nolink(Tinkex.TaskSupervisor, fun) do
+      case Task.Supervisor.async_nolink(Tinkex.TaskSupervisor, wrapped_fun) do
         %Task{pid: pid} ->
           ref = Process.monitor(pid)
 

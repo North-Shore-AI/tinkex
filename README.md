@@ -13,12 +13,13 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.16 Highlights
+## 0.1.17 Highlights
 
-- **CLI parity for checkpoints/runs**: `tinkex checkpoint/run list` now paginate with progress, support `--limit 0` for "all", and emit JSON (`--format json`/`--json`) with `total`/`shown` counts plus run filters for checkpoint listing.
-- **Richer checkpoint info**: `tinkex checkpoint info` surfaces size, visibility, timestamps, training run IDs, and base model/LoRA metadata in both table and JSON formats.
-- **Run visibility**: `tinkex run list/info` include owners, LoRA flags/ranks, statuses, last training/sampler checkpoints, and user metadata with JSON output for scripting.
-- **Cursor typing**: Checkpoint pagination cursors now use the typed `Tinkex.Types.Cursor` struct for consistent access (`cursor.total_count/offset/limit`).
+- **Log-level parity**: `TINKER_LOG` / `config :tinkex, :log_level` now set Logger at app start (Python parity); HTTP header dumps stay redacted unless explicitly enabled.
+- **Telemetry exception capture**: `ServiceClient`, `TrainingClient`, and `SamplingClient` entrypoints now wrap exceptions with telemetry reporting and emit session-end events on fatal paths.
+- **Session heartbeats**: Heartbeats pin a 10s timeout with zero retries (Python defaults) while preserving debounce/warning semantics.
+- **Pool isolation**: Finch pools are isolated per pool type (session/training/sampling/futures/telemetry) with Python-aligned sizes; pool names derive from `http_pool` + `base_url`.
+- **Configurable defaults**: `TINKEX_DEFAULT_HEADERS`, `TINKEX_DEFAULT_QUERY`, `TINKEX_HTTP_CLIENT`, and `TINKEX_HTTP_POOL` extend `Tinkex.Config` merging for default headers/query params and custom HTTP client/pool selection; secrets stay redacted in dumps/inspect.
 
 ## Features
 
@@ -62,7 +63,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.16"}
+    {:tinkex, "~> 0.1.17"}
   ]
 end
 ```

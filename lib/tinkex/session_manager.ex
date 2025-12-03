@@ -8,6 +8,7 @@ defmodule Tinkex.SessionManager do
 
   alias Tinkex.Config
   alias Tinkex.Error
+  alias Tinkex.PoolKey
   alias Tinkex.Types.CreateSessionResponse
 
   @type session_id :: String.t()
@@ -302,11 +303,17 @@ defmodule Tinkex.SessionManager do
     end
   end
 
-  defp maybe_heartbeat(session_id, %Config{http_pool: pool} = config, session_api) do
-    case Process.whereis(pool) do
+  defp maybe_heartbeat(
+         session_id,
+         %Config{http_pool: pool, base_url: base_url} = config,
+         session_api
+       ) do
+    resolved_pool = PoolKey.resolve_pool_name(pool, base_url, :session)
+
+    case Process.whereis(resolved_pool) do
       nil ->
         Logger.warning(
-          "Skipping heartbeat for #{session_id}: http_pool #{inspect(pool)} is not running"
+          "Skipping heartbeat for #{session_id}: http_pool #{inspect(resolved_pool)} is not running"
         )
 
         {:error, :http_pool_not_alive}
@@ -355,10 +362,12 @@ defmodule Tinkex.SessionManager do
   defp resolve_limit(:infinity, _default), do: :infinity
   defp resolve_limit(value, _default), do: value
 
-  defp maybe_warn_about_pool(session_id, %{config: %Config{http_pool: pool}}) do
-    if Process.whereis(pool) == nil do
+  defp maybe_warn_about_pool(session_id, %{config: %Config{http_pool: pool, base_url: base_url}}) do
+    resolved_pool = PoolKey.resolve_pool_name(pool, base_url, :session)
+
+    if Process.whereis(resolved_pool) == nil do
       Logger.warning(
-        "Loaded session #{session_id} referencing missing http_pool #{inspect(pool)}; will retry when pool is available"
+        "Loaded session #{session_id} referencing missing http_pool #{inspect(resolved_pool)}; will retry when pool is available"
       )
     end
   end

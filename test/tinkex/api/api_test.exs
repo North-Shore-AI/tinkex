@@ -382,4 +382,50 @@ defmodule Tinkex.APITest do
       assert log =~ "[REDACTED]"
     end
   end
+
+  describe "default headers and query" do
+    test "merges default headers and query params", %{bypass: bypass, config: config} do
+      config = %Config{
+        config
+        | default_headers: %{"x-org" => "acme-co"},
+          default_query: %{"from" => "default"}
+      }
+
+      Bypass.expect_once(bypass, "GET", "/default", fn conn ->
+        conn = Plug.Conn.fetch_query_params(conn)
+
+        assert Plug.Conn.get_req_header(conn, "x-org") == ["acme-co"]
+        assert conn.params["from"] == "default"
+        assert conn.params["extra"] == "1"
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"ok":true}))
+      end)
+
+      assert {:ok, %{"ok" => true}} =
+               API.get("/default",
+                 config: config,
+                 query: %{extra: 1}
+               )
+    end
+
+    test "per-call query overrides defaults", %{bypass: bypass, config: config} do
+      config = %Config{config | default_query: %{"mode" => "default"}}
+
+      Bypass.expect_once(bypass, "GET", "/override", fn conn ->
+        conn = Plug.Conn.fetch_query_params(conn)
+
+        assert conn.params["mode"] == "override"
+        assert conn.params["path"] == "1"
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"ok":true}))
+      end)
+
+      assert {:ok, %{"ok" => true}} =
+               API.get("/override?path=1", config: config, query: %{mode: "override"})
+    end
+  end
 end

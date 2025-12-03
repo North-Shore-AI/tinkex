@@ -18,6 +18,8 @@ defmodule Tinkex.ServiceClient do
   alias Tinkex.SessionManager
   alias Tinkex.Telemetry
   alias Tinkex.Telemetry.Reporter
+  alias Tinkex.Telemetry.Capture, as: TelemetryCapture
+  require TelemetryCapture
   alias Tinkex.Types.LoraConfig
 
   @type t :: pid()
@@ -62,9 +64,11 @@ defmodule Tinkex.ServiceClient do
   @spec create_lora_training_client_async(t(), String.t(), keyword()) :: Task.t()
   def create_lora_training_client_async(service_client, base_model, opts \\ [])
       when is_binary(base_model) do
-    Task.async(fn ->
+    reporter = telemetry_reporter_for(service_client)
+
+    TelemetryCapture.async_capture reporter: reporter, fatal?: true do
       create_lora_training_client(service_client, base_model, opts)
-    end)
+    end
   end
 
   @doc """
@@ -102,9 +106,11 @@ defmodule Tinkex.ServiceClient do
   @spec create_training_client_from_state_async(t(), String.t(), keyword()) :: Task.t()
   def create_training_client_from_state_async(service_client, path, opts \\ [])
       when is_binary(path) do
-    Task.async(fn ->
+    reporter = telemetry_reporter_for(service_client)
+
+    TelemetryCapture.async_capture reporter: reporter, fatal?: true do
       create_training_client_from_state(service_client, path, opts)
-    end)
+    end
   end
 
   @doc """
@@ -114,9 +120,11 @@ defmodule Tinkex.ServiceClient do
           Task.t()
   def create_training_client_from_state_with_optimizer_async(service_client, path, opts \\ [])
       when is_binary(path) do
-    Task.async(fn ->
+    reporter = telemetry_reporter_for(service_client)
+
+    TelemetryCapture.async_capture reporter: reporter, fatal?: true do
       create_training_client_from_state_with_optimizer(service_client, path, opts)
-    end)
+    end
   end
 
   @doc """
@@ -142,7 +150,11 @@ defmodule Tinkex.ServiceClient do
   """
   @spec get_server_capabilities_async(t()) :: Task.t()
   def get_server_capabilities_async(service_client) do
-    Task.async(fn -> get_server_capabilities(service_client) end)
+    reporter = telemetry_reporter_for(service_client)
+
+    TelemetryCapture.async_capture reporter: reporter, fatal?: true do
+      get_server_capabilities(service_client)
+    end
   end
 
   @doc """
@@ -157,9 +169,11 @@ defmodule Tinkex.ServiceClient do
   """
   @spec create_sampling_client_async(t(), keyword()) :: Task.t()
   def create_sampling_client_async(service_client, opts \\ []) do
-    Task.async(fn ->
+    reporter = telemetry_reporter_for(service_client)
+
+    TelemetryCapture.async_capture reporter: reporter, fatal?: true do
       create_sampling_client(service_client, opts)
-    end)
+    end
   end
 
   @doc """
@@ -297,126 +311,142 @@ defmodule Tinkex.ServiceClient do
 
   @impl true
   def handle_call({:create_training_client, base_model, opts}, _from, state) do
-    model_seq_id = state.training_client_counter
+    TelemetryCapture.capture_exceptions reporter: state.telemetry, fatal?: true do
+      model_seq_id = state.training_client_counter
 
-    with {:ok, normalized_opts} <- normalize_training_opts(opts),
-         child_opts <-
-           normalized_opts
-           |> Keyword.put(:base_model, base_model)
-           |> Keyword.put(:session_id, state.session_id)
-           |> Keyword.put(:config, state.config)
-           |> Keyword.put(:model_seq_id, model_seq_id)
-           |> Keyword.put(:client_supervisor, state.client_supervisor)
-           |> Keyword.put(:telemetry, state.telemetry)
-           |> Keyword.put(:telemetry_metadata, state.telemetry_metadata),
-         {:ok, pid} <-
-           DynamicSupervisor.start_child(
-             state.client_supervisor,
-             {state.training_client_module, child_opts}
-           ) do
-      {:reply, {:ok, pid}, %{state | training_client_counter: model_seq_id + 1}}
-    else
-      {:error, %Error{} = error} ->
-        {:reply, {:error, error}, state}
+      with {:ok, normalized_opts} <- normalize_training_opts(opts),
+           child_opts <-
+             normalized_opts
+             |> Keyword.put(:base_model, base_model)
+             |> Keyword.put(:session_id, state.session_id)
+             |> Keyword.put(:config, state.config)
+             |> Keyword.put(:model_seq_id, model_seq_id)
+             |> Keyword.put(:client_supervisor, state.client_supervisor)
+             |> Keyword.put(:telemetry, state.telemetry)
+             |> Keyword.put(:telemetry_metadata, state.telemetry_metadata),
+           {:ok, pid} <-
+             DynamicSupervisor.start_child(
+               state.client_supervisor,
+               {state.training_client_module, child_opts}
+             ) do
+        {:reply, {:ok, pid}, %{state | training_client_counter: model_seq_id + 1}}
+      else
+        {:error, %Error{} = error} ->
+          {:reply, {:error, error}, state}
 
-      {:error, _} = error ->
-        {:reply, error, state}
+        {:error, _} = error ->
+          {:reply, error, state}
+      end
     end
   end
 
   @impl true
   def handle_call({:create_training_client_from_state, path, opts}, _from, state) do
-    rest_client = RestClient.new(state.session_id, state.config)
+    TelemetryCapture.capture_exceptions reporter: state.telemetry, fatal?: true do
+      rest_client = RestClient.new(state.session_id, state.config)
 
-    case RestClient.get_weights_info_by_tinker_path(rest_client, path) do
-      {:ok, weights_info} ->
-        case start_training_client_from_weights(weights_info, opts, state) do
-          {:ok, training_client, new_counter} ->
-            case load_checkpoint(state.training_client_module, training_client, path, opts) do
-              {:ok, load_task} ->
-                case await_load_task(load_task, opts) do
-                  {:ok, _response} ->
-                    {:reply, {:ok, training_client},
-                     %{state | training_client_counter: new_counter}}
+      case RestClient.get_weights_info_by_tinker_path(rest_client, path) do
+        {:ok, weights_info} ->
+          case start_training_client_from_weights(weights_info, opts, state) do
+            {:ok, training_client, new_counter} ->
+              case load_checkpoint(state.training_client_module, training_client, path, opts) do
+                {:ok, load_task} ->
+                  case await_load_task(load_task, opts) do
+                    {:ok, _response} ->
+                      {:reply, {:ok, training_client},
+                       %{state | training_client_counter: new_counter}}
 
-                  {:error, reason} ->
-                    stop_training_client(training_client)
-                    {:reply, {:error, reason}, state}
-                end
+                    {:error, reason} ->
+                      stop_training_client(training_client)
+                      {:reply, {:error, reason}, state}
+                  end
 
-              {:error, reason} ->
-                stop_training_client(training_client)
-                {:reply, {:error, reason}, state}
-            end
+                {:error, reason} ->
+                  stop_training_client(training_client)
+                  {:reply, {:error, reason}, state}
+              end
 
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
-        end
+            {:error, reason} ->
+              {:reply, {:error, reason}, state}
+          end
 
-      {:error, reason} ->
-        {:reply, {:error, reason}, state}
+        {:error, reason} ->
+          {:reply, {:error, reason}, state}
+      end
     end
   end
 
   @impl true
   def handle_call({:create_sampling_client, opts}, _from, state) do
-    sampling_client_id = state.sampling_client_counter
+    TelemetryCapture.capture_exceptions reporter: state.telemetry, fatal?: true do
+      sampling_client_id = state.sampling_client_counter
 
-    with :ok <- validate_sampling_opts(opts),
-         child_opts <-
-           opts
-           |> Keyword.put(:session_id, state.session_id)
-           |> Keyword.put(:config, state.config)
-           |> Keyword.put(:sampling_client_id, sampling_client_id)
-           |> Keyword.put(:telemetry, state.telemetry)
-           |> Keyword.put(:telemetry_metadata, state.telemetry_metadata),
-         {:ok, pid} <-
-           DynamicSupervisor.start_child(
-             state.client_supervisor,
-             {state.sampling_client_module, child_opts}
-           ) do
-      {:reply, {:ok, pid}, %{state | sampling_client_counter: sampling_client_id + 1}}
-    else
-      {:error, %Error{} = error} ->
-        {:reply, {:error, error}, state}
+      with :ok <- validate_sampling_opts(opts),
+           child_opts <-
+             opts
+             |> Keyword.put(:session_id, state.session_id)
+             |> Keyword.put(:config, state.config)
+             |> Keyword.put(:sampling_client_id, sampling_client_id)
+             |> Keyword.put(:telemetry, state.telemetry)
+             |> Keyword.put(:telemetry_metadata, state.telemetry_metadata),
+           {:ok, pid} <-
+             DynamicSupervisor.start_child(
+               state.client_supervisor,
+               {state.sampling_client_module, child_opts}
+             ) do
+        {:reply, {:ok, pid}, %{state | sampling_client_counter: sampling_client_id + 1}}
+      else
+        {:error, %Error{} = error} ->
+          {:reply, {:error, error}, state}
 
-      {:error, _} = error ->
-        {:reply, error, state}
+        {:error, _} = error ->
+          {:reply, error, state}
+      end
     end
   end
 
   @impl true
   def handle_call(:get_server_capabilities, _from, state) do
-    case Service.get_server_capabilities(
-           config: state.config,
-           telemetry_metadata: state.telemetry_metadata
-         ) do
-      {:ok, %Tinkex.Types.GetServerCapabilitiesResponse{} = resp} ->
-        {:reply, {:ok, resp}, state}
+    TelemetryCapture.capture_exceptions reporter: state.telemetry, fatal?: true do
+      case Service.get_server_capabilities(
+             config: state.config,
+             telemetry_metadata: state.telemetry_metadata
+           ) do
+        {:ok, %Tinkex.Types.GetServerCapabilitiesResponse{} = resp} ->
+          {:reply, {:ok, resp}, state}
 
-      {:error, _} = error ->
-        {:reply, error, state}
+        {:error, _} = error ->
+          {:reply, error, state}
+      end
     end
   end
 
   @impl true
   def handle_call(:create_rest_client, _from, state) do
-    client = Tinkex.RestClient.new(state.session_id, state.config)
-    {:reply, {:ok, client}, state}
+    TelemetryCapture.capture_exceptions reporter: state.telemetry, fatal?: true do
+      client = Tinkex.RestClient.new(state.session_id, state.config)
+      {:reply, {:ok, client}, state}
+    end
   end
 
   @impl true
   def handle_call(:telemetry_reporter, _from, %{telemetry: nil} = state) do
-    {:reply, {:error, :disabled}, state}
+    TelemetryCapture.capture_exceptions reporter: state.telemetry, fatal?: true do
+      {:reply, {:error, :disabled}, state}
+    end
   end
 
   def handle_call(:telemetry_reporter, _from, %{telemetry: pid} = state) when is_pid(pid) do
-    {:reply, {:ok, pid}, state}
+    TelemetryCapture.capture_exceptions reporter: state.telemetry, fatal?: true do
+      {:reply, {:ok, pid}, state}
+    end
   end
 
   @impl true
   def handle_call(:get_telemetry, _from, state) do
-    {:reply, state.telemetry, state}
+    TelemetryCapture.capture_exceptions reporter: state.telemetry, fatal?: true do
+      {:reply, state.telemetry, state}
+    end
   end
 
   @impl true
@@ -426,6 +456,17 @@ defmodule Tinkex.ServiceClient do
 
   def get_telemetry(server) when is_pid(server) do
     GenServer.call(server, :get_telemetry)
+  end
+
+  defp telemetry_reporter_for(server) do
+    try do
+      case telemetry_reporter(server) do
+        {:ok, pid} -> pid
+        _ -> nil
+      end
+    catch
+      _, _ -> nil
+    end
   end
 
   @impl true

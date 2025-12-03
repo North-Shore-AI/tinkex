@@ -11,6 +11,7 @@ defmodule Tinkex.API do
   require Logger
 
   alias Tinkex.Error
+  alias Tinkex.Config
   alias Tinkex.Env
   alias Tinkex.PoolKey
   alias Tinkex.Transform
@@ -29,16 +30,21 @@ defmodule Tinkex.API do
   @telemetry_stop [:tinkex, :http, :request, :stop]
   @telemetry_exception [:tinkex, :http, :request, :exception]
 
+  @typep retry_result :: {{:ok, Finch.Response.t()} | {:error, term()}, non_neg_integer()}
+  @typep response_result :: {:ok, Finch.Response.t()} | {:error, term()}
+
   @impl true
   @spec post(String.t(), map(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def post(path, body, opts) do
     config = Keyword.fetch!(opts, :config)
 
-    url = build_url(config.base_url, path)
+    query_params = normalize_query_params(Keyword.get(opts, :query))
+    url = build_url(config.base_url, path, config.default_query, query_params)
     timeout = Keyword.get(opts, :timeout, config.timeout)
     headers = build_headers(:post, config, opts, timeout)
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     pool_type = Keyword.get(opts, :pool_type, :default)
+    pool_name = PoolKey.resolve_pool_name(config.http_pool, config.base_url, pool_type)
     response_mode = Keyword.get(opts, :response)
     transform_opts = Keyword.get(opts, :transform, [])
     files = Keyword.get(opts, :files)
@@ -55,12 +61,11 @@ defmodule Tinkex.API do
     with {:ok, prepared_headers, prepared_body} <-
            prepare_request_body(body, headers, files, transform_opts),
          request <- Finch.build(:post, url, prepared_headers, prepared_body) do
-      pool_key = PoolKey.build(config.base_url, pool_type)
-
       {result, retry_count, duration} =
         execute_with_telemetry(
-          &with_retries/6,
-          [request, config.http_pool, timeout, pool_key, max_retries, config.dump_headers?],
+          fn ->
+            with_retries(request, pool_name, timeout, max_retries, config.dump_headers?)
+          end,
           metadata
         )
 
@@ -92,11 +97,13 @@ defmodule Tinkex.API do
   def get(path, opts) do
     config = Keyword.fetch!(opts, :config)
 
-    url = build_url(config.base_url, path)
+    query_params = normalize_query_params(Keyword.get(opts, :query))
+    url = build_url(config.base_url, path, config.default_query, query_params)
     timeout = Keyword.get(opts, :timeout, config.timeout)
     headers = build_headers(:get, config, opts, timeout)
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     pool_type = Keyword.get(opts, :pool_type, :default)
+    pool_name = PoolKey.resolve_pool_name(config.http_pool, config.base_url, pool_type)
     response_mode = Keyword.get(opts, :response)
 
     metadata =
@@ -110,12 +117,11 @@ defmodule Tinkex.API do
 
     request = Finch.build(:get, url, headers)
 
-    pool_key = PoolKey.build(config.base_url, pool_type)
-
     {result, retry_count, duration} =
       execute_with_telemetry(
-        &with_retries/6,
-        [request, config.http_pool, timeout, pool_key, max_retries, config.dump_headers?],
+        fn ->
+          with_retries(request, pool_name, timeout, max_retries, config.dump_headers?)
+        end,
         metadata
       )
 
@@ -133,11 +139,13 @@ defmodule Tinkex.API do
   def delete(path, opts) do
     config = Keyword.fetch!(opts, :config)
 
-    url = build_url(config.base_url, path)
+    query_params = normalize_query_params(Keyword.get(opts, :query))
+    url = build_url(config.base_url, path, config.default_query, query_params)
     timeout = Keyword.get(opts, :timeout, config.timeout)
     headers = build_headers(:delete, config, opts, timeout)
     max_retries = Keyword.get(opts, :max_retries, config.max_retries)
     pool_type = Keyword.get(opts, :pool_type, :default)
+    pool_name = PoolKey.resolve_pool_name(config.http_pool, config.base_url, pool_type)
     response_mode = Keyword.get(opts, :response)
 
     metadata =
@@ -151,12 +159,11 @@ defmodule Tinkex.API do
 
     request = Finch.build(:delete, url, headers)
 
-    pool_key = PoolKey.build(config.base_url, pool_type)
-
     {result, retry_count, duration} =
       execute_with_telemetry(
-        &with_retries/6,
-        [request, config.http_pool, timeout, pool_key, max_retries, config.dump_headers?],
+        fn ->
+          with_retries(request, pool_name, timeout, max_retries, config.dump_headers?)
+        end,
         metadata
       )
 
@@ -174,14 +181,17 @@ defmodule Tinkex.API do
   def stream_get(path, opts) do
     config = Keyword.fetch!(opts, :config)
 
-    url = build_url(config.base_url, path)
+    query_params = normalize_query_params(Keyword.get(opts, :query))
+    url = build_url(config.base_url, path, config.default_query, query_params)
     timeout = Keyword.get(opts, :timeout, config.timeout)
     headers = build_headers(:get, config, opts, timeout)
     parser = Keyword.get(opts, :event_parser, :json)
+    pool_type = Keyword.get(opts, :pool_type, :default)
+    pool_name = PoolKey.resolve_pool_name(config.http_pool, config.base_url, pool_type)
 
     request = Finch.build(:get, url, headers)
 
-    case Finch.request(request, config.http_pool, receive_timeout: timeout) do
+    case Finch.request(request, pool_name, receive_timeout: timeout) do
       {:ok, %Finch.Response{} = response} ->
         response = maybe_decompress(response)
         {events, _decoder} = SSEDecoder.feed(SSEDecoder.new(), response.body <> "\n\n")
@@ -213,13 +223,15 @@ defmodule Tinkex.API do
     end
   end
 
-  defp execute_with_telemetry(fun, args, metadata) do
+  @spec execute_with_telemetry((-> retry_result), map()) ::
+          {response_result, non_neg_integer(), integer()}
+  defp execute_with_telemetry(fun, metadata) do
     start_native = System.monotonic_time()
 
     :telemetry.execute(@telemetry_start, %{system_time: System.system_time()}, metadata)
 
     try do
-      {result, retry_count} = apply(fun, args)
+      {result, retry_count} = fun.()
       duration = System.monotonic_time() - start_native
 
       result_type =
@@ -251,11 +263,11 @@ defmodule Tinkex.API do
     end
   end
 
-  defp build_url(base_url, path) do
+  defp build_url(base_url, path, default_query, request_query) do
     base = URI.parse(base_url)
     base_path = base.path || "/"
 
-    {relative_path, query} =
+    {relative_path, path_query} =
       case String.split(path, "?", parts: 2) do
         [p, q] -> {p, q}
         [p] -> {p, nil}
@@ -267,9 +279,80 @@ defmodule Tinkex.API do
       |> then(fn trimmed -> Path.join(base_path, trimmed) end)
 
     uri = %{base | path: merged_path}
-    uri = if query, do: %{uri | query: query}, else: uri
+
+    merged_query =
+      default_query
+      |> merge_query_maps(decode_query(path_query))
+      |> merge_query_maps(request_query)
+
+    uri =
+      case map_size(merged_query) do
+        0 -> uri
+        _ -> %{uri | query: URI.encode_query(merged_query)}
+      end
 
     URI.to_string(uri)
+  end
+
+  defp decode_query(nil), do: %{}
+
+  defp decode_query(query) when is_binary(query) do
+    URI.decode_query(query)
+  rescue
+    _ -> %{}
+  end
+
+  defp merge_query_maps(primary, secondary) when is_map(primary) and is_map(secondary) do
+    primary
+    |> Map.merge(secondary, fn _k, _v1, v2 -> v2 end)
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> Map.new()
+  end
+
+  defp merge_query_maps(_primary, _secondary), do: %{}
+
+  defp normalize_query_params(nil), do: %{}
+
+  defp normalize_query_params(params) when is_map(params) do
+    params
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+    |> Enum.map(&normalize_query_kv/1)
+    |> Map.new()
+  end
+
+  defp normalize_query_params(params) when is_list(params) do
+    if Enum.all?(params, &match?({_, _}, &1)) do
+      params
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> Enum.map(&normalize_query_kv/1)
+      |> Map.new()
+    else
+      raise ArgumentError, "query must be a map or keyword list, got: #{inspect(params)}"
+    end
+  end
+
+  defp normalize_query_params(other),
+    do: raise(ArgumentError, "query must be a map or keyword list, got: #{inspect(other)}")
+
+  defp normalize_query_kv({key, value}) do
+    normalized_key =
+      key
+      |> to_string()
+      |> String.trim()
+      |> case do
+        "" -> raise ArgumentError, "query keys must be non-empty strings"
+        other -> other
+      end
+
+    normalized_value =
+      case value do
+        v when is_binary(v) -> v
+        v when is_number(v) -> to_string(v)
+        v when is_atom(v) -> Atom.to_string(v)
+        v -> raise ArgumentError, "query values must be string-able, got: #{inspect(v)}"
+      end
+
+    {normalized_key, normalized_value}
   end
 
   defp build_headers(method, config, opts, timeout_ms) do
@@ -283,6 +366,7 @@ defmodule Tinkex.API do
     ]
     |> Kernel.++(stainless_headers(timeout_ms))
     |> Kernel.++(cloudflare_headers(config))
+    |> Kernel.++(config_default_headers(config))
     |> Kernel.++(request_headers(opts))
     |> Kernel.++(idempotency_headers(method, opts))
     |> Kernel.++(sampling_headers(opts))
@@ -560,7 +644,7 @@ defmodule Tinkex.API do
   end
 
   defp headers_to_map(headers) do
-    Enum.reduce(headers || [], %{}, fn
+    Enum.reduce(headers, %{}, fn
       {k, v}, acc -> Map.put(acc, String.downcase(k), v)
       _, acc -> acc
     end)
@@ -578,37 +662,48 @@ defmodule Tinkex.API do
   end
 
   # Python parity: No wall-clock timeout. Retries governed only by max_retries.
-  @spec with_retries(Finch.Request.t(), atom(), timeout(), term(), non_neg_integer(), boolean()) ::
-          {{:ok, Finch.Response.t()} | {:error, term()}, non_neg_integer()}
-  defp with_retries(request, pool, timeout, _pool_key, max_retries, dump_headers?) do
+  @spec with_retries(Finch.Request.t(), atom(), timeout(), non_neg_integer(), boolean()) ::
+          retry_result
+  defp with_retries(request, pool, timeout, max_retries, dump_headers?) do
+    timeout = normalize_timeout(timeout)
+    max_retries = normalize_max_retries(max_retries)
+    dump_headers? = !!dump_headers?
+
     context = %{
       request: request,
       pool: pool,
       timeout: timeout,
-      max_retries: max_retries,
       dump_headers?: dump_headers?
     }
 
-    do_retry(context, 0)
+    do_retry(context, max_retries, 0)
   end
 
-  defp do_retry(context, attempt) do
-    perform_request(context, attempt)
+  defp normalize_timeout(timeout) when is_integer(timeout) and timeout > 0, do: timeout
+  defp normalize_timeout(_timeout), do: Config.default_timeout()
+
+  defp normalize_max_retries(max_retries) when is_integer(max_retries) and max_retries >= 0,
+    do: max_retries
+
+  defp normalize_max_retries(_max_retries), do: 0
+
+  defp do_retry(context, max_retries, attempt) do
+    perform_request(context, max_retries, attempt)
   end
 
-  defp perform_request(context, attempt) do
+  defp perform_request(context, max_retries, attempt) do
     request = put_retry_headers(context.request, attempt, context.timeout)
     maybe_dump_request(request, attempt, context.dump_headers?)
 
     case Finch.request(request, context.pool, receive_timeout: context.timeout) do
       {:ok, %Finch.Response{} = response} = response_tuple ->
-        handle_success(response_tuple, response, context, attempt)
+        handle_success(response_tuple, response, context, max_retries, attempt)
 
       {:error, %Mint.TransportError{reason: reason}} = error ->
-        handle_retryable_error(error, reason, context, attempt)
+        handle_retryable_error(error, reason, context, max_retries, attempt)
 
       {:error, %Mint.HTTPError{reason: reason}} = error ->
-        handle_retryable_error(error, reason, context, attempt)
+        handle_retryable_error(error, reason, context, max_retries, attempt)
 
       other ->
         {other, attempt}
@@ -619,16 +714,17 @@ defmodule Tinkex.API do
          response_tuple,
          %Finch.Response{status: status, headers: headers},
          context,
+         max_retries,
          attempt
        ) do
-    case retry_decision(status, headers, context.max_retries, attempt) do
+    case retry_decision(status, headers, max_retries, attempt) do
       {:retry, delay_ms} ->
         Logger.debug(
-          "Retrying request (attempt #{attempt + 1}/#{context.max_retries}) status=#{status} delay=#{delay_ms}ms"
+          "Retrying request (attempt #{attempt + 1}/#{max_retries}) status=#{status} delay=#{delay_ms}ms"
         )
 
         Process.sleep(delay_ms)
-        do_retry(context, attempt + 1)
+        do_retry(context, max_retries, attempt + 1)
 
       :no_retry ->
         {response_tuple, attempt}
@@ -669,12 +765,12 @@ defmodule Tinkex.API do
 
   defp status_based_decision(_status, _headers, _attempt), do: :no_retry
 
-  defp handle_retryable_error(error, reason, context, attempt) do
-    if attempt < context.max_retries do
+  defp handle_retryable_error(error, reason, context, max_retries, attempt) do
+    if attempt < max_retries do
       delay = retry_delay(attempt)
       Logger.debug("Retrying after #{inspect(reason)} delay=#{delay}ms")
       Process.sleep(delay)
-      do_retry(context, attempt + 1)
+      do_retry(context, max_retries, attempt + 1)
     else
       {error, attempt}
     end
@@ -770,6 +866,8 @@ defmodule Tinkex.API do
         cond do
           lowered == "x-api-key" -> {name, Env.mask_secret(value)}
           lowered == "cf-access-client-secret" -> {name, Env.mask_secret(value)}
+          lowered == "authorization" -> {name, Env.mask_secret(value)}
+          lowered == "proxy-authorization" -> {name, Env.mask_secret(value)}
           true -> {name, value}
         end
 
@@ -824,6 +922,10 @@ defmodule Tinkex.API do
 
   defp maybe_put_roundtrip(headers, value) do
     [{"x-tinker-create-promise-roundtrip-time", to_string(value)} | headers]
+  end
+
+  defp config_default_headers(%{default_headers: headers}) when is_map(headers) do
+    Enum.map(headers, fn {k, v} -> {k, to_string(v)} end)
   end
 
   defp idempotency_headers(:get, _opts), do: []
@@ -968,6 +1070,23 @@ defmodule Tinkex.API do
     case Keyword.get(opts, :telemetry_metadata) do
       meta when is_map(meta) -> Map.merge(metadata, meta)
       _ -> metadata
+    end
+  end
+
+  @doc """
+  Resolve the HTTP client module for a request based on options/config.
+  """
+  @spec client_module(keyword()) :: module()
+  def client_module(opts) do
+    cond do
+      is_atom(opts[:http_client]) and not is_nil(opts[:http_client]) ->
+        opts[:http_client]
+
+      match?(%Tinkex.Config{http_client: client} when is_atom(client), Keyword.get(opts, :config)) ->
+        Keyword.fetch!(opts, :config).http_client
+
+      true ->
+        __MODULE__
     end
   end
 
