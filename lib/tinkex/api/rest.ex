@@ -47,12 +47,12 @@ defmodule Tinkex.API.Rest do
   List all checkpoints for the current user with pagination.
 
   ## Options
-    * `:limit` - Maximum number of checkpoints to return (default: 50)
+    * `:limit` - Maximum number of checkpoints to return (default: 100)
     * `:offset` - Offset for pagination (default: 0)
   """
   @spec list_user_checkpoints(Config.t(), integer(), integer()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
-  def list_user_checkpoints(config, limit \\ 50, offset \\ 0) do
+  def list_user_checkpoints(config, limit \\ 100, offset \\ 0) do
     path = "/api/v1/checkpoints?limit=#{limit}&offset=#{offset}"
     API.get(path, config: config, pool_type: :training)
   end
@@ -66,10 +66,20 @@ defmodule Tinkex.API.Rest do
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def get_checkpoint_archive_url(config, checkpoint_path) do
     with {:ok, {run_id, checkpoint_id}} <- parse_tinker_path(checkpoint_path) do
-      # Archive endpoint issues a redirect to the signed URL
-      path = "/api/v1/training_runs/#{run_id}/checkpoints/#{checkpoint_id}/archive"
-      API.get(path, config: config, pool_type: :training)
+      get_checkpoint_archive_url(config, run_id, checkpoint_id)
     end
+  end
+
+  @doc """
+  Get the archive download URL for a checkpoint by IDs.
+
+  The returned URL can be used to download the checkpoint archive.
+  """
+  @spec get_checkpoint_archive_url(Config.t(), String.t(), String.t()) ::
+          {:ok, map()} | {:error, Tinkex.Error.t()}
+  def get_checkpoint_archive_url(config, run_id, checkpoint_id) do
+    path = "/api/v1/training_runs/#{run_id}/checkpoints/#{checkpoint_id}/archive"
+    API.get(path, config: config, pool_type: :training)
   end
 
   @doc """
@@ -78,9 +88,18 @@ defmodule Tinkex.API.Rest do
   @spec delete_checkpoint(Config.t(), String.t()) :: {:ok, map()} | {:error, Tinkex.Error.t()}
   def delete_checkpoint(config, checkpoint_path) do
     with {:ok, {run_id, checkpoint_id}} <- parse_tinker_path(checkpoint_path) do
-      path = "/api/v1/training_runs/#{run_id}/checkpoints/#{checkpoint_id}"
-      API.delete(path, config: config, pool_type: :training)
+      delete_checkpoint(config, run_id, checkpoint_id)
     end
+  end
+
+  @doc """
+  Delete a checkpoint by training run and checkpoint ID.
+  """
+  @spec delete_checkpoint(Config.t(), String.t(), String.t()) ::
+          {:ok, map()} | {:error, Tinkex.Error.t()}
+  def delete_checkpoint(config, run_id, checkpoint_id) do
+    path = "/api/v1/training_runs/#{run_id}/checkpoints/#{checkpoint_id}"
+    API.delete(path, config: config, pool_type: :training)
   end
 
   @doc """

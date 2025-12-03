@@ -18,13 +18,15 @@ Each ServiceClient maintains sequencing counters for per-model operations; Train
 - `get_session/2` – fetch training run IDs and sampler IDs for a session.
 - `list_user_checkpoints/2` – paginate through the caller's checkpoints (with cursor metadata).
 - `list_checkpoints/2` – list checkpoints for a specific training run.
-- `get_checkpoint_archive_url/2` – return a signed download URL for a checkpoint (tinker paths supported).
+- `get_checkpoint_archive_url/2` / `get_checkpoint_archive_url/3` – return a signed download URL for a checkpoint (tinker paths and run/checkpoint IDs supported).
 - `get_checkpoint_archive_url_by_tinker_path/2` – alias for ergonomics (mirrors Python naming).
-- `delete_checkpoint/2` / `delete_checkpoint_by_tinker_path/2` – delete a checkpoint by `tinker://` path.
+- `delete_checkpoint/2` / `delete_checkpoint/3` / `delete_checkpoint_by_tinker_path/2` – delete a checkpoint by `tinker://` path or explicit IDs.
 - `publish_checkpoint/2` / `publish_checkpoint_from_tinker_path/2` and `unpublish_checkpoint/2` / `unpublish_checkpoint_from_tinker_path/2` – manage checkpoint visibility.
 - `get_training_run/2` / `get_training_run_by_tinker_path/2` – fetch training run metadata by ID or checkpoint tinker path.
 - `get_weights_info_by_tinker_path/2` – fetch checkpoint base model + LoRA metadata.
 - `get_sampler/2` – fetch sampler base model and optional model_path.
+
+Archive URL responses return both the signed URL and its expiration (`CheckpointArchiveUrlResponse.url` + `expires`).
 
 All methods return typed structs (`ListSessionsResponse`, `GetSessionResponse`, `CheckpointsListResponse`, `CheckpointArchiveUrlResponse`, `TrainingRun`, `WeightsInfoResponse`, `GetSamplerResponse`) to match the Python SDK wire format.
 

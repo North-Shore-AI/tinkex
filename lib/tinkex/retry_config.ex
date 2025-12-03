@@ -33,7 +33,7 @@ defmodule Tinkex.RetryConfig do
   @default_max_delay_ms 10_000
   @default_jitter_pct 0.25
   @default_progress_timeout_ms 7_200_000
-  @default_max_connections 100
+  @default_max_connections 1000
   @default_enable_retry_logic true
 
   @doc """

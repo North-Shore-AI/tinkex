@@ -5,9 +5,41 @@ defmodule Tinkex.SamplingClientTest do
   alias Tinkex.SamplingClient
   alias Tinkex.Types.{ModelInput, SampleResponse, SamplingParams}
 
+  defmodule ServiceApiStub do
+    def set_session_id(id), do: :persistent_term.put({__MODULE__, :session_id}, id)
+    def clear, do: :persistent_term.erase({__MODULE__, :session_id})
+
+    def create_sampling_session(_request, _opts) do
+      session_id = :persistent_term.get({__MODULE__, :session_id}, "sample-stub")
+      {:ok, %{"sampling_session_id" => session_id}}
+    end
+  end
+
+  defmodule SamplingApiStub do
+    def set_test_pid(pid), do: :persistent_term.put({__MODULE__, :test_pid}, pid)
+    def clear, do: :persistent_term.erase({__MODULE__, :test_pid})
+
+    def sample_async(request, _opts) do
+      test_pid = :persistent_term.get({__MODULE__, :test_pid})
+      seq_id = request.seq_id
+      send(test_pid, {:request_started, seq_id, self()})
+
+      receive do
+        {:continue, ^seq_id} -> :ok
+      end
+
+      {:ok, %{"sequences" => [%{"tokens" => [seq_id]}]}}
+    end
+  end
+
   setup :setup_http_client
 
   setup do
+    on_exit(fn ->
+      SamplingApiStub.clear()
+      ServiceApiStub.clear()
+    end)
+
     {:ok, _} = Application.ensure_all_started(:tinkex)
     :ok
   end
@@ -123,6 +155,46 @@ defmodule Tinkex.SamplingClientTest do
     assert RateLimiter.should_backoff?(entry.rate_limiter)
   end
 
+  test "applies default backoff when retry-after is missing", %{bypass: bypass, config: config} do
+    Bypass.expect(bypass, fn conn ->
+      {:ok, _body, conn} = Plug.Conn.read_body(conn)
+
+      case conn.request_path do
+        "/api/v1/create_sampling_session" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"sampling_session_id":"sample-default-rl"}))
+
+        "/api/v1/asample" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(429, ~s({"error":"rate"}))
+      end
+    end)
+
+    {:ok, client} =
+      SamplingClient.start_link(
+        session_id: "sess-default-rl",
+        sampling_client_id: 0,
+        base_model: "base",
+        config: config,
+        retry_config: [enable_retry_logic: false]
+      )
+
+    [{_, entry}] = :ets.lookup(:tinkex_sampling_clients, {:config, client})
+    start_ms = System.monotonic_time(:millisecond)
+
+    prompt = ModelInput.from_ints([1])
+    params = %SamplingParams{max_tokens: 1, temperature: 0.5}
+
+    {:ok, task} = SamplingClient.sample(client, prompt, params)
+    assert {:error, %Tinkex.Error{status: 429}} = Task.await(task, 5_000)
+
+    backoff_until = :atomics.get(entry.rate_limiter, 1)
+    assert backoff_until > start_ms
+    assert_in_delta(backoff_until - start_ms, 1_000, 250)
+  end
+
   test "clients with same config share rate limiter", %{bypass: bypass, config: config} do
     {:ok, counter} = Agent.start_link(fn -> 0 end)
 
@@ -158,6 +230,40 @@ defmodule Tinkex.SamplingClientTest do
     [{_, entry2}] = :ets.lookup(:tinkex_sampling_clients, {:config, client2})
 
     assert entry1.rate_limiter == entry2.rate_limiter
+  end
+
+  test "dispatch semaphore gates concurrent sampling", %{config: config} do
+    ServiceApiStub.set_session_id("dispatch-session")
+    SamplingApiStub.set_test_pid(self())
+
+    {:ok, client} =
+      SamplingClient.start_link(
+        session_id: "sess-dispatch",
+        sampling_client_id: 0,
+        base_model: "base",
+        config: config,
+        sampling_api: SamplingApiStub,
+        service_api: ServiceApiStub,
+        dispatch_concurrency: 1,
+        retry_config: [enable_retry_logic: false]
+      )
+
+    prompt = ModelInput.from_ints([1, 2, 3])
+    params = %SamplingParams{max_tokens: 2, temperature: 0.7}
+
+    {:ok, task1} = SamplingClient.sample(client, prompt, params)
+    {:ok, task2} = SamplingClient.sample(client, prompt, params)
+
+    assert_receive {:request_started, 0, pid1}, 1_000
+    refute_receive {:request_started, _, _}, 150
+
+    send(pid1, {:continue, 0})
+
+    assert_receive {:request_started, 1, pid2}, 1_000
+    send(pid2, {:continue, 1})
+
+    assert {:ok, %SampleResponse{}} = Task.await(task1, 1_000)
+    assert {:ok, %SampleResponse{}} = Task.await(task2, 1_000)
   end
 
   test "compute_logprobs requests prompt logprobs and returns values",

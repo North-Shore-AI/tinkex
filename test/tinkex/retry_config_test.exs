@@ -12,7 +12,7 @@ defmodule Tinkex.RetryConfigTest do
       assert config.max_delay_ms == 10_000
       assert config.jitter_pct == 0.25
       assert config.progress_timeout_ms == 7_200_000
-      assert config.max_connections == 100
+      assert config.max_connections == 1000
       assert config.enable_retry_logic == true
     end
 

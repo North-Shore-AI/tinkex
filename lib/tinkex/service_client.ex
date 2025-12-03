@@ -13,6 +13,7 @@ defmodule Tinkex.ServiceClient do
 
   alias Tinkex.API.Service
   alias Tinkex.Config
+  alias Tinkex.Error
   alias Tinkex.RestClient
   alias Tinkex.SessionManager
   alias Tinkex.Telemetry
@@ -298,23 +299,25 @@ defmodule Tinkex.ServiceClient do
   def handle_call({:create_training_client, base_model, opts}, _from, state) do
     model_seq_id = state.training_client_counter
 
-    child_opts =
-      opts
-      |> normalize_training_opts()
-      |> Keyword.put(:base_model, base_model)
-      |> Keyword.put(:session_id, state.session_id)
-      |> Keyword.put(:config, state.config)
-      |> Keyword.put(:model_seq_id, model_seq_id)
-      |> Keyword.put(:client_supervisor, state.client_supervisor)
-      |> Keyword.put(:telemetry, state.telemetry)
-      |> Keyword.put(:telemetry_metadata, state.telemetry_metadata)
-
-    case DynamicSupervisor.start_child(
-           state.client_supervisor,
-           {state.training_client_module, child_opts}
-         ) do
-      {:ok, pid} ->
-        {:reply, {:ok, pid}, %{state | training_client_counter: model_seq_id + 1}}
+    with {:ok, normalized_opts} <- normalize_training_opts(opts),
+         child_opts <-
+           normalized_opts
+           |> Keyword.put(:base_model, base_model)
+           |> Keyword.put(:session_id, state.session_id)
+           |> Keyword.put(:config, state.config)
+           |> Keyword.put(:model_seq_id, model_seq_id)
+           |> Keyword.put(:client_supervisor, state.client_supervisor)
+           |> Keyword.put(:telemetry, state.telemetry)
+           |> Keyword.put(:telemetry_metadata, state.telemetry_metadata),
+         {:ok, pid} <-
+           DynamicSupervisor.start_child(
+             state.client_supervisor,
+             {state.training_client_module, child_opts}
+           ) do
+      {:reply, {:ok, pid}, %{state | training_client_counter: model_seq_id + 1}}
+    else
+      {:error, %Error{} = error} ->
+        {:reply, {:error, error}, state}
 
       {:error, _} = error ->
         {:reply, error, state}
@@ -359,20 +362,23 @@ defmodule Tinkex.ServiceClient do
   def handle_call({:create_sampling_client, opts}, _from, state) do
     sampling_client_id = state.sampling_client_counter
 
-    child_opts =
-      opts
-      |> Keyword.put(:session_id, state.session_id)
-      |> Keyword.put(:config, state.config)
-      |> Keyword.put(:sampling_client_id, sampling_client_id)
-      |> Keyword.put(:telemetry, state.telemetry)
-      |> Keyword.put(:telemetry_metadata, state.telemetry_metadata)
-
-    case DynamicSupervisor.start_child(
-           state.client_supervisor,
-           {state.sampling_client_module, child_opts}
-         ) do
-      {:ok, pid} ->
-        {:reply, {:ok, pid}, %{state | sampling_client_counter: sampling_client_id + 1}}
+    with :ok <- validate_sampling_opts(opts),
+         child_opts <-
+           opts
+           |> Keyword.put(:session_id, state.session_id)
+           |> Keyword.put(:config, state.config)
+           |> Keyword.put(:sampling_client_id, sampling_client_id)
+           |> Keyword.put(:telemetry, state.telemetry)
+           |> Keyword.put(:telemetry_metadata, state.telemetry_metadata),
+         {:ok, pid} <-
+           DynamicSupervisor.start_child(
+             state.client_supervisor,
+             {state.sampling_client_module, child_opts}
+           ) do
+      {:reply, {:ok, pid}, %{state | sampling_client_counter: sampling_client_id + 1}}
+    else
+      {:error, %Error{} = error} ->
+        {:reply, {:error, error}, state}
 
       {:error, _} = error ->
         {:reply, error, state}
@@ -437,23 +443,26 @@ defmodule Tinkex.ServiceClient do
   defp start_training_client_from_weights(weights_info, opts, state) do
     model_seq_id = state.training_client_counter
 
-    child_opts =
-      opts
-      |> Keyword.put(:session_id, state.session_id)
-      |> Keyword.put(:config, state.config)
-      |> Keyword.put(:model_seq_id, model_seq_id)
-      |> Keyword.put(:base_model, weights_info.base_model)
-      |> Keyword.put(:lora_config, lora_config_from_weights_info(weights_info))
-      |> Keyword.put(:client_supervisor, state.client_supervisor)
-      |> Keyword.put(:telemetry, state.telemetry)
-      |> Keyword.put(:telemetry_metadata, state.telemetry_metadata)
-
-    case DynamicSupervisor.start_child(
-           state.client_supervisor,
-           {state.training_client_module, child_opts}
-         ) do
-      {:ok, pid} ->
-        {:ok, pid, model_seq_id + 1}
+    with {:ok, lora_config} <- validate_lora_config(lora_config_from_weights_info(weights_info)),
+         child_opts <-
+           opts
+           |> Keyword.put(:session_id, state.session_id)
+           |> Keyword.put(:config, state.config)
+           |> Keyword.put(:model_seq_id, model_seq_id)
+           |> Keyword.put(:base_model, weights_info.base_model)
+           |> Keyword.put(:lora_config, lora_config)
+           |> Keyword.put(:client_supervisor, state.client_supervisor)
+           |> Keyword.put(:telemetry, state.telemetry)
+           |> Keyword.put(:telemetry_metadata, state.telemetry_metadata),
+         {:ok, pid} <-
+           DynamicSupervisor.start_child(
+             state.client_supervisor,
+             {state.training_client_module, child_opts}
+           ) do
+      {:ok, pid, model_seq_id + 1}
+    else
+      {:error, %Error{} = error} ->
+        {:error, error}
 
       {:error, _} = error ->
         error
@@ -494,11 +503,12 @@ defmodule Tinkex.ServiceClient do
     do: %LoraConfig{rank: rank}
 
   defp normalize_training_opts(opts) do
-    lora_config = resolve_lora_config(opts)
-
-    opts
-    |> Keyword.put(:lora_config, lora_config)
-    |> Keyword.drop([:rank, :seed, :train_mlp, :train_attn, :train_unembed])
+    with {:ok, lora_config} <- build_lora_config(opts) do
+      {:ok,
+       opts
+       |> Keyword.put(:lora_config, lora_config)
+       |> Keyword.drop([:rank, :seed, :train_mlp, :train_attn, :train_unembed])}
+    end
   end
 
   defp resolve_lora_config(opts) do
@@ -532,6 +542,38 @@ defmodule Tinkex.ServiceClient do
 
   defp maybe_override(config, _field, nil), do: config
   defp maybe_override(%LoraConfig{} = config, field, value), do: Map.put(config, field, value)
+
+  defp build_lora_config(opts) do
+    opts
+    |> resolve_lora_config()
+    |> validate_lora_config()
+  end
+
+  defp validate_lora_config(%LoraConfig{} = config) do
+    if config.train_mlp or config.train_attn or config.train_unembed do
+      {:ok, config}
+    else
+      {:error,
+       Error.new(
+         :validation,
+         "At least one of train_mlp, train_attn, or train_unembed must be true",
+         category: :user
+       )}
+    end
+  end
+
+  defp validate_sampling_opts(opts) do
+    case {Keyword.get(opts, :model_path), Keyword.get(opts, :base_model)} do
+      {nil, nil} ->
+        {:error,
+         Error.new(:validation, "Either model_path or base_model must be provided",
+           category: :user
+         )}
+
+      _ ->
+        :ok
+    end
+  end
 
   defp init_telemetry(session_id, config, opts) do
     telemetry_opts = Keyword.get(opts, :telemetry_opts, [])

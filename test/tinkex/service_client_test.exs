@@ -140,6 +140,32 @@ defmodule Tinkex.ServiceClientTest do
     GenServer.stop(pid)
   end
 
+  test "create_lora_training_client rejects all train_* flags disabled", %{
+    bypass: bypass,
+    config: config,
+    manager: manager
+  } do
+    expect_create_session(bypass, "service-session-train-flags")
+
+    {:ok, pid} =
+      ServiceClient.start_link(
+        config: config,
+        training_client_module: TrainingClientStub,
+        sampling_client_module: SamplingClientStub,
+        session_manager: manager
+      )
+
+    opts = [train_mlp: false, train_attn: false, train_unembed: false]
+
+    assert {:error, %Tinkex.Error{type: :validation}} =
+             ServiceClient.create_lora_training_client(pid, "base-model", opts)
+
+    task = ServiceClient.create_lora_training_client_async(pid, "base-model", opts)
+    assert {:error, %Tinkex.Error{type: :validation}} = Task.await(task)
+
+    GenServer.stop(pid)
+  end
+
   test "create_sampling_client starts supervised child with sequencing", %{
     bypass: bypass,
     config: config,
@@ -155,11 +181,35 @@ defmodule Tinkex.ServiceClientTest do
         session_manager: manager
       )
 
-    {:ok, child1} = ServiceClient.create_sampling_client(pid, model: "m1")
-    {:ok, child2} = ServiceClient.create_sampling_client(pid, model: "m2")
+    {:ok, child1} = ServiceClient.create_sampling_client(pid, base_model: "m1")
+    {:ok, child2} = ServiceClient.create_sampling_client(pid, base_model: "m2")
 
     assert %{sampling_client_id: 0, session_id: "service-session-3"} = :sys.get_state(child1)
     assert %{sampling_client_id: 1, session_id: "service-session-3"} = :sys.get_state(child2)
+
+    GenServer.stop(pid)
+  end
+
+  test "create_sampling_client validates presence of model_path or base_model", %{
+    bypass: bypass,
+    config: config,
+    manager: manager
+  } do
+    expect_create_session(bypass, "service-session-missing-model")
+
+    {:ok, pid} =
+      ServiceClient.start_link(
+        config: config,
+        training_client_module: TrainingClientStub,
+        sampling_client_module: SamplingClientStub,
+        session_manager: manager
+      )
+
+    assert {:error, %Tinkex.Error{type: :validation}} =
+             ServiceClient.create_sampling_client(pid, [])
+
+    task = ServiceClient.create_sampling_client_async(pid, [])
+    assert {:error, %Tinkex.Error{type: :validation}} = Task.await(task)
 
     GenServer.stop(pid)
   end

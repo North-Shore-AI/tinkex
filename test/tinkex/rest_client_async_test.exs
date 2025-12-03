@@ -81,6 +81,9 @@ defmodule Tinkex.RestClientAsyncTest do
 
     test "list_user_checkpoints_async/2 returns task", %{bypass: bypass, config: config} do
       Bypass.expect_once(bypass, "GET", "/api/v1/checkpoints", fn conn ->
+        assert conn.query_params["limit"] == "100"
+        assert conn.query_params["offset"] == "0"
+
         conn
         |> Plug.Conn.put_resp_content_type("application/json")
         |> Plug.Conn.resp(200, ~s({"checkpoints": [], "cursor": null}))
@@ -128,6 +131,24 @@ defmodule Tinkex.RestClientAsyncTest do
       {:ok, _response} = Task.await(task)
     end
 
+    test "delete_checkpoint_async/3 returns task", %{bypass: bypass, config: config} do
+      Bypass.expect_once(
+        bypass,
+        "DELETE",
+        "/api/v1/training_runs/run-abc/checkpoints/ckpt-9",
+        fn conn ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"status": "deleted"}))
+        end
+      )
+
+      client = RestClient.new("session-123", config)
+      task = RestClient.delete_checkpoint_async(client, "run-abc", "ckpt-9")
+
+      {:ok, _response} = Task.await(task)
+    end
+
     test "publish_checkpoint_async/2 returns task", %{bypass: bypass, config: config} do
       Bypass.expect_once(
         bypass,
@@ -154,6 +175,7 @@ defmodule Tinkex.RestClientAsyncTest do
         fn conn ->
           conn
           |> Plug.Conn.put_resp_header("location", "https://storage.example.com/ckpt.tar")
+          |> Plug.Conn.put_resp_header("expires", "2025-12-03T10:00:00Z")
           |> Plug.Conn.resp(302, "")
         end
       )
@@ -164,6 +186,26 @@ defmodule Tinkex.RestClientAsyncTest do
       {:ok, response} = Task.await(task)
       assert %CheckpointArchiveUrlResponse{} = response
       assert response.url == "https://storage.example.com/ckpt.tar"
+      assert %DateTime{} = response.expires
+    end
+
+    test "get_checkpoint_archive_url_async/3 returns task", %{bypass: bypass, config: config} do
+      Bypass.expect_once(
+        bypass,
+        "GET",
+        "/api/v1/training_runs/run-ids/checkpoints/ckpt-7/archive",
+        fn conn ->
+          conn
+          |> Plug.Conn.put_resp_header("location", "https://storage.example.com/ckpt7.tar")
+          |> Plug.Conn.resp(302, "")
+        end
+      )
+
+      client = RestClient.new("session-123", config)
+      task = RestClient.get_checkpoint_archive_url_async(client, "run-ids", "ckpt-7")
+
+      {:ok, response} = Task.await(task)
+      assert response.url == "https://storage.example.com/ckpt7.tar"
     end
   end
 

@@ -578,9 +578,13 @@ For more detailed information about specific SDK features and APIs, refer to the
 $ ./examples/run_all.sh
 
 ==> Running examples/sampling_basic.exs
+Compiling 7 files (.ex)
+Generated tinkex app
 Sampling 1 sequence(s) from meta-llama/Llama-3.1-8B ...
 Received 1 sequence(s):
-Sample 1:  I'm a new member here. I'm very excited to find out about a place like this. I have polycystic ovaries and I'm in the process of trying to get pregnant and I'm really looking for some help and support. I have been trying to get pregnant since I was 19, and
+Sample 1:  A new brand of personalised stationery that is all about adding joy to your day. We create unique personalised stationery that you can use for yourself or gift to your loved ones.
+Tinkex is founded by a mother of 3 who is a stationery geek.
+We create unique designer stationery that is not readily
 
 ==> Running examples/training_loop.exs
 ----------------------------------------
@@ -590,24 +594,24 @@ Prompt: 'Fine-tuning sample prompt'
 Sample after training: false
 
 [step] creating ServiceClient...
-[step] creating ServiceClient completed in 760ms
+[step] creating ServiceClient completed in 606ms
 [step] creating TrainingClient (LoRA rank=16)...
 [note] this may take 30-120s on first run (model loading)...
-[step] creating TrainingClient (LoRA rank=16) completed in 320ms
+[step] creating TrainingClient (LoRA rank=16) completed in 317ms
 [step] building model input...
 [step] got 6 tokens: [128000, 64816, 2442, 38302, 6205, 10137]
-[step] building model input completed in 1.73s
+[step] building model input completed in 1.87s
 [step] running forward_backward...
-[step] forward_backward completed in 2.11s
-[metrics] forward_backward: %{"clock_cycle:unique" => 1773468.0, "loss:sum" => 85.29592895507812}
+[step] forward_backward completed in 9.8s
+[metrics] forward_backward: %{"clock_cycle:unique" => 668517.0, "loss:sum" => 85.29592895507812}
 [step] running optim_step...
-[step] optim_step completed in 708ms
+[step] optim_step completed in 873ms
 [metrics] optim_step: (none - optimizer doesn't compute metrics)
 [step] saving weights for sampler...
-[step] save_weights_for_sampler completed in 2.96s
-[result] save_weights: %{"path" => "tinker://50398661-7150-5042-9891-5611cb535340:train:0/sampler_weights/sampler-weights", "sampling_session_id" => nil, "size_bytes" => nil, "type" => "save_weights_for_sampler"}
+[step] save_weights_for_sampler completed in 4.03s
+[result] save_weights: %{"path" => "tinker://39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0/sampler_weights/sampler-weights", "sampling_session_id" => nil, "size_bytes" => nil, "type" => "save_weights_for_sampler"}
 
-[done] Training loop finished in 5.79s
+[done] Training loop finished in 14.71s
 
 ==> Running examples/custom_loss_training.exs
 ================================================================================
@@ -621,14 +625,14 @@ Creating training client...
 Preparing training datum for prompt: Name three planets in the solar system.
 
 Running forward_backward_custom...
-Custom loss completed in 4164 ms
+Custom loss completed in 20292 ms
 
 Running optim_step...
 optim_step succeeded.
 
 === ForwardBackwardOutput ===
 loss_fn_output_type: CrossEntropyLossReturn
-metrics: %{"clock_cycle:unique" => 1773473.0, "custom_perplexity" => 201762.703125, "loss:sum" => 12.214847564697266}
+metrics: %{"clock_cycle:unique" => 668522.0, "custom_perplexity" => 201762.703125, "loss:sum" => 12.214847564697266}
 loss_fn_outputs (truncated):
 [
   %{
@@ -652,8 +656,6 @@ loss_fn_outputs (truncated):
 Success! Gradients were sent to the backend and optim_step is ready.
 
 ==> Running examples/forward_inference.exs
-Compiling 2 files (.ex)
-Generated tinkex app
 === Forward Inference Example ===
 Base URL: https://tinker.thinkingmachines.dev/services/tinker-prod
 Base model: meta-llama/Llama-3.1-8B
@@ -665,9 +667,9 @@ Token count: 6
 
 Running forward pass (inference only, no backward)...
 
-Forward pass completed in 4321ms
+Forward pass completed in 10357ms
 Output type: CrossEntropyLossReturn
-Metrics: %{"clock_cycle:unique" => 1773476.0, "loss:sum" => 71.73094177246094}
+Metrics: %{"clock_cycle:unique" => 3556618.0, "loss:sum" => 71.73094177246094}
 Number of loss_fn_outputs: 1
 
 === Nx Tensor Conversion Demo ===
@@ -757,8 +759,8 @@ Per-regularizer gradient norms:
 --- 7. Sequential vs Parallel Execution ---
 
 Execution time comparison:
-  Parallel: 273 μs
-  Sequential: 181 μs
+  Parallel: 471 μs
+  Sequential: 242 μs
   Results match: true
 
 --- 8. Async Regularizers (for I/O-bound operations) ---
@@ -767,7 +769,7 @@ Created async regularizer (simulates external API call)
 Async regularizer result:
   loss_total: 1.1016
   async_external_validation contribution: 0.0216
-  Execution time: 10950 μs
+  Execution time: 11387 μs
 
 --- 9. Direct Executor Usage ---
 
@@ -795,21 +797,21 @@ Gradient norm for sum(x^2):
 --- 11. Telemetry Integration ---
 
 
-16:40:25.431 [info] The function passed as a handler with ID "tinkex-regularizer-8195" is a local function.
+10:32:48.777 [info] The function passed as a handler with ID "tinkex-regularizer-5186" is a local function.
 This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.
 
 https://hexdocs.pm/telemetry/telemetry.html#attach/4
-Attached telemetry handler: tinkex-regularizer-8195
+Attached telemetry handler: tinkex-regularizer-5186
 
 Running pipeline with telemetry (watch for log output):
 
-16:40:25.437 [info] Custom loss starting: regularizers=1 track_grad_norms=true
+10:32:48.784 [info] Custom loss starting: regularizers=1 track_grad_norms=true
 
-16:40:25.437 [info] Regularizer l1_sparsity starting
+10:32:48.784 [info] Regularizer l1_sparsity starting
 
-16:40:25.437 [info] Regularizer l1_sparsity value=10.8 contribution=0.108 in 0ms grad_norm=3.1623
+10:32:48.784 [info] Regularizer l1_sparsity value=10.8 contribution=0.108 in 0ms grad_norm=3.1623
 
-16:40:25.437 [info] Custom loss computed in 0ms total=1.188 regularizer_total=0.108 regularizers=1
+10:32:48.784 [info] Custom loss computed in 0ms total=1.188 regularizer_total=0.108 regularizers=1
 Detached telemetry handler
 
 --- 12. JSON Serialization ---
@@ -973,11 +975,11 @@ Token count: 11
 
 --- Running forward_backward_custom (Live API) ---
 
-Completed in 7095ms
+Completed in 6125ms
 
 === Metrics ===
 base_nll: 12.02071
-clock_cycle:unique: 1773479.0
+clock_cycle:unique: 668526.0
 custom_perplexity: 166160.59375
 entropy: -5.0e-6
 l1: 1.322278
@@ -995,18 +997,18 @@ Creating RestClient...
 
 --- Listing Sessions ---
 Found 10 sessions:
-  • e47047ab-6885-5b39-b648-b9873e4b3f77
-  • 9f84518a-b264-5009-bca5-46d764f8d5b0
-  • 9f773e1a-5187-5bf9-9f4b-2c293dd55602
-  • 20a7d022-5706-5388-8869-ef4d3c703496
-  • 50398661-7150-5042-9891-5611cb535340
-  • 9f82c0d6-3f6e-5560-b5e5-9a60b151bbd3
-  • 8ad60bdf-fd24-5867-8ee4-e731b81caff0
-  • 10f2a665-dd9a-54c0-8dd9-d2dcdb4a2c46
-  • 127a4ed4-9357-5f7f-ab25-b822f925016e
-  • 984a07be-3844-549a-82a3-09ffd3cdc9cf
+  • 1b237267-9f76-5a03-9ea8-96578ddbe935
+  • bef237d2-e7dc-54ae-8055-55b143264cbd
+  • 046c901d-5e46-5982-a80d-32fcc2acfb9f
+  • e461bab9-a627-5c7b-889b-26b744d46df3
+  • 39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4
+  • ae3e031a-e2a4-512a-8d85-708e93dd4f1b
+  • 0ba9f266-961a-5c66-8bed-a5103ed577bd
+  • f9ee4b55-c2b5-59da-9c4a-e15b50d13845
+  • f66b0737-c942-5f75-831a-b86dbd5c4d7e
+  • c86fee95-7c04-5163-a4ca-9f9002fd49c7
 
---- Session Details: e47047ab-6885-5b39-b648-b9873e4b3f77 ---
+--- Session Details: 1b237267-9f76-5a03-9ea8-96578ddbe935 ---
 Training Runs: 0
 Samplers: 0
 
@@ -1016,7 +1018,21 @@ Samplers: 0
 === Tinkex Checkpoint Management Example ===
 
 --- All User Checkpoints ---
-Found 6 of 90 checkpoints:
+Found 20 of 92 checkpoints:
+
+  sampler_weights/sampler-weights
+    Path: tinker://39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-12-03T20:32:09.677474Z
+
+  weights/async_demo_checkpoint
+    Path: tinker://170beeb9-9fa9-5011-b896-ba0616c7e94d:train:0/weights/async_demo_checkpoint
+    Type: training
+    Size: 153.0 MB
+    Public: false
+    Created: 2025-11-28T02:43:17.958810Z
 
   sampler_weights/sampler-weights
     Path: tinker://50398661-7150-5042-9891-5611cb535340:train:0/sampler_weights/sampler-weights
@@ -1060,6 +1076,90 @@ Found 6 of 90 checkpoints:
     Public: false
     Created: 2025-11-27T18:58:37.961274Z
 
+  sampler_weights/sampler-weights
+    Path: tinker://f4521144-ef58-53ec-950c-29260c9b1a41:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-27T18:44:47.285732Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://1ec257a9-28bf-559c-aa73-e54a09cce5bd:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-27T18:37:23.205082Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://046c91d9-d9f4-5dd6-ac42-0135bbde947e:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-27T18:15:50.316094Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://fdf7af94-bcce-5bf7-847b-a159e8bfb025:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-27T18:11:28.567500Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://8eba0a5a-0dcf-57f3-9d0d-65ec6ef22a1f:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-27T17:53:03.197669Z
+
+  sampler_weights/checkpoint_1764230891.2048833.pt
+    Path: tinker://fa0ecefc-83b2-5e26-a2a9-aee483b913ba:train:0/sampler_weights/checkpoint_1764230891.2048833.pt
+    Type: sampler
+    Size: 5.77 GB
+    Public: false
+    Created: 2025-11-27T08:09:13.441453Z
+
+  sampler_weights/checkpoint_1764230289.3815918.pt
+    Path: tinker://bc33563e-6730-5cbe-9a25-43e11dbe5095:train:0/sampler_weights/checkpoint_1764230289.3815918.pt
+    Type: sampler
+    Size: 5.77 GB
+    Public: false
+    Created: 2025-11-27T07:59:06.047243Z
+
+  sampler_weights/checkpoint_1764229717.8670213.pt
+    Path: tinker://bfc7c5e5-0b90-55a1-8c97-fc8bdac649c9:train:0/sampler_weights/checkpoint_1764229717.8670213.pt
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-27T07:48:41.184106Z
+
+  sampler_weights/checkpoint_1764229539.9387324.pt
+    Path: tinker://9922175e-533d-52e3-a433-5e0fa645462c:train:0/sampler_weights/checkpoint_1764229539.9387324.pt
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-11-27T07:45:42.982073Z
+
+  weights/demo-checkpoint-1764228622
+    Path: tinker://8c4cfd17-df85-5634-badf-e12068d2efc8:train:0/weights/demo-checkpoint-1764228622
+    Type: training
+    Size: 126.3 MB
+    Public: false
+    Created: 2025-11-27T07:30:37.300885Z
+
+  sampler_weights/checkpoint_1764215477.2502818.pt
+    Path: tinker://daba87c6-4e86-5797-81d5-efe038b44524:train:0/sampler_weights/checkpoint_1764215477.2502818.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-27T03:51:18.921217Z
+
+  sampler_weights/checkpoint_1764127354.6624672.pt
+    Path: tinker://d0fde479-adea-5e5a-9974-1196f01fbb82:train:0/sampler_weights/checkpoint_1764127354.6624672.pt
+    Type: sampler
+    Size: 84.1 MB
+    Public: false
+    Created: 2025-11-26T03:22:37.215881Z
+
 
 === Example Complete ===
 
@@ -1069,70 +1169,70 @@ Found 6 of 90 checkpoints:
 --- Training Runs ---
 Found 10 training runs:
 
-  9f84518a-b264-5009-bca5-46d764f8d5b0:train:0
+  bef237d2-e7dc-54ae-8055-55b143264cbd:train:0
     Base Model: meta-llama/Llama-3.1-8B
     Is LoRA: true, Rank: 16
     Corrupted: false
     Last Checkpoint: none
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  9f773e1a-5187-5bf9-9f4b-2c293dd55602:train:0
+  046c901d-5e46-5982-a80d-32fcc2acfb9f:train:0
     Base Model: meta-llama/Llama-3.1-8B
     Is LoRA: true, Rank: 16
     Corrupted: false
     Last Checkpoint: none
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  20a7d022-5706-5388-8869-ef4d3c703496:train:0
+  e461bab9-a627-5c7b-889b-26b744d46df3:train:0
     Base Model: meta-llama/Llama-3.1-8B
     Is LoRA: true, Rank: 16
     Corrupted: false
     Last Checkpoint: none
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  50398661-7150-5042-9891-5611cb535340:train:0
+  39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0
     Base Model: meta-llama/Llama-3.1-8B
     Is LoRA: true, Rank: 16
     Corrupted: false
     Last Checkpoint: none
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  8ad60bdf-fd24-5867-8ee4-e731b81caff0:train:0
+  0ba9f266-961a-5c66-8bed-a5103ed577bd:train:0
     Base Model: meta-llama/Llama-3.1-8B
-    Is LoRA: true, Rank: 16
+    Is LoRA: true, Rank: 8
     Corrupted: false
     Last Checkpoint: none
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  10f2a665-dd9a-54c0-8dd9-d2dcdb4a2c46:train:0
+  f9ee4b55-c2b5-59da-9c4a-e15b50d13845:train:0
     Base Model: meta-llama/Llama-3.1-8B
-    Is LoRA: true, Rank: 16
+    Is LoRA: true, Rank: 8
     Corrupted: false
     Last Checkpoint: none
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  127a4ed4-9357-5f7f-ab25-b822f925016e:train:0
-    Base Model: meta-llama/Llama-3.1-8B
-    Is LoRA: true, Rank: 16
+  598b870d-dc81-5be9-9581-d4c3bffb44be:train:0
+    Base Model: meta-llama/Llama-3.2-1B
+    Is LoRA: true, Rank: 32
     Corrupted: false
     Last Checkpoint: none
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  984a07be-3844-549a-82a3-09ffd3cdc9cf:train:0
-    Base Model: meta-llama/Llama-3.1-8B
-    Is LoRA: true, Rank: 16
+  cd663bca-7892-55cb-be4e-c7b646d850b2:train:0
+    Base Model: meta-llama/Llama-3.2-1B
+    Is LoRA: true, Rank: 32
     Corrupted: false
     Last Checkpoint: none
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  a5d5031a-72a5-5180-8417-e32c5c0a9598:train:0
-    Base Model: meta-llama/Llama-3.1-8B
-    Is LoRA: true, Rank: 16
+  a847bd03-868b-5c68-b726-5a8bd072625a:train:0
+    Base Model: meta-llama/Llama-3.2-1B
+    Is LoRA: true, Rank: 32
     Corrupted: false
     Last Checkpoint: none
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  47f7276e-454e-5dde-9188-1c1e3c3536b5:train:1
+  7c78675f-2d36-5aca-a0ec-bef786762a91:train:0
     Base Model: meta-llama/Llama-3.2-1B
     Is LoRA: true, Rank: 32
     Corrupted: false
@@ -1140,19 +1240,31 @@ Found 10 training runs:
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
 
---- Training Run Details: 9f84518a-b264-5009-bca5-46d764f8d5b0:train:0 ---
-  ID: 9f84518a-b264-5009-bca5-46d764f8d5b0:train:0
+--- Training Run Details: bef237d2-e7dc-54ae-8055-55b143264cbd:train:0 ---
+  ID: bef237d2-e7dc-54ae-8055-55b143264cbd:train:0
   Base Model: meta-llama/Llama-3.1-8B
   Is LoRA: true
   LoRA Rank: 16
   Corrupted: false
   Last Checkpoint: none
   Last Sampler Checkpoint: none
-  Last Request: 2025-11-28 02:40:36.691803Z
+  Last Request: 2025-12-03 20:32:55.109826Z
   Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
 --- User Checkpoints ---
-Found 2 checkpoint(s):
+Found 10 checkpoint(s):
+
+  tinker://39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    ID: sampler_weights/sampler-weights
+    Size: 84.1 MB
+    Time: 2025-12-03T20:32:09.677474Z
+
+  tinker://170beeb9-9fa9-5011-b896-ba0616c7e94d:train:0/weights/async_demo_checkpoint
+    Type: training
+    ID: weights/async_demo_checkpoint
+    Size: 152.98 MB
+    Time: 2025-11-28T02:43:17.958810Z
 
   tinker://50398661-7150-5042-9891-5611cb535340:train:0/sampler_weights/sampler-weights
     Type: sampler
@@ -1166,6 +1278,42 @@ Found 2 checkpoint(s):
     Size: 84.1 MB
     Time: 2025-11-28T02:32:20.546936Z
 
+  tinker://47f7276e-454e-5dde-9188-1c1e3c3536b5:train:0/weights/async_demo_checkpoint
+    Type: training
+    ID: weights/async_demo_checkpoint
+    Size: 152.98 MB
+    Time: 2025-11-28T02:31:18.060463Z
+
+  tinker://a7517405-527c-571e-9fe2-c94e6b3cf548:train:0/sampler_weights/async_demo_weights
+    Type: sampler
+    ID: sampler_weights/async_demo_weights
+    Size: 50.98 MB
+    Time: 2025-11-28T02:30:25.465448Z
+
+  tinker://73c466d3-b063-56a2-86d0-d035a1392c23:train:0/sampler_weights/async_demo_weights
+    Type: sampler
+    ID: sampler_weights/async_demo_weights
+    Size: 50.98 MB
+    Time: 2025-11-28T02:29:56.731159Z
+
+  tinker://53f0586d-3f98-58e5-b04e-297ea717378e:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    ID: sampler_weights/sampler-weights
+    Size: 84.1 MB
+    Time: 2025-11-27T18:58:37.961274Z
+
+  tinker://f4521144-ef58-53ec-950c-29260c9b1a41:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    ID: sampler_weights/sampler-weights
+    Size: 84.1 MB
+    Time: 2025-11-27T18:44:47.285732Z
+
+  tinker://1ec257a9-28bf-559c-aa73-e54a09cce5bd:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    ID: sampler_weights/sampler-weights
+    Size: 84.1 MB
+    Time: 2025-11-27T18:37:23.205082Z
+
 
 === Example Complete ===
 
@@ -1173,15 +1321,15 @@ Found 2 checkpoint(s):
 === Tinkex Checkpoint Download Example ===
 
 TINKER_CHECKPOINT_PATH not provided; downloading first available checkpoint:
-  tinker://50398661-7150-5042-9891-5611cb535340:train:0/sampler_weights/sampler-weights
+  tinker://39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0/sampler_weights/sampler-weights
 
-Downloading checkpoint: tinker://50398661-7150-5042-9891-5611cb535340:train:0/sampler_weights/sampler-weights
+Downloading checkpoint: tinker://39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0/sampler_weights/sampler-weights
 Output directory: /tmp/tinkex_checkpoints
 
 Progress: 100.0% (84.1 MB / 84.1 MB)
 
 Download complete!
-Extracted to: /tmp/tinkex_checkpoints/50398661-7150-5042-9891-5611cb535340:train:0_sampler_weights_sampler-weights
+Extracted to: /tmp/tinkex_checkpoints/39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0_sampler_weights_sampler-weights
 
 Extracted files (3):
   • adapter_config.json (736 B)
@@ -1202,7 +1350,7 @@ Task created, awaiting result...
 ✓ LoRA training client created: #PID<0.260.0>
 
 Saving training state to create checkpoint...
-✓ Saved state to: tinker://170beeb9-9fa9-5011-b896-ba0616c7e94d:train:0/weights/async_demo_checkpoint
+✓ Saved state to: tinker://9677c040-d833-5325-8a9d-4c3a1f816328:train:0/weights/async_demo_checkpoint
 
 Restoring training client from checkpoint asynchronously...
 ✓ Training client restored: #PID<0.278.0>
@@ -1210,43 +1358,38 @@ Restoring training client from checkpoint asynchronously...
 === Example Complete ===
 
 ==> Running examples/cli_run_text.exs
-Compiling 1 file (.ex)
-Generated tinkex app
 Running CLI with args: run --base-model meta-llama/Llama-3.1-8B --prompt Hello from the CLI runner --max-tokens 64 --temperature 0.7 --num-samples 1 --api-key tml-mIf5gSt5tyewbDuXjwgeTkbdcgCZUpntGFyVBfKvmfGpb2FpJbfJ9tcFyYC5DXjcrAAAA
 Starting sampling...
 Sample 1:
-! 🐹
-
-This is an ongoing series about building a Command Line Interface (CLI) using Node.js. In the previous posts , we built a CLI runner to run commands and display the output.
-
-In this post, we will learn how to:
-
-  - Build a shell for the CLI to display a prompt and
-stop_reason=length | avg_logprob=-1.412
+.
+I'm not sure if this is possible, but I'd like to be able to run tests from the CLI runner that use the test runner, which in turn uses the command runner to execute the test code.
+So, for example, I have a test runner file that looks like this:
+var testRunner = require
+stop_reason=length | avg_logprob=-1.306
 Sampling complete (1 sequences)
 sampling response: %Tinkex.Types.SampleResponse{
   sequences: [
     %Tinkex.Types.SampledSequence{
-      tokens: [0, 11410, 238, 117, 271, 2028, 374, 459, 14529, 4101, 922, 4857,
-       264, 7498, 7228, 20620, 320, 65059, 8, 1701, 6146, 2927, 13, 763, 279,
-       3766, 8158, 1174, 584, 5918, 264, 40377, 23055, 311, 1629, 11545, 323,
-       3113, 279, 2612, 382, 644, 420, 1772, 11, 584, 690, ...],
-      logprobs: [-1.7039800882339478, -3.466979742050171, -0.9360814094543457,
-       -4.165317535400391, -0.650089681148529, -1.9199599027633667,
-       -0.34799057245254517, -3.030365467071533, -5.270044803619385,
-       -0.966291606426239, -2.1171317100524902, -2.510927438735962,
-       -0.20073369145393372, -5.096033573150635, -0.05905577540397644,
-       -0.014663073234260082, -0.13072693347930908, -0.007412430830299854,
-       -0.006001902278512716, -2.369553565979004, -0.5246874094009399,
-       -0.12046212702989578, -0.7990386486053467, -1.3348363637924194,
-       -0.8554633259773254, -0.4986070692539215, -2.6043143272399902,
-       -3.31363582611084, -0.0717608779668808, -1.4896317720413208,
-       -0.36651191115379333, -0.28990933299064636, -1.2671798467636108,
-       -3.112506866455078, -0.7198663949966431, -0.5957552194595337,
-       -1.305849313735962, -2.085432529449463, -0.9527989625930786,
-       -0.42896461486816406, -2.528024911880493, -0.2813137173652649,
-       -0.014210226014256477, -0.034759532660245895, -0.016728835180401802,
-       -0.007730448618531227, ...],
+      tokens: [627, 40, 2846, 539, 2771, 422, 420, 374, 3284, 11, 719, 358,
+       4265, 1093, 311, 387, 3025, 311, 1629, 7177, 505, 279, 40377, 23055, 430,
+       1005, 279, 1296, 23055, 11, 902, 304, 2543, 5829, 279, 3290, 23055, 311,
+       9203, 279, 1296, 2082, 627, 4516, 11, 369, 3187, ...],
+      logprobs: [-3.5795583724975586, -1.0052404403686523, -1.2745513916015625,
+       -2.8693130016326904, -0.2649388611316681, -0.8700623512268066,
+       -0.559992790222168, -0.04600697010755539, -4.418613433837891,
+       -0.4960397779941559, -0.03471290320158005, -0.28530794382095337,
+       -1.37711763381958, -0.09592393785715103, -0.015257902443408966,
+       -1.4179904460906982, -0.0015180503251031041, -2.4399164249189198e-4,
+       -0.7839916944503784, -3.9295105934143066, -1.264305830001831,
+       -0.1773315817117691, -1.5910406112670898, -1.316138744354248,
+       -1.7571544647216797, -2.5250649452209473, -0.5046882033348083,
+       -3.402918577194214, -0.47159984707832336, -2.6524651050567627,
+       -3.103660821914673, -1.989617109298706, -0.01729818433523178,
+       -0.7375035881996155, -0.14178435504436493, -3.6171159744262695,
+       -3.4245076179504395, -2.65036678314209, -1.733647346496582,
+       -0.42849284410476685, -1.1295380592346191, -2.542349100112915,
+       -0.5898256897926331, -3.905834436416626, -0.7327507734298706,
+       -1.018278956413269, ...],
       stop_reason: :length
     }
   ],
@@ -1256,19 +1399,18 @@ sampling response: %Tinkex.Types.SampleResponse{
 }
 
 ==> Running examples/cli_run_prompt_file.exs
-Running CLI with prompt file /tmp/tinkex_prompt_5700.txt
+Running CLI with prompt file /tmp/tinkex_prompt_5826.txt
 Starting sampling...
 Sampling complete (1 sequences)
-JSON output written to /tmp/tinkex_output_5764.json
+JSON output written to /tmp/tinkex_output_5890.json
 Preview:
-{"prompt_logprobs":null,"sequences":[{"logprobs":[-2.400696039199829,-5.000959396362305,-6.997798919677734,-5.103384017944336,-1.474899172782898,-0.22148850560188293,-5.698232650756836,-8.8033447265625,-4.131427764892578,-3.1210622787475586,-11.481575965881348,-4.038726329803467,-6.739284038543701,-2.1484124660491943,-2.2500598430633545,-5.737714767456055,-0.14512623846530914,-6.080523490905762,-9.278803825378418,-5.87931489944458,-4.170082092285156,-4.829282760620117,-8.654241561889648,-4.822141170501709,-4.359817981719971,-4.025493621826172,-8.817239761352539,-2.915034294128418,-10.06367301940918,-1.0239031314849854],"stop_reason":"stop","tokens":[13,4815,35,71,2739,85,25,1304,701,10137,3930,84,304,1933,198,2727,25,816,37,86,33,22,3647,52,54,24,46164,198,19317,128001]}],"topk_prompt_logprobs":null,"type":"sample"}
+{"prompt_logprobs":null,"sequences":[{"logprobs":[-2.4103214740753174,-1.481612205505371,-1.6993517875671387,-1.6085186004638672,-5.111445426940918,-1.97594153881073,-1.1717655658721924,-0.4643413722515106,-1.3711751699447632,-0.006968954112380743,-1.1871790885925293,-0.04053192213177681,-2.121251106262207,-0.004537524189800024,-1.3446797132492065,-6.138952255249023,-5.222756385803223,-4.653529167175293,-5.804534912109375,-0.8416662216186523,-9.227217674255371,-1.2605887651443481,-1.5938613414764404,-2.1836817264556885,-5.224343299865723,-1.3763225078582764,-0.11617501080036163,-2.9787542819976807,-0.6054537296295166,-5.050826072692871,-0.5107788443565369,-2.1634936332702637,-2.498811960220337,-3.2069690227508545,-2.2543468475341797,-2.579184055328369,-3.743730306625366,-8.058501243591309,-6.793439865112305,-5.710214138031006,-8.676680564880371,-6.139692783355713,-6.30639123916626,-2.062299966812134,-3.8482143878936768,-4.542710781097412,-0.5203852653503418,-3.8335604667663574,-1.6408588886260986,-1.568137288093567,-0.012080245651304722,-1.2023649215698242,-1.4825797080993652,-1.482069969177246,-1.3127667903900146,-0.17095088958740234,-1.4786778688430786,-1.6125874519348145,-0.006843580398708582,-5.21590518951416,-0.05076216533780098,-0.22017771005630493,-5.9606404304504395,-5.549184322357178,-4.7872209548950195,-4.855972766876221,-0.9366350173950195,-0.12604430317878723,-9.595711708068848,-0.7755651473999023,-2.820842742919922,-3.7621843814849854,-5.157322883605957,-2.6577000617980957,-5.21419095993042,-1.5303518772125244,-0.007139763794839382,-1.9781513214111328,-1.3684971332550049,-2.268671751022339,-1.777215600013733,-7.819088935852051,-11.438087463378906,-2.451627254486084,-8.741952896118164,-6.708137512207031,-5.673834800720215,-3.203212261199951,-8.400153160095215,-6.0843095779418945,-16.10692596435547,-3.2539682388305664,-5.298253059387207,-8.841060638427734,-3.1346662044525146,-7.1228485107421875,-2.2069647312164307,-6.067137241363525,-2.42806077003479,-5.857672691345215,-2.4751973152160645,-6.354546546936035,-4.133467674255371,-11.019477844238281,-2.4210262298583984,-0.893137514591217,-3.2921323776245117,-9.257552146911621,-6.81947135925293,-6.079846382141113,-11.751153945922852,-1.789302110671997,-8.758362770080566,-4.224250793457031,-7.154967784881592,-2.3976199626922607,-11.934314727783203,-2.5352611541748047,-2.5792174339294434,-3.3471624851226807,-8.435900688171387,-3.911782741546631,-4.933475494384766,-6.7821455001831055,-2.338259696960449,-1.733213186264038,-0.16573885083198547,-0.8874191641807556,-3.5605456829071045,-0.1679030954837799,-0.15616737306118011,-0.39686769247055054,-0.07913373410701752,-0.4499230682849884,-6.871246150694788e-4,-0.007271964568644762,-3.6272482872009277,-0.07902028411626816,-0.07613808661699295,-0.0017864234978333116,-0.052572790533304214,-0.00722569040954113,-0.02836875058710575,-0.06212211400270462,-3.5470392322167754e-4,-0.002725697821006179,-7.942138671875,-10.012084007263184,-0.07492903620004654,-0.002745907986536622,-0.06627770513296127,-0.10175099223852158,-0.012989195063710213,-0.013234037905931473,-0.07967877388000488,-0.0505918487906456,-5.078217945992947e-4,-0.009351381100714207,-5.694699287414551,-3.7189815044403076,-0.028416143730282784,-0.07267549633979797,-0.0015376898227259517,-0.017790740355849266,-0.011137695983052254,-0.0010033579310402274,-0.0037643304094672203,-5.360727787017822,-0.5493968725204468,-0.1271948218345642,-2.130580425262451,-8.717945098876953,-0.640282392501831,-0.1252182573080063,-0.020092058926820755,-0.6820160746574402,-0.5253106951713562,-10.228569030761719,-6.81758451461792,-8.117961883544922,-2.3921868801116943,-8.689125061035156,-1.7730913162231445,-4.698187828063965,-0.24678246676921844,-4.603797435760498,-2.967658758163452,-5.875194072723389,-18.165441513061523,-4.863584041595459,-0.2899436056613922,-2.8398327827453613,-5.573713779449463,-3.1849451065063477,-11.773632049560547,-0.30232974886894226,-5.63413143157959,-1.2279820442199707,-14.847956657409668,-10.91910171508789,-11.21194076538086,-2.8944525718688965,-0.43136003613471985,-0.6919549107551575,-0.7771584391593933,-1.5401930809020996,-5.155832290649414,-4.753726959228516,-0.96075439453125,-1.223474144935608,-10.294321060180664,-9.029932975769043,-12.407955169677734,-5.040881156921387,-1.532426357269287,-9.444000244140625,-3.103414297103882,-8.488123893737793,-4.926351547241211,-6.718753337860107,-1.0221798419952393,-7.329015731811523,-0.4833906292915344,-7.192741394042969,-4.679009437561035,-4.814059257507324,-13.409563064575195,-7.051697254180908,-9.483461380004883,-5.190164566040039,-6.417781829833984,-9.602149963378906,-9.241943359375,-3.491941452026367,-4.302358150482178,-1.8735932111740112,-4.267017364501953,-3.7181270122528076,-1.7670300006866455,-1.4795916080474854,-2.524857521057129,-9.832592964172363,-0.18930113315582275,-7.060855865478516,-3.470280647277832,-4.026463031768799,-4.834967613220215,-2.6490068435668945,-3.39202880859375,-1.1640807390213013,-7.865609645843506,-0.6302926540374756,-7.037282943725586,-2.540952205657959,-1.1739842891693115,-0.1342141032218933,-1.9657386541366577,-13.7061185836792,-3.214365243911743,-2.070497989654541,-2.3705854415893555,-2.711764335632324,-13.07050609588623,-10.616802215576172,-4.135945796966553,-4.414124965667725,-4.404797554016113,-0.9277579188346863,-9.539392471313477,-4.300154209136963,-1.4321762323379517,-8.916997909545898,-1.6228301525115967,-3.8632383346557617,-8.053675651550293,-5.6849212646484375,-0.23074105381965637,-7.190181255340576,-8.572669982910156,-4.091102600097656,-0.02828427404165268,-5.719094276428223,-4.888680458068848,-2.3962152004241943,-10.532453536987305,-6.399784088134766,-3.3022067546844482,-6.654189109802246,-9.710124969482422,-2.229261636734009,-5.250110626220703,-0.980569064617157,-0.5991645455360413,-8.894183158874512,-6.204658031463623,-0.6972963213920593,-14.117812156677246,-9.730276107788086,-4.162985801696777,-7.3795485496521,-8.472846984863281,-7.300466537475586,-3.631579637527466,-2.0620036125183105,-12.545825004577637,-7.127178192138672,-1.880378007888794,-7.33294677734375,-4.351083755493164,-0.9646018743515015,-4.605457305908203,-3.1085894107818604,-4.044012546539307,-9.295428276062012,-3.486915111541748,-4.781571865081787,-5.992690086364746,-1.0766656398773193,-7.147191047668457,-2.5994911193847656,-5.492531776428223,-7.9876275062561035,-5.285679817199707,-3.2594082355499268,-2.0916457176208496,-8.100872039794922,-11.840993881225586,-2.974590539932251,-7.839136123657227,-4.262036323547363,-5.481948375701904,-10.553565979003906,-7.0019850730896,-6.973628044128418,-2.470111846923828,-9.823935508728027,-0.1414492279291153,-11.930364608764648,-3.5212631225585938,-6.222449779510498,-9.678894996643066,-7.970310211181641,-8.884906768798828,-8.208680152893066,-6.209246635437012,-2.3077828884124756,-2.941310405731201,-8.231354713439941,-3.543962001800537,-9.320425033569336,-2.950599431991577,-4.594964027404785,-3.985895872116089,-3.410745859146118,-2.042266607284546,-5.721744537353516,-6.170266151428223,-1.3732715845108032,-4.510341644287109,-4.921364784240723,-1.452978253364563,-3.3367912769317627,-3.4576730728149414,-4.878668308258057,-1.75033438205719,-6.508336544036865,-1.5457738637924194,-5.313633441925049,-3.0053248405456543,-5.352481842041016,-0.6981807351112366,-5.106980800628662,-5.385060787200928,-8.490257263183594,-10.190001487731934,-0.247206911444664,-3.7554209232330322,-2.4797203540802,-1.8158812522888184,-2.5369791984558105,-2.602865219116211,-2.7751574516296387,-3.1225266456604004,-5.000789642333984,-1.214324712753296,-4.346864700317383,-2.109657049179077,-5.430792331695557,-6.761059284210205,-6.898703575134277,-4.7746968269348145,-2.015768527984619,-5.372612953186035,-1.9969673156738281,-2.989100456237793,-1.8669538497924805,-6.728403091430664,-7.530834197998047,-0.936662495136261,-3.904484748840332,-1.7678725719451904,-4.4931488037109375,-1.889866590499878,-6.541816234588623,-6.394891738891602,-5.447674751281738,-2.8917791843414307,-5.015178680419922,-4.118044853210449,-7.045520782470703,-0.13903780281543732,-5.570929527282715,-1.4497491121292114,-6.02664041519165,-5.345512866973877,-3.697784423828125,-5.528990745544434,-1.119093418121338,-3.6796624660491943,-5.868624687194824,-3.658134937286377,-0.2156352996826172,-6.301939964294434,-4.858808517456055,-6.971897125244141,-2.8257932662963867,-4.060304641723633,-4.664558410644531,-1.4773588180541992,-3.924105405807495,-2.857407569885254,-1.909933090209961,-3.4156386852264404,-6.915688991546631,-2.9088029861450195,-3.8407182693481445,-1.5526909828186035,-0.0837012305855751,-0.07925884425640106,-0.8097116351127625,-5.971117973327637,-2.222133159637451,-3.4983556270599365,-7.906166076660156,-3.9793972969055176,-1.1109726428985596,-1.9890332221984863,-2.1169726848602295,-5.793446063995361,-5.1206207275390625,-8.680839538574219,-0.031018543988466263,-1.6338731050491333,-7.992051124572754,-3.1342926025390625,-2.637775182723999,-4.140921115875244,-2.619992733001709,-3.3330860137939453,-6.303351879119873,-2.9176695346832275,-4.456803798675537,-1.5668621063232422,-5.857741355895996,-1.6906102895736694,-5.212464809417725,-3.2073841094970703,-12.405179023742676,-11.078841209411621,-3.3388383388519287,-7.54919958114624,-11.077221870422363,-7.113646507263184,-6.839696884155273,-0.5240275859832764,-8.117510795593262,-3.773449659347534,-3.436506509780884,-3.421865940093994,-0.7046695947647095,-2.365330696105957,-0.4494428038597107,-1.8536851406097412,-5.814051628112793,-0.15075509250164032,-7.569639205932617,-9.599751472473145,-3.3304550647735596,-1.9099969863891602,-0.003810290014371276,-4.44084358215332,-0.14838072657585144,-0.015774348750710487,-9.892560005187988,-6.56809663772583,-0.7999904155731201,-8.854347229003906,-1.5444003343582153,-6.854297637939453,-2.026348352432251,-3.3447279930114746,-6.2145795822143555,-7.157571792602539,-4.418673515319824,-7.0218353271484375,-4.038987159729004,-1.8179885149002075,-0.22167687118053436,-1.7934563159942627,-7.91077184677124,-5.223263740539551,-10.383594512939453,-0.4000903367996216,-4.405243396759033,-9.333325386047363,-8.555054664611816,-4.383699417114258,-6.802282333374023,-9.053688049316406,-5.417450904846191,-2.7287087440490723,-4.119086742401123,-2.404736280441284,-0.134462371468544,-7.951897621154785,-7.543621063232422,-5.40523624420166,-10.465496063232422,-6.980744361877441,-3.8108181953430176,-7.191021919250488,-1.1321568489074707,-2.5136146545410156,-5.294621467590332,-4.425957679748535,-1.7979824542999268,-7.669944763183594,-3.084674596786499,-3.0852231979370117,-0.1785353124141693,-6.065652370452881,-12.09787654876709,-4.717751502990723,-1.6871678829193115,-4.653213977813721,-2.914987564086914,-2.222034215927124,-6.606910705566406,-1.9629156589508057,-9.310382843017578,-2.0288844108581543,-2.9871809482574463,-0.8337690234184265,-0.06881903111934662,-0.11161081492900848,-7.116535186767578,-3.6248185634613037,-2.492919445037842,-1.9082257747650146,-3.1884868144989014],"stop_reason":"stop","tokens":[13,358,1097,264,11164,11,323,420,1772,574,56168,555,611,84,14,754,347,370,1037,68,4749,13,358,690,2815,304,220,17,4207,505,1457,382,40,690,387,1203,994,328,45456,66313,40124,334,81663,17160,10245,36868,3507,93350,57318,71361,55759,3651,40330,7354,2006,83069,2794,16511,6979,10009,37636,45613,1389,5782,393,25434,44272,15215,39129,19324,16932,2006,16139,1389,7354,63427,50736,34733,63151,57277,2,35390,5211,271,13617,5829,220,19,14774,19930,69338,22071,311,46113,220,1419,3626,1555,279,4272,11,7999,832,51658,311,1855,832,45082,100441,100699,126450,101305,107915,101179,108797,96298,18939,382,2,29438,16067,1432,334,15147,1035,16,13,510,42144,9725,2,50378,340,17,13,510,61032,40227,9725,2,47928,40227,340,18,13,510,35891,65776,9725,2,62344,2427,19253,14164,340,19,13,510,15777,21829,811,9725,2,25615,12,25742,811,12795,2,35907,271,1255,347,370,1037,71853,374,1981,439,7060,264,3560,43012,4029,439,6866,382,4516,102503,3018,306,13,1442,358,8122,36626,433,311,37002,72537,11299,304,3021,449,433,13,3639,1436,387,810,50765,551,49582,382,2,38943,1038,12834,1455,5865,527,22486,311,3566,477,4641,83430,482,2613,3834,1288,12771,20160,2613,16692,13,2030,1148,422,499,617,15860,315,9624,13422,499,2351,1701,11,323,842,709,14324,264,2763,315,892,20505,304,279,7074,13,11930,15987,382,2181,1253,387,17057,389,264,27946,5569,369,320,97525,8,6222,13650,1778,439,4443,26743,13,30013,10925,617,8066,75581,389,1778,13650,439,6696,7512,11,34266,39230,277,311,612,442,8322,11,34507,3674,3772,430,1436,387,9959,304,3938,13042,323,20207,25907,13,3297,1101,5101,1418,21646,22917,13,34863,32855,13,10323,10397,45933,12309,16736,30098,449,1560,83775,23460,5315,14,63879,61912,83663,5922,13122,389,11,9455,502,11983,323,3674,2065,2671,11,3318,12135,449,502,3674,3772,323,1023,6732,13,1398,69597,358,2846,5128,2771,1070,6866,2317,7191,1109,904,832,1732,1436,11000,1440,477,48248,13,1442,358,1518,1403,3062,18845,11,499,3358,617,264,9257,1317,9860,3938,13,1666,264,3682,3157,320,269,8996,374,4560,311,4667,449,1778,3674,29130,28271,8,374,1455,8173,304,2038,5552,4819,323,3674,7640,11,584,617,311,1781,2225,5627,520,279,1890,892,13,18156,433,1253,4097,810,1109,264,3254,3217,1389,4536,956,433,34707,13,358,4510,279,1455,28289,3245,574,279,5133,449,1884,358,27724,16250,323,8661,84257,358,42777,922,1980,2181,1053,1101,387,6555,311,617,520,3325,510,16497,9725,1277,1129,268,34466,2726,705,1095,7636,4815,2,12027,271,9,13688,18939,551,65,14369,512,9,13688,505,832,2055,2,74977,12,5263,16067,55160,5520,9669,2997,912,1862,369,2653,36106,1389,62019,6924,4669,15161,32705,596,8106,6559,269,5471,279,1217,505,34111,21142,382,2,65814,362,482,5649,22166,5560,271,2,65814,426,482,14969,612,35680,1038,128001]}],"topk_prompt_logprobs":null,"type":"sample"}
 
 
 ==> Running examples/metrics_live.exs
 Sampling 1 sequence(s) from meta-llama/Llama-3.1-8B ...
-Sampled text:  with Tinkex API v1.3
-Quick metrics check from Tinkex with Tinkex API v1.3
-Request a set of specific
+Sampled text:
+The Tinkex dashboard shows a quick, at-a-glance view of your projects. The dashboard allows you to easily compare projects to see where your time
 
 === Metrics Snapshot ===
 Counters:
@@ -1277,51 +1419,51 @@ Counters:
 
 Latency (ms):
   count: 4
-  mean: 399.06
-  p50:  307.40
-  p95:  753.17
-  p99:  753.17
+  mean: 502.44
+  p50:  465.24
+  p95:  826.13
+  p99:  826.13
 
 ==> Running examples/telemetry_live.exs
 Starting service client against https://tinker.thinkingmachines.dev/services/tinker-prod ...
 Creating sampling client for meta-llama/Llama-3.1-8B ...
 
-16:43:39.285 [info] HTTP post /api/v1/create_sampling_session start (pool=session base=https://tinker.thinkingmachines.dev/services/tinker-prod)
+10:36:07.331 [info] HTTP post /api/v1/create_sampling_session start (pool=session base=https://tinker.thinkingmachines.dev/services/tinker-prod)
 
-16:43:39.499 [info] HTTP post /api/v1/create_sampling_session ok in 214ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
+10:36:07.611 [info] HTTP post /api/v1/create_sampling_session ok in 279ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
 Sending sample request ...
 
-16:43:40.379 [info] HTTP post /api/v1/asample start (pool=sampling base=https://tinker.thinkingmachines.dev/services/tinker-prod)
+10:36:08.688 [info] HTTP post /api/v1/asample start (pool=sampling base=https://tinker.thinkingmachines.dev/services/tinker-prod)
 
-16:43:40.539 [info] HTTP post /api/v1/asample ok in 160ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
+10:36:09.166 [info] HTTP post /api/v1/asample ok in 477ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
 
-16:43:40.543 [info] HTTP post /api/v1/retrieve_future start (pool=futures base=https://tinker.thinkingmachines.dev/services/tinker-prod)
+10:36:09.185 [info] HTTP post /api/v1/retrieve_future start (pool=futures base=https://tinker.thinkingmachines.dev/services/tinker-prod)
 
-16:43:41.382 [info] HTTP post /api/v1/retrieve_future ok in 838ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
+10:36:09.994 [info] HTTP post /api/v1/retrieve_future ok in 808ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
 Sampled sequences: [
   %Tinkex.Types.SampledSequence{
-    tokens: [2360, 11, 2216, 11, 1120, 832, 11914, 627, 47641, 555, 4074, 389,
-     220, 966, 5936, 11, 220, 679, 18, 482, 220, 806, 25, 2946, 198, 6777,
-     37058, 374, 279, 8198, 315, 26984],
-    logprobs: [-4.704059600830078, -1.6005475521087646, -1.479292631149292,
-     -0.7334266304969788, -0.8752605319023132, -0.10427486151456833,
-     -0.28443869948387146, -0.7477242946624756, -9.216988563537598,
-     -0.016099924221634865, -4.885961055755615, -0.0038587411399930716,
-     -0.9665814638137817, -3.3782808780670166, -2.4663166999816895,
-     -0.5304547548294067, -3.576278118089249e-7, -0.056088097393512726,
-     -1.9098819494247437, -0.0014297273010015488, -4.410734163684538e-6,
-     -2.457045793533325, -7.152555099310121e-7, -4.118589401245117,
-     -0.027281949296593666, -1.7136030197143555, -2.3278864682652056e-4,
-     -0.06805312633514404, -0.3185139000415802, -1.7561581134796143,
-     -0.03197753056883812, -1.6106730699539185],
+    tokens: [3639, 374, 433, 30, 8595, 656, 584, 1005, 433, 30, 3639, 527, 279,
+     7720, 1980, 6777, 37058, 374, 279, 1920, 315, 26984, 323, 42118, 828, 311,
+     8895, 26793, 1139, 279, 5178, 11],
+    logprobs: [-1.4004876613616943, -0.21809379756450653, -0.5183565616607666,
+     -0.6882222890853882, -1.6689610481262207, -1.3359495401382446,
+     -0.507761538028717, -1.121880054473877, -0.017047420144081116,
+     -0.21992535889148712, -0.6591378450393677, -0.9404007196426392,
+     -0.35884523391723633, -0.8169716000556946, -4.404777526855469,
+     -0.4814941883087158, -2.7092601521871984e-4, -0.023718087002635002,
+     -0.40297552943229675, -1.0642532110214233, -0.005674799904227257,
+     -0.5010918378829956, -0.418936550617218, -0.707565426826477,
+     -0.07639224827289581, -1.5775229930877686, -1.2423986196517944,
+     -0.3514748513698578, -0.48231393098831177, -0.23728083074092865,
+     -0.06967131048440933, -1.6731479167938232],
     stop_reason: :length
   }
 ]
 
-16:43:41.411 [info] HTTP post /api/v1/telemetry start (pool=telemetry base=https://tinker.thinkingmachines.dev/services/tinker-prod)
-Flushed telemetry; detach logger and exit.
+10:36:10.026 [info] HTTP post /api/v1/telemetry start (pool=telemetry base=https://tinker.thinkingmachines.dev/services/tinker-prod)
 
-16:43:41.656 [info] HTTP post /api/v1/telemetry ok in 245ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
+10:36:10.249 [info] HTTP post /api/v1/telemetry ok in 222ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
+Flushed telemetry; detach logger and exit.
 
 ==> Running examples/telemetry_reporter_demo.exs
 ==========================================
@@ -1343,8 +1485,8 @@ Model: meta-llama/Llama-3.1-8B
 
 4. Performing live sampling (generates HTTP telemetry)...
    Sampling complete!
-   Generated:  Why not?
-I've been teaching my kids about this, but they are still not able to ...
+   Generated:  Can you say anything about the technology, but also about industry and scope?
+T...
 
 5. Demonstrating wait_until_drained...
    Queue drained: true
@@ -1386,13 +1528,13 @@ Final result: "succeeded on attempt 3"
 ==> Running examples/model_info_and_unload.exs
 [tinkex] base_url=https://tinker.thinkingmachines.dev/services/tinker-prod
 [tinkex] base_model=meta-llama/Llama-3.1-8B
-[tinkex] created session_id=be224b9d-8c94-58da-827b-c05a8d85a5a7
-[tinkex] poll #1 create_model request_id=be224b9d-8c94-58da-827b-c05a8d85a5a7:train:0:0
-[tinkex] created model_id=be224b9d-8c94-58da-827b-c05a8d85a5a7:train:0
-[tinkex] model_id=be224b9d-8c94-58da-827b-c05a8d85a5a7:train:0
+[tinkex] created session_id=a9a84697-074e-5a76-a4f2-f6a6f3a24364
+[tinkex] poll #1 create_model request_id=a9a84697-074e-5a76-a4f2-f6a6f3a24364:train:0:0
+[tinkex] created model_id=a9a84697-074e-5a76-a4f2-f6a6f3a24364:train:0
+[tinkex] model_id=a9a84697-074e-5a76-a4f2-f6a6f3a24364:train:0
 - model_name: meta-llama/Llama-3.1-8B
 - arch: unknown
-- tokenizer_id: thinkingmachineslabinc/meta-llama-3-tokenizer
+- tokenizer_id: baseten/Meta-Llama-3-tokenizer
 - is_lora: true
 - lora_rank: 32
 [tinkex] unload_model

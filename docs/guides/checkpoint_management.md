@@ -101,7 +101,7 @@ This format uniquely identifies a checkpoint and is used throughout the API.
 Get all checkpoints for the current user with pagination:
 
 ```elixir
-{:ok, response} = Tinkex.RestClient.list_user_checkpoints(rest_client, limit: 50, offset: 0)
+{:ok, response} = Tinkex.RestClient.list_user_checkpoints(rest_client, limit: 100, offset: 0)
 
 Enum.each(response.checkpoints, fn checkpoint ->
   IO.puts("Path: #{checkpoint.tinker_path}")
@@ -114,7 +114,7 @@ end)
 ```
 
 **Options:**
-- `:limit` - Maximum number of checkpoints to return (default: 50)
+- `:limit` - Maximum number of checkpoints to return (default: 100)
 - `:offset` - Offset for pagination (default: 0)
 
 ### List Checkpoints for a Training Run
@@ -289,9 +289,19 @@ Get a signed URL for downloading the checkpoint archive directly:
   )
 
 IO.puts("Download URL: #{url_response.url}")
+IO.puts("Expires at: #{inspect(url_response.expires)}")
 ```
 
 This URL can be used with external download tools or for programmatic access.
+
+If you already have IDs from the training run list, you can call the ID-based helpers instead:
+
+```elixir
+{:ok, url_response} =
+  Tinkex.RestClient.get_checkpoint_archive_url(rest_client, "run-abc123", "0001")
+
+{:ok, _} = Tinkex.RestClient.delete_checkpoint(rest_client, "run-abc123", "0001")
+```
 
 ## Using Downloaded Weights
 
@@ -517,7 +527,7 @@ end
 ### 2. Use Pagination for Large Collections
 
 ```elixir
-def fetch_all_checkpoints(rest_client, limit \\ 50) do
+def fetch_all_checkpoints(rest_client, limit \\ 100) do
   fetch_page(rest_client, limit, 0, [])
 end
 

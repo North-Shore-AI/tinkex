@@ -122,20 +122,38 @@ defmodule Tinkex.Types.CheckpointTypesTest do
   end
 
   describe "CheckpointArchiveUrlResponse" do
-    test "creates struct with url" do
+    test "creates struct with url and expires" do
       response = %CheckpointArchiveUrlResponse{
-        url: "https://storage.example.com/checkpoint.tar"
+        url: "https://storage.example.com/checkpoint.tar",
+        expires: ~U[2025-12-03 00:00:00Z]
       }
 
       assert response.url == "https://storage.example.com/checkpoint.tar"
+      assert response.expires == ~U[2025-12-03 00:00:00Z]
     end
 
-    test "from_map/1 converts map to struct" do
-      map = %{"url" => "https://example.com/download/ckpt.tar"}
+    test "from_map/1 converts map to struct and parses iso8601 expires" do
+      map = %{
+        "url" => "https://example.com/download/ckpt.tar",
+        "expires" => "2025-12-03T01:02:03Z"
+      }
 
       response = CheckpointArchiveUrlResponse.from_map(map)
 
       assert response.url == "https://example.com/download/ckpt.tar"
+      assert %DateTime{} = response.expires
+      assert DateTime.to_iso8601(response.expires) == "2025-12-03T01:02:03Z"
+    end
+
+    test "from_map/1 preserves non-ISO expires strings" do
+      map = %{
+        "url" => "https://example.com/download/ckpt.tar",
+        "expires" => "Wed, 03 Dec 2025 01:02:03 GMT"
+      }
+
+      response = CheckpointArchiveUrlResponse.from_map(map)
+
+      assert response.expires == "Wed, 03 Dec 2025 01:02:03 GMT"
     end
   end
 end

@@ -167,7 +167,7 @@ defmodule Tinkex.RestClient do
   List all checkpoints for the current user with pagination.
 
   ## Options
-    * `:limit` - Maximum number of checkpoints to return (default: 50)
+    * `:limit` - Maximum number of checkpoints to return (default: 100)
     * `:offset` - Offset for pagination (default: 0)
 
   ## Examples
@@ -178,7 +178,7 @@ defmodule Tinkex.RestClient do
   @spec list_user_checkpoints(t(), keyword()) ::
           {:ok, CheckpointsListResponse.t()} | {:error, Tinkex.Error.t()}
   def list_user_checkpoints(%__MODULE__{config: config}, opts \\ []) do
-    limit = Keyword.get(opts, :limit, 50)
+    limit = Keyword.get(opts, :limit, 100)
     offset = Keyword.get(opts, :offset, 0)
 
     case Rest.list_user_checkpoints(config, limit, offset) do
@@ -205,6 +205,18 @@ defmodule Tinkex.RestClient do
   end
 
   @doc """
+  Get the archive download URL for a checkpoint by training run and checkpoint ID.
+  """
+  @spec get_checkpoint_archive_url(t(), String.t(), String.t()) ::
+          {:ok, CheckpointArchiveUrlResponse.t()} | {:error, Tinkex.Error.t()}
+  def get_checkpoint_archive_url(%__MODULE__{config: config}, run_id, checkpoint_id) do
+    case Rest.get_checkpoint_archive_url(config, run_id, checkpoint_id) do
+      {:ok, data} -> {:ok, CheckpointArchiveUrlResponse.from_map(data)}
+      error -> error
+    end
+  end
+
+  @doc """
   Delete a checkpoint.
 
   ## Examples
@@ -214,6 +226,15 @@ defmodule Tinkex.RestClient do
   @spec delete_checkpoint(t(), String.t()) :: {:ok, map()} | {:error, Tinkex.Error.t()}
   def delete_checkpoint(%__MODULE__{config: config}, checkpoint_path) do
     Rest.delete_checkpoint(config, checkpoint_path)
+  end
+
+  @doc """
+  Delete a checkpoint by training run and checkpoint ID.
+  """
+  @spec delete_checkpoint(t(), String.t(), String.t()) ::
+          {:ok, map()} | {:error, Tinkex.Error.t()}
+  def delete_checkpoint(%__MODULE__{config: config}, run_id, checkpoint_id) do
+    Rest.delete_checkpoint(config, run_id, checkpoint_id)
   end
 
   @doc """
@@ -396,6 +417,16 @@ defmodule Tinkex.RestClient do
   end
 
   @doc """
+  Async variant of `get_checkpoint_archive_url/3`.
+
+  Returns a `Task.t()` that resolves to `{:ok, CheckpointArchiveUrlResponse.t()} | {:error, Tinkex.Error.t()}`.
+  """
+  @spec get_checkpoint_archive_url_async(t(), String.t(), String.t()) :: Task.t()
+  def get_checkpoint_archive_url_async(client, run_id, checkpoint_id) do
+    Task.async(fn -> get_checkpoint_archive_url(client, run_id, checkpoint_id) end)
+  end
+
+  @doc """
   Async variant of `delete_checkpoint/2`.
 
   Returns a `Task.t()` that resolves to `{:ok, map()} | {:error, Tinkex.Error.t()}`.
@@ -403,6 +434,16 @@ defmodule Tinkex.RestClient do
   @spec delete_checkpoint_async(t(), String.t()) :: Task.t()
   def delete_checkpoint_async(client, checkpoint_path) do
     Task.async(fn -> delete_checkpoint(client, checkpoint_path) end)
+  end
+
+  @doc """
+  Async variant of `delete_checkpoint/3`.
+
+  Returns a `Task.t()` that resolves to `{:ok, map()} | {:error, Tinkex.Error.t()}`.
+  """
+  @spec delete_checkpoint_async(t(), String.t(), String.t()) :: Task.t()
+  def delete_checkpoint_async(client, run_id, checkpoint_id) do
+    Task.async(fn -> delete_checkpoint(client, run_id, checkpoint_id) end)
   end
 
   @doc """

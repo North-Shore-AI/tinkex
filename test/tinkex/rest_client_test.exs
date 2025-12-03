@@ -248,7 +248,7 @@ defmodule Tinkex.RestClientTest do
   describe "list_user_checkpoints/2" do
     test "returns paginated user checkpoints", %{bypass: bypass, config: config} do
       Bypass.expect_once(bypass, "GET", "/api/v1/checkpoints", fn conn ->
-        assert conn.query_params["limit"] == "50"
+        assert conn.query_params["limit"] == "100"
         assert conn.query_params["offset"] == "0"
 
         conn
@@ -304,6 +304,7 @@ defmodule Tinkex.RestClientTest do
             "location",
             "https://storage.example.com/checkpoints/ckpt-123.tar"
           )
+          |> Plug.Conn.put_resp_header("expires", "2025-12-03T10:00:00Z")
           |> Plug.Conn.resp(302, "")
         end
       )
@@ -315,6 +316,29 @@ defmodule Tinkex.RestClientTest do
 
       assert %CheckpointArchiveUrlResponse{} = response
       assert response.url == "https://storage.example.com/checkpoints/ckpt-123.tar"
+      assert %DateTime{} = response.expires
+      assert DateTime.to_iso8601(response.expires) == "2025-12-03T10:00:00Z"
+    end
+
+    test "fetches archive URL by ids", %{bypass: bypass, config: config} do
+      Bypass.expect_once(
+        bypass,
+        "GET",
+        "/api/v1/training_runs/run-ids/checkpoints/ckpt-7/archive",
+        fn conn ->
+          conn
+          |> Plug.Conn.put_resp_header("location", "https://storage.example.com/ckpt-7.tar")
+          |> Plug.Conn.put_resp_header("expires", "Wed, 03 Dec 2025 10:00:00 GMT")
+          |> Plug.Conn.resp(302, "")
+        end
+      )
+
+      client = RestClient.new("session-ids", config)
+
+      {:ok, response} = RestClient.get_checkpoint_archive_url(client, "run-ids", "ckpt-7")
+
+      assert response.url == "https://storage.example.com/ckpt-7.tar"
+      assert response.expires == "Wed, 03 Dec 2025 10:00:00 GMT"
     end
 
     test "returns error when checkpoint not found", %{bypass: bypass, config: config} do
@@ -382,6 +406,22 @@ defmodule Tinkex.RestClientTest do
 
       client = RestClient.new("session-123", config)
       {:ok, _} = RestClient.delete_checkpoint(client, "tinker://run-123/weights/0001")
+    end
+
+    test "deletes checkpoint by ids", %{bypass: bypass, config: config} do
+      Bypass.expect_once(
+        bypass,
+        "DELETE",
+        "/api/v1/training_runs/run-abc/checkpoints/ckpt-9",
+        fn conn ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"status": "deleted"}))
+        end
+      )
+
+      client = RestClient.new("session-abc", config)
+      assert {:ok, _} = RestClient.delete_checkpoint(client, "run-abc", "ckpt-9")
     end
 
     test "returns error when checkpoint not found", %{bypass: bypass, config: config} do

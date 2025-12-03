@@ -15,7 +15,7 @@ Key components:
 
 ## Sampling retry configuration
 
-`SamplingClient` now accepts an optional `:retry_config`, letting you tune high-level retries and bound concurrent attempts per client. Defaults match the Python SDK: base delay 500ms, max delay 10s, ±25% jitter, 120-minute progress timeout, unbounded retries until the progress timeout elapses, and 100 max_connections.
+`SamplingClient` now accepts an optional `:retry_config`, letting you tune high-level retries and bound concurrent attempts per client. Defaults match the Python SDK: base delay 500ms, max delay 10s, ±25% jitter, 120-minute progress timeout, unbounded retries until the progress timeout elapses, and 1000 max_connections.
 
 ```elixir
 # Custom retry profile

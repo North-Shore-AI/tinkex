@@ -2,6 +2,20 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.15] - 2025-12-03
+
+### Added
+- Checkpoint archive responses now surface `expires`; `CheckpointArchiveUrlResponse` parses timestamps and Rest/RestClient expose ID-based archive/delete helpers alongside tinker-path variants.
+- Sampling backpressure parity: dispatch semaphore (default 400) gates sampling dispatch and 429s without `Retry-After` trigger a 1s shared backoff.
+
+### Changed
+- `list_user_checkpoints/2` now defaults to `limit: 100` (Python parity).
+- `RetryConfig` default `max_connections` raised to 1000 to match Python connection limits.
+- ServiceClient validation requires `base_model` or `model_path` for sampling clients and at least one of `train_mlp`/`train_attn`/`train_unembed` when creating training clients.
+
+### Documentation
+- README/version bump; checkpoint management guide covers archive expirations + ID helpers; retry guide reflects the new `max_connections` default.
+
 ## [0.1.14] - 2025-12-02
 
 ### Added

@@ -75,6 +75,18 @@ defmodule Tinkex.API.RestTest do
   end
 
   describe "list_user_checkpoints/3" do
+    test "uses default pagination of 100/0", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/checkpoints", fn conn ->
+        assert conn.query_params == %{"limit" => "100", "offset" => "0"}
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"checkpoints": [], "cursor": null}))
+      end)
+
+      {:ok, _} = Rest.list_user_checkpoints(config)
+    end
+
     test "sends GET with pagination", %{bypass: bypass, config: config} do
       Bypass.expect_once(bypass, "GET", "/api/v1/checkpoints", fn conn ->
         assert conn.query_params == %{"limit" => "100", "offset" => "50"}
@@ -99,6 +111,7 @@ defmodule Tinkex.API.RestTest do
         fn conn ->
           conn
           |> Plug.Conn.put_resp_header("location", "https://example.com/dl")
+          |> Plug.Conn.put_resp_header("expires", "Wed, 03 Dec 2025 10:00:00 GMT")
           |> Plug.Conn.resp(302, "")
         end
       )
@@ -106,6 +119,24 @@ defmodule Tinkex.API.RestTest do
       {:ok, data} = Rest.get_checkpoint_archive_url(config, "tinker://run-1/weights/0001")
 
       assert data["url"] == "https://example.com/dl"
+      assert data["expires"] == "Wed, 03 Dec 2025 10:00:00 GMT"
+    end
+
+    test "requests archive URL by IDs", %{bypass: bypass, config: config} do
+      Bypass.expect_once(
+        bypass,
+        "GET",
+        "/api/v1/training_runs/run-2/checkpoints/ckpt-2/archive",
+        fn conn ->
+          conn
+          |> Plug.Conn.put_resp_header("location", "https://example.com/ckpt2")
+          |> Plug.Conn.resp(302, "")
+        end
+      )
+
+      {:ok, data} = Rest.get_checkpoint_archive_url(config, "run-2", "ckpt-2")
+
+      assert data["url"] == "https://example.com/ckpt2"
     end
   end
 
@@ -123,6 +154,21 @@ defmodule Tinkex.API.RestTest do
       )
 
       {:ok, _} = Rest.delete_checkpoint(config, "tinker://run-1/weights/0001")
+    end
+
+    test "deletes checkpoint by ids", %{bypass: bypass, config: config} do
+      Bypass.expect_once(
+        bypass,
+        "DELETE",
+        "/api/v1/training_runs/run-2/checkpoints/ckpt-2",
+        fn conn ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({}))
+        end
+      )
+
+      {:ok, _} = Rest.delete_checkpoint(config, "run-2", "ckpt-2")
     end
 
     test "returns error on failure", %{bypass: bypass, config: config} do

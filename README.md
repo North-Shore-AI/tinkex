@@ -13,13 +13,12 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.14 Highlights
+## 0.1.15 Highlights
 
-- **Image chunk parity**: `ImageChunk` / `ImageAssetPointerChunk` now use `expected_tokens` only; `.length/1` raises when missing and batching counts images by base64/location length.
-- **Retry tuning**: Default progress timeout raised to 120 minutes and retries run until the timeout (no attempt cap by default); keep per-request caps by setting `max_retries`.
-- **Optimizer resume helpers**: `ServiceClient.create_training_client_from_state_with_optimizer/3` (+ async) wraps weight+optimizer restore; new example covers multimodal payloads and optimizer resume.
-- **CLI multi-delete**: `tinkex checkpoint delete` accepts multiple paths with a single confirmation (`--yes` to skip) and reports partial failures.
-- **Tokenizer override**: Llama-3 models now map to `thinkingmachineslabinc/meta-llama-3-tokenizer` to avoid gated downloads.
+- **Checkpoint archive metadata**: Archive URL responses now include `expires`; RestClient gains ID-based archive/delete helpers and `list_user_checkpoints/2` defaults to 100 items.
+- **Sampling backpressure parity**: SamplingClient adds a dispatch semaphore (default 400) and applies a 1s shared backoff on 429s without `Retry-After`, matching the Python SDK.
+- **Retry concurrency parity**: `RetryConfig` now defaults `max_connections` to 1000 to align with Python connection limits.
+- **Service validation**: Creating sampling clients now requires `base_model` or `model_path`; training clients must enable at least one of `train_mlp`/`train_attn`/`train_unembed`.
 
 ## Features
 
@@ -63,7 +62,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.14"}
+    {:tinkex, "~> 0.1.15"}
   ]
 end
 ```

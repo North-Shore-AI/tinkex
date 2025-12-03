@@ -36,6 +36,7 @@ defmodule Tinkex.SamplingClient do
     Error,
     Future,
     RateLimiter,
+    PoolKey,
     Retry,
     RetryConfig,
     RetryHandler,
@@ -54,6 +55,7 @@ defmodule Tinkex.SamplingClient do
   }
 
   @type t :: pid()
+  @default_dispatch_concurrency 400
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -139,7 +141,8 @@ defmodule Tinkex.SamplingClient do
       |> Map.new()
       |> Map.put_new(:session_id, session_id)
 
-    with {:ok, sampling_session_id} <-
+    with :ok <- validate_sampling_inputs(base_model, model_path),
+         {:ok, sampling_session_id} <-
            resolve_sampling_session_id(
              sampling_session_id_override,
              session_id,
@@ -160,11 +163,14 @@ defmodule Tinkex.SamplingClient do
         |> Map.put_new(:session_id, session_id)
         |> Map.put_new(:sampling_session_id, sampling_session_id)
 
+      dispatch_semaphore = build_dispatch_semaphore(config, opts)
+
       entry = %{
         sampling_session_id: sampling_session_id,
         http_pool: config.http_pool,
         request_id_counter: request_counter,
         rate_limiter: limiter,
+        dispatch_semaphore: dispatch_semaphore,
         config: config,
         retry_config: retry_config,
         sampling_api: sampling_api,
@@ -183,6 +189,7 @@ defmodule Tinkex.SamplingClient do
          sampling_session_id: sampling_session_id,
          request_id_counter: request_counter,
          rate_limiter: limiter,
+         dispatch_semaphore: dispatch_semaphore,
          config: config,
          retry_config: retry_config,
          sampling_api: sampling_api,
@@ -245,11 +252,13 @@ defmodule Tinkex.SamplingClient do
   defp do_sample(client, prompt, sampling_params, opts) do
     case :ets.lookup(:tinkex_sampling_clients, {:config, client}) do
       [{{:config, ^client}, entry}] ->
-        if entry.retry_config.enable_retry_logic do
-          do_sample_with_retry(entry, prompt, sampling_params, opts)
-        else
-          do_sample_once(entry, prompt, sampling_params, opts)
-        end
+        with_dispatch(entry, fn ->
+          if entry.retry_config.enable_retry_logic do
+            do_sample_with_retry(entry, prompt, sampling_params, opts)
+          else
+            do_sample_once(entry, prompt, sampling_params, opts)
+          end
+        end)
 
       [] ->
         {:error, Error.new(:validation, "SamplingClient not initialized")}
@@ -290,6 +299,13 @@ defmodule Tinkex.SamplingClient do
     end
   end
 
+  defp validate_sampling_inputs(nil, nil) do
+    {:error,
+     Error.new(:validation, "Either model_path or base_model must be provided", category: :user)}
+  end
+
+  defp validate_sampling_inputs(_base_model, _model_path), do: :ok
+
   defp resolve_sampling_session_id(
          nil,
          session_id,
@@ -329,9 +345,14 @@ defmodule Tinkex.SamplingClient do
     :atomics.add_get(counter, 1, 1) - 1
   end
 
-  defp maybe_set_backoff(limiter, %Error{retry_after_ms: retry_after_ms})
-       when is_integer(retry_after_ms) do
-    RateLimiter.set_backoff(limiter, retry_after_ms)
+  defp maybe_set_backoff(limiter, %Error{retry_after_ms: retry_after_ms}) do
+    duration_ms =
+      case retry_after_ms do
+        value when is_integer(value) -> value
+        _ -> 1_000
+      end
+
+    RateLimiter.set_backoff(limiter, duration_ms)
   end
 
   defp maybe_set_backoff(_limiter, _error), do: :ok
@@ -378,6 +399,57 @@ defmodule Tinkex.SamplingClient do
     base
     |> Map.new()
     |> Map.merge(Map.new(override))
+  end
+
+  defp build_dispatch_semaphore(config, opts) do
+    limit =
+      opts
+      |> Keyword.get(:dispatch_concurrency, @default_dispatch_concurrency)
+      |> normalize_dispatch_limit()
+
+    ensure_dispatch_semaphore_started()
+
+    %{
+      name:
+        {:tinkex_sampling_dispatch, PoolKey.normalize_base_url(config.base_url), config.api_key,
+         limit},
+      limit: limit
+    }
+  end
+
+  defp normalize_dispatch_limit(limit) when is_integer(limit) and limit > 0, do: limit
+  defp normalize_dispatch_limit(_), do: @default_dispatch_concurrency
+
+  defp with_dispatch(%{dispatch_semaphore: semaphore}, fun) do
+    acquire_dispatch(semaphore.name, semaphore.limit)
+
+    try do
+      fun.()
+    after
+      Semaphore.release(semaphore.name)
+    end
+  end
+
+  defp acquire_dispatch(name, limit) do
+    case Semaphore.acquire(name, limit) do
+      true ->
+        :ok
+
+      false ->
+        Process.sleep(2)
+        acquire_dispatch(name, limit)
+    end
+  end
+
+  defp ensure_dispatch_semaphore_started do
+    case Process.whereis(Semaphore) do
+      nil ->
+        {:ok, _pid} = Semaphore.start_link()
+        :ok
+
+      _pid ->
+        :ok
+    end
   end
 
   defp put_telemetry(nil), do: :ok
