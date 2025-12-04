@@ -9,7 +9,7 @@ defmodule Tinkex.API.Rest do
   alias Tinkex.API
   alias Tinkex.Config
 
-  alias Tinkex.Types.{TrainingRun, TrainingRunsResponse}
+  alias Tinkex.Types.{ParsedCheckpointTinkerPath, TrainingRun, TrainingRunsResponse}
 
   @doc """
   Get session information.
@@ -309,21 +309,9 @@ defmodule Tinkex.API.Rest do
 
   defp http_client(config), do: API.client_module(config: config)
 
-  defp parse_tinker_path("tinker://" <> rest) do
-    case String.split(rest, "/") do
-      [run_id, part1, part2] ->
-        {:ok, {run_id, Path.join(part1, part2)}}
-
-      _ ->
-        {:error,
-         Tinkex.Error.new(:validation, "Invalid checkpoint path: #{rest}", category: :user)}
+  defp parse_tinker_path(tinker_path) do
+    with {:ok, parsed} <- ParsedCheckpointTinkerPath.from_tinker_path(tinker_path) do
+      {:ok, {parsed.training_run_id, ParsedCheckpointTinkerPath.checkpoint_segment(parsed)}}
     end
-  end
-
-  defp parse_tinker_path(other) do
-    {:error,
-     Tinkex.Error.new(:validation, "Checkpoint path must start with tinker://, got: #{other}",
-       category: :user
-     )}
   end
 end

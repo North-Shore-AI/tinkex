@@ -22,7 +22,7 @@ defmodule Tinkex.ConfigTest do
       assert config.http_pool == Tinkex.HTTP.Pool
       assert config.http_client == Tinkex.API
       assert config.tags == ["tinkex-elixir"]
-      assert config.feature_gates == []
+      assert config.feature_gates == ["async_sampling"]
       refute config.telemetry_enabled?
       refute config.dump_headers?
       assert config.default_headers == %{}
@@ -167,6 +167,33 @@ defmodule Tinkex.ConfigTest do
       assert config.default_query == %{"env" => "1"}
       assert config.http_client == Tinkex.API
       assert config.http_pool == :env_pool
+    end
+
+    test "feature_gates default to async_sampling with precedence" do
+      env_snapshot = snapshot_env(~w[TINKER_FEATURE_GATES])
+      app_snapshot = snapshot_app([:feature_gates])
+
+      on_exit(fn ->
+        restore_env(env_snapshot)
+        restore_app(app_snapshot)
+      end)
+
+      System.delete_env("TINKER_FEATURE_GATES")
+      Application.delete_env(:tinkex, :feature_gates)
+
+      default_config = Config.new(api_key: "key")
+      assert default_config.feature_gates == ["async_sampling"]
+
+      System.put_env("TINKER_FEATURE_GATES", "env1,env2")
+      env_config = Config.new(api_key: "key")
+      assert env_config.feature_gates == ["env1", "env2"]
+
+      Application.put_env(:tinkex, :feature_gates, ["app"])
+      app_config = Config.new(api_key: "key")
+      assert app_config.feature_gates == ["app"]
+
+      opt_config = Config.new(api_key: "key", feature_gates: [])
+      assert opt_config.feature_gates == []
     end
 
     test "pulls cloudflare credentials from env" do

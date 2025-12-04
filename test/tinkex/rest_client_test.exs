@@ -345,7 +345,7 @@ defmodule Tinkex.RestClientTest do
       Bypass.expect_once(
         bypass,
         "GET",
-        "/api/v1/training_runs/run-123/checkpoints/bad/path/archive",
+        "/api/v1/training_runs/run-123/checkpoints/weights/missing/archive",
         fn conn ->
           conn
           |> Plug.Conn.put_resp_content_type("application/json")
@@ -356,9 +356,19 @@ defmodule Tinkex.RestClientTest do
       client = RestClient.new("session-123", config)
 
       {:error, error} =
-        RestClient.get_checkpoint_archive_url(client, "tinker://run-123/bad/path")
+        RestClient.get_checkpoint_archive_url(client, "tinker://run-123/weights/missing")
 
       assert error.status == 404
+    end
+
+    test "returns validation error for malformed tinker path", %{config: config} do
+      client = RestClient.new("session-123", config)
+
+      {:error, error} =
+        RestClient.get_checkpoint_archive_url(client, "tinker://run-123/bad/path")
+
+      assert error.type == :validation
+      assert error.category == :user
     end
   end
 

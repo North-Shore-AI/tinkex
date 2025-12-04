@@ -344,7 +344,7 @@ defmodule Tinkex.CLIManagementTest do
   test "checkpoint delete validates tinker:// paths" do
     stderr =
       capture_io(:stderr, fn ->
-        assert {:error, %Tinkex.Error{type: :validation}} =
+        assert {:error, %Tinkex.Error{type: :validation, category: :user}} =
                  CLI.run([
                    "checkpoint",
                    "delete",
@@ -354,7 +354,7 @@ defmodule Tinkex.CLIManagementTest do
                  ])
       end)
 
-    assert stderr =~ "Checkpoint paths must start with tinker://"
+    assert stderr =~ "Checkpoint path"
     refute_received {:delete, _}
   end
 

@@ -54,7 +54,7 @@ The `Tinkex.Config` struct contains all configuration needed for API requests:
   cf_access_client_id: String.t() | nil,
   cf_access_client_secret: String.t() | nil,
   tags: [String.t()],              # Session tags (default: ["tinkex-elixir"])
-  feature_gates: [String.t()],     # Feature gates (default: [])
+  feature_gates: [String.t()],     # Feature gates (default: ["async_sampling"])
   user_metadata: map() | nil       # Custom metadata for sessions (optional)
 }
 ```

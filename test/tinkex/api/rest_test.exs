@@ -340,6 +340,7 @@ defmodule Tinkex.API.RestTest do
       {:error, error} = Rest.get_training_run_by_tinker_path(config, "invalid-path")
 
       assert error.type == :validation
+      assert error.category == :user
     end
   end
 

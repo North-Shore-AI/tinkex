@@ -41,13 +41,14 @@ defmodule Tinkex.EnvTest do
     env = %{
       "TINKER_API_KEY" => " ",
       "TINKER_TELEMETRY" => "maybe",
-      "TINKEX_DUMP_HEADERS" => ""
+      "TINKEX_DUMP_HEADERS" => "",
+      "TINKER_FEATURE_GATES" => " "
     }
 
     assert Env.api_key(env) == nil
     assert Env.base_url(env) == nil
     assert Env.tags(env) == []
-    assert Env.feature_gates(env) == []
+    assert Env.feature_gates(env) == ["async_sampling"]
     assert Env.telemetry_enabled?(env)
     refute Env.dump_headers?(env)
   end
@@ -83,6 +84,11 @@ defmodule Tinkex.EnvTest do
     assert redacted.cf_access_client_secret == "[REDACTED]"
     assert redacted.default_headers == %{"Authorization" => "[REDACTED]", "x-extra" => "1"}
     assert redacted.tags == ["a"]
+  end
+
+  test "snapshot defaults feature_gates to async_sampling when unset" do
+    snapshot = Env.snapshot(%{})
+    assert snapshot.feature_gates == ["async_sampling"]
   end
 
   describe "parity_mode/1" do

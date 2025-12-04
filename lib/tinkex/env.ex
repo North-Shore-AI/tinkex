@@ -13,6 +13,7 @@ defmodule Tinkex.Env do
 
   @truthy ~w(1 true yes on)
   @falsey ~w(0 false no off)
+  @default_feature_gates ["async_sampling"]
 
   @type env_source :: :system | %{optional(String.t()) => String.t()}
 
@@ -61,7 +62,12 @@ defmodule Tinkex.Env do
   def tags(env \\ :system), do: env |> fetch("TINKER_TAGS") |> split_list()
 
   @spec feature_gates(env_source()) :: [String.t()]
-  def feature_gates(env \\ :system), do: env |> fetch("TINKER_FEATURE_GATES") |> split_list()
+  def feature_gates(env \\ :system) do
+    env
+    |> fetch("TINKER_FEATURE_GATES")
+    |> split_list()
+    |> default_feature_gates()
+  end
 
   @spec telemetry_enabled?(env_source()) :: boolean()
   def telemetry_enabled?(env \\ :system) do
@@ -323,6 +329,9 @@ defmodule Tinkex.Env do
     |> Enum.map(&String.trim/1)
     |> Enum.reject(&(&1 == ""))
   end
+
+  defp default_feature_gates([]), do: @default_feature_gates
+  defp default_feature_gates(gates), do: gates
 
   defp normalize(nil), do: nil
 

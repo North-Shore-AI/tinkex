@@ -16,7 +16,7 @@ Centralized environment handling is provided by `Tinkex.Env` and fed into `Tinke
 - `TINKER_API_KEY` (required): API key. Masked in inspect output.
 - `TINKER_BASE_URL`: Base URL override. Default: `https://tinker.thinkingmachines.dev/services/tinker-prod`.
 - `TINKER_TAGS`: Comma-separated tags. Default: `["tinkex-elixir"]`.
-- `TINKER_FEATURE_GATES`: Comma-separated feature gates. Default: `[]`.
+- `TINKER_FEATURE_GATES`: Comma-separated feature gates. Default: `["async_sampling"]` when unset/empty (opts > app config > env still override).
 - `TINKER_TELEMETRY`: Telemetry toggle (truthy: `1/true/yes/on`, falsey: `0/false/no/off`). Default: `true`.
 - `TINKER_LOG`: Log level (`debug` | `info` | `warn` | `warning` | `error`), applied at application start. Default: unset.
 - `TINKEX_DUMP_HEADERS`: HTTP dump toggle (same truthy/falsey parsing). Default: `false`; sensitive headers are redacted.
@@ -29,6 +29,8 @@ Centralized environment handling is provided by `Tinkex.Env` and fed into `Tinke
 - `CLOUDFLARE_ACCESS_CLIENT_ID` / `CLOUDFLARE_ACCESS_CLIENT_SECRET`: Forwarded on every request per ADR-002; secret is redacted in logs/inspect.
 
 `Tinkex.Env.snapshot/0` returns all parsed values; booleans are normalized using the truthy/falsey lists above, and lists are split on commas with trimming.
+
+> Note: When no option/app/env value is provided, `feature_gates` seed to `["async_sampling"]` (Python SDK parity).
 
 ## Application config example
 

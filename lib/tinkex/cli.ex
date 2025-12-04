@@ -14,6 +14,7 @@ defmodule Tinkex.CLI do
     CheckpointsListResponse,
     LoraConfig,
     ModelInput,
+    ParsedCheckpointTinkerPath,
     SampleResponse,
     SamplingParams,
     StopReason,
@@ -949,10 +950,10 @@ defmodule Tinkex.CLI do
   defp checkpoint_info(config, options, deps) do
     path = Map.fetch!(options, :path)
 
-    with :ok <- validate_checkpoint_paths([path]),
+    with {:ok, [parsed]} <- validate_checkpoint_paths([path]),
          {:ok, format} <- management_format(options),
-         {:ok, checkpoint} <- fetch_checkpoint_by_path(config, path, deps),
-         {:ok, weights_info} <- fetch_weights_info(config, path, deps) do
+         {:ok, checkpoint} <- fetch_checkpoint_by_path(config, parsed, deps),
+         {:ok, weights_info} <- fetch_weights_info(config, parsed.tinker_path, deps) do
       render_checkpoint_info(checkpoint, weights_info, format, deps)
     else
       {:error, %Error{} = error} ->
@@ -1117,38 +1118,48 @@ defmodule Tinkex.CLI do
       |> Enum.reject(&is_nil/1)
 
     with {:ok, format} <- management_format(options),
-         :ok <- validate_checkpoint_paths(paths) do
-      case confirm_delete?(paths, Map.get(options, :yes, false)) do
+         {:ok, parsed_paths} <- validate_checkpoint_paths(paths) do
+      tinker_paths = Enum.map(parsed_paths, & &1.tinker_path)
+
+      case confirm_delete?(tinker_paths, Map.get(options, :yes, false)) do
         true ->
-          total = length(paths)
+          total = length(tinker_paths)
 
           results =
-            paths
+            parsed_paths
             |> Enum.with_index(1)
-            |> Enum.map(fn {path, idx} ->
-              IO.puts("Deleting #{idx}/#{total}: #{path}")
+            |> Enum.map(fn {parsed, idx} ->
+              IO.puts("Deleting #{idx}/#{total}: #{parsed.tinker_path}")
 
-              case deps.rest_api_module.delete_checkpoint(config, path) do
+              case deps.rest_api_module.delete_checkpoint(config, parsed.tinker_path) do
                 {:ok, _} ->
-                  IO.puts("Deleted #{path}")
-                  {:ok, path}
+                  IO.puts("Deleted #{parsed.tinker_path}")
+                  {:ok, parsed.tinker_path}
 
                 {:error, %Error{} = error} ->
-                  IO.puts(:stderr, "Delete failed for #{path}: #{Error.format(error)}")
-                  {:error, {path, error}}
+                  IO.puts(
+                    :stderr,
+                    "Delete failed for #{parsed.tinker_path}: #{Error.format(error)}"
+                  )
+
+                  {:error, {parsed.tinker_path, error}}
 
                 {:error, reason} ->
                   error =
-                    Error.new(:request_failed, "Delete failed for #{path}",
+                    Error.new(:request_failed, "Delete failed for #{parsed.tinker_path}",
                       data: %{reason: reason}
                     )
 
-                  IO.puts(:stderr, "Delete failed for #{path}: #{Error.format(error)}")
-                  {:error, {path, error}}
+                  IO.puts(
+                    :stderr,
+                    "Delete failed for #{parsed.tinker_path}: #{Error.format(error)}"
+                  )
+
+                  {:error, {parsed.tinker_path, error}}
               end
             end)
 
-          summary = summarize_deletes(results, paths)
+          summary = summarize_deletes(results, tinker_paths)
 
           json_summary =
             Map.update(summary, :failures, [], fn failures ->
@@ -1170,7 +1181,7 @@ defmodule Tinkex.CLI do
             command: :checkpoint,
             action: :delete,
             cancelled: true,
-            paths: paths
+            paths: tinker_paths
           }
 
           IO.puts("Aborted delete of #{length(paths)} checkpoint(s).")
@@ -1189,17 +1200,16 @@ defmodule Tinkex.CLI do
   end
 
   defp validate_checkpoint_paths(paths) do
-    invalid = Enum.reject(paths, &String.starts_with?(&1, "tinker://"))
-
-    if invalid == [] do
-      :ok
-    else
-      {:error,
-       Error.new(
-         :validation,
-         "Checkpoint paths must start with tinker://, got: #{Enum.join(invalid, ", ")}",
-         category: :user
-       )}
+    paths
+    |> Enum.reduce_while([], fn path, acc ->
+      case ParsedCheckpointTinkerPath.from_tinker_path(path) do
+        {:ok, parsed} -> {:cont, [parsed | acc]}
+        {:error, %Error{} = error} -> {:halt, {:error, error}}
+      end
+    end)
+    |> case do
+      {:error, _} = error -> error
+      parsed -> {:ok, Enum.reverse(parsed)}
     end
   end
 
@@ -1233,18 +1243,27 @@ defmodule Tinkex.CLI do
     }
   end
 
-  defp fetch_checkpoint_by_path(config, path, deps) do
-    with {:ok, run_id} <- checkpoint_run_id(path),
-         {:ok, %CheckpointsListResponse{} = resp} <-
-           normalize_checkpoint_response(deps.rest_api_module.list_checkpoints(config, run_id)) do
-      case Enum.find(resp.checkpoints, &(&1.tinker_path == path)) do
+  defp fetch_checkpoint_by_path(config, %ParsedCheckpointTinkerPath{} = parsed, deps) do
+    with {:ok, %CheckpointsListResponse{} = resp} <-
+           normalize_checkpoint_response(
+             deps.rest_api_module.list_checkpoints(config, parsed.training_run_id)
+           ) do
+      case Enum.find(resp.checkpoints, &(&1.tinker_path == parsed.tinker_path)) do
         nil ->
           {:error,
-           Error.new(:validation, "Checkpoint not found for #{to_string(path)}", category: :user)}
+           Error.new(:validation, "Checkpoint not found for #{to_string(parsed.tinker_path)}",
+             category: :user
+           )}
 
         checkpoint ->
           {:ok, checkpoint}
       end
+    end
+  end
+
+  defp fetch_checkpoint_by_path(config, path, deps) when is_binary(path) do
+    with {:ok, [parsed]} <- validate_checkpoint_paths([path]) do
+      fetch_checkpoint_by_path(config, parsed, deps)
     end
   end
 
@@ -1623,29 +1642,17 @@ defmodule Tinkex.CLI do
     end
   end
 
-  defp checkpoint_run_id("tinker://" <> rest) do
-    case String.split(rest, "/") do
-      [run_id | _] -> {:ok, run_id}
-      _ -> {:error, Error.new(:validation, "Invalid checkpoint path: #{rest}", category: :user)}
+  defp training_run_from_path(path) do
+    case ParsedCheckpointTinkerPath.from_tinker_path(path) do
+      {:ok, parsed} -> parsed.training_run_id
+      _ -> nil
     end
-  end
-
-  defp checkpoint_run_id(other) do
-    {:error,
-     Error.new(
-       :validation,
-       "Checkpoint path must start with tinker://, got: #{other}",
-       category: :user
-     )}
   end
 
   defp checkpoint_to_map(%Checkpoint{} = checkpoint) do
     training_run_id =
       checkpoint.training_run_id ||
-        case checkpoint_run_id(checkpoint.tinker_path) do
-          {:ok, run_id} -> run_id
-          _ -> nil
-        end
+        training_run_from_path(checkpoint.tinker_path)
 
     %{
       "checkpoint_id" => checkpoint.checkpoint_id,

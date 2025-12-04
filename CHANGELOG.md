@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.18] - 2025-12-03
+
+### Added
+- Public `Tinkex.Types.ParsedCheckpointTinkerPath` helper exposes structured `tinker://` components and user-category errors; REST helpers and CLI checkpoint commands reuse it for consistent validation.
+
+### Changed
+- `feature_gates` now default to `["async_sampling"]` when opts/app/env do not supply a value (Python parity); env snapshots/config defaults reflect the new baseline while keeping opts > app config > env precedence.
+- Environment and checkpoint guides note the default gate and the new path parser; README/install snippets bump to 0.1.18.
+
 ## [0.1.17] - 2025-12-03
 
 ### Added

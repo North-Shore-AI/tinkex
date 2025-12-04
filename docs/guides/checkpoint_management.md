@@ -94,6 +94,10 @@ tinker://run-id/weights/checkpoint-id
 
 This format uniquely identifies a checkpoint and is used throughout the API.
 
+### Parsing Tinker Paths
+
+Use `Tinkex.Types.ParsedCheckpointTinkerPath.from_tinker_path/1` to validate and extract the components of a `tinker://` checkpoint path. It returns `{:ok, %ParsedCheckpointTinkerPath{tinker_path: ..., training_run_id: ..., checkpoint_type: "training" | "sampler", checkpoint_id: ...}}` or `{:error, %Tinkex.Error{category: :user}}` for invalid input. The helper is shared by REST/CLI helpers so you see consistent validation errors for bad paths.
+
 ## Listing Checkpoints
 
 ### List All User Checkpoints

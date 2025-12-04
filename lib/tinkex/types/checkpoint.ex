@@ -5,6 +5,8 @@ defmodule Tinkex.Types.Checkpoint do
   Represents a saved model checkpoint with its metadata.
   """
 
+  alias Tinkex.Types.ParsedCheckpointTinkerPath
+
   @type t :: %__MODULE__{
           checkpoint_id: String.t(),
           checkpoint_type: String.t(),
@@ -43,12 +45,10 @@ defmodule Tinkex.Types.Checkpoint do
     }
   end
 
-  defp training_run_from_path("tinker://" <> rest) do
-    case String.split(rest, "/") do
-      [run_id | _] -> run_id
+  defp training_run_from_path(path) do
+    case ParsedCheckpointTinkerPath.from_tinker_path(path) do
+      {:ok, parsed} -> parsed.training_run_id
       _ -> nil
     end
   end
-
-  defp training_run_from_path(_), do: nil
 end
