@@ -11,41 +11,18 @@
 | `create_training_client_from_state` | Yes | Yes | Parity |
 | `create_training_client_from_state_async` | Yes | Yes | Parity |
 | `create_training_client_from_state_with_optimizer` | No | Yes | Elixir extra |
-| `create_sampling_client` | Yes | Yes | Parity |
+| `create_sampling_client` | Yes (`retry_config` optional) | Yes (`retry_config` optional) | Parity |
 | `create_sampling_client_async` | Yes | Yes | Parity |
 | `create_rest_client` | Yes | Yes | Parity |
 | `get_server_capabilities` | Yes | Yes | Parity |
 | `get_telemetry` | Yes | Yes | Different |
-
-### Missing Feature
-
-**Retry Config on Sampling Client**
-
-**Python:**
-```python
-def create_sampling_client(
-    self,
-    model_path: str | None = None,
-    base_model: str | None = None,
-    retry_config: RetryConfig | None = None,  # MISSING IN ELIXIR
-) -> SamplingClient:
-```
-
-**Elixir:** No `retry_config` parameter
-
-**Implementation Recommendation:**
-```elixir
-def create_sampling_client(server, opts \\ []) do
-  retry_config = Keyword.get(opts, :retry_config)
-  # Pass to SamplingClient
-end
-```
 
 ### Elixir Improvements
 
 1. **Explicit timeout control:** `call_timeout`, `load_timeout` parameters
 2. **Optimizer convenience methods:** Dedicated `_with_optimizer` variants
 3. **Server capability checks:** Before operations
+4. **Parity mode:** Optional `parity_mode: :python`/`TINKEX_PARITY=python` to match Python retry/timeout defaults
 
 ## RestClient
 
@@ -111,7 +88,7 @@ Both implementations:
 | Backoff | `delay * 2^attempt` | `delay * 2^attempt` |
 | Jitter | 0.75-1.0x | 0.75-1.0x |
 | Retryable codes | 408, 409, 429, 5xx | 408, 409, 429, 5xx |
-| Max retries | 10 (python parity) | 10 (python parity) |
+| Max retries | 10 (defaults) | 2 by default; 10 when `parity_mode: :python` or overriding opts |
 
 ### Headers
 
@@ -142,16 +119,16 @@ Both send:
 | Sampling | `asample` | Same | 100% |
 | Weights | `save`, `load`, `save_for_sampler` | Same + typed variants | 100% |
 | Rest | All checkpoint/run endpoints | Same | 100% |
-| Telemetry | `send_batch` | Not implemented | **Gap** |
+| Telemetry | `send_batch` | `send_batch` | Parity |
 
 ## Recommendations
 
 ### Priority 1
-1. Add `retry_config` parameter to `create_sampling_client`
+1. Document timeout/retry parity mode so users can match Python defaults easily.
 
 ### Priority 2
-2. Document HTTP error codes in RestClient
-3. Consider exposing retry configuration at client level
+2. Document HTTP error codes in RestClient.
+3. Keep `retry_config` surfaced for SamplingClient (already supported).
 
 ### Files Reference
 

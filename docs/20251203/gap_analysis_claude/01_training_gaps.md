@@ -2,98 +2,37 @@
 
 ## Overview
 
-TrainingClient achieves ~85% parity. Core training loop (forward, backward, optim_step) is fully implemented. Gaps exist in advanced regularizer features.
+TrainingClient achieves ~95% parity. Core training loop (forward, backward, optim_step, checkpoint save/load, sampler creation) matches Python. Elixir goes beyond Python with a regularizer pipeline and optional gradient-norm reporting; Python lacks this pipeline entirely.
 
 ## Fully Implemented (Parity)
 
 | Feature | Python | Elixir | Status |
 |---------|--------|--------|--------|
-| `forward/3` | Lines 202-260 | Lines 240-247 | Full |
-| `forward_backward/3` | Lines 282-354 | Lines 213-220 | Full |
-| `forward_backward_custom/3` | Lines 358-607 | Lines 404-417 + CustomLoss | Full |
-| `optim_step/3` | Lines 610-671 | Lines 255-259 | Full |
-| `save_state/3` (save_weights) | Lines 674-723 | Lines 325-331 | Full |
-| `load_state/3` (load_weights) | Lines 755-777 | Lines 339-345 | Full |
-| `load_state_with_optimizer/3` | Lines 780-806 | Lines 353-360 | Full |
-| `save_weights_for_sampler/3` | Lines 847-882 | Lines 272-279 | Full |
-| `save_weights_and_get_sampling_client/3` | Lines 971-1023 | Lines 287-317 | Full |
-| `get_info/1` | Lines 899-918 | Lines 84-92 | Full |
-| `get_tokenizer/2` | Lines 922-935 | Lines 116-126 | Full |
-| `create_sampling_client/2` | Lines 938-969 | Lines 372-377 | Full |
+| `forward/3` | training_client.py:181-233 | training_client.ex:240-279 | Parity |
+| `forward_backward/3` | training_client.py:261-318 | training_client.ex:213-220 | Parity |
+| `forward_backward_custom/3` | training_client.py:337-419 | training_client.ex:404-455 + `Training.CustomLoss` | Different (Elixir richer) |
+| `optim_step/3` | training_client.py:422-479 | training_client.ex:255-279 | Parity |
+| `save_state/3` (save_weights) | training_client.py:486-533 | training_client.ex:325-332 | Parity |
+| `load_state/3` (load_weights) | training_client.py:541-578 | training_client.ex:339-345 | Parity |
+| `load_state_with_optimizer/3` | training_client.py:584-619 | training_client.ex:353-360 | Parity |
+| `save_weights_for_sampler/3` | training_client.py:642-688 | training_client.ex:272-279 | Parity |
+| `save_weights_and_get_sampling_client/3` | training_client.py:723-789 | training_client.ex:287-317 | Parity |
+| `get_info/1` | training_client.py:808-840 | training_client.ex:84-92 | Parity |
+| `get_tokenizer/1` | training_client.py:843-894 | training_client.ex:116-126 | Parity |
+| `create_sampling_client/2` | training_client.py:898-935 | training_client.ex:372-377 | Parity |
 
-## Missing Features
+## Gaps & Differences
 
-### 1. Gradient Norm Tracking (High Priority)
+1. **Regularizer pipeline / grad norms**  
+   - Python: `forward_backward_custom` only wraps a torch-based custom loss; no regularizer execution or gradient-norm reporting.  
+   - Elixir: Full regularizer pipeline with optional gradient norms (`Tinkex.Regularizer.*`, `Training.CustomLoss`). This is an Elixir-only enhancement, not a gap.
 
-**Python Implementation:**
-```python
-# training_client.py lines 484-596
-def forward_backward_custom(..., track_grad_norms: bool = False):
-    if track_grad_norms:
-        # Compute L2 norm of gradients per-regularizer
-        grad_norm = torch.linalg.vector_norm(gradient).item()
-        grad_norm_weighted = grad_norm * weight
-```
+2. **Async regularizer handling**  
+   - Python: No regularizer async handling.  
+   - Elixir: Supports `async: true` specs with `Task.async_stream/3`.
 
-**Python Output Structure:**
-```python
-{
-    "regularizers": {
-        "<name>": {
-            "value": float,
-            "weight": float,
-            "contribution": float,
-            "grad_norm": float,           # MISSING
-            "grad_norm_weighted": float,  # MISSING
-            "custom": dict
-        }
-    },
-    "total_grad_norm": float  # MISSING
-}
-```
-
-**Elixir Status:** Not implemented
-
-**Implementation Recommendation:**
-Add to `Tinkex.CustomLoss`:
-```elixir
-defp compute_gradient_norms(regularizer_grads, track_norms?) when track_norms? do
-  Enum.map(regularizer_grads, fn {name, grad, weight} ->
-    norm = Nx.LinAlg.norm(grad) |> Nx.to_number()
-    {name, %{grad_norm: norm, grad_norm_weighted: norm * weight}}
-  end)
-end
-```
-
-### 2. Thread Pool Regularizer Execution (Low Priority)
-
-**Python Implementation:**
-```python
-# training_client.py line 365, 501-507
-run_sync_in_executor: bool = False
-
-async def _maybe_run_in_executor(fn, *args):
-    if run_sync_in_executor and not inspect.iscoroutinefunction(fn):
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, fn, *args)
-```
-
-**Elixir Status:** Not implemented
-
-**Note:** Less critical in Elixir due to BEAM's lightweight process model. Regularizers can be spawned as Tasks for parallelism:
-```elixir
-regularizers
-|> Task.async_stream(&compute_regularizer/1)
-|> Enum.to_list()
-```
-
-### 3. Automatic Async Detection (Low Priority)
-
-**Python:** Uses `inspect.iscoroutinefunction()` to auto-detect async regularizers
-
-**Elixir:** Uses explicit `async: boolean` flag in `RegularizerSpec`
-
-**Recommendation:** Keep explicit flag - more idiomatic in Elixir
+3. **Coverage gap: metric reducer parity**  
+   - Training results that depend on `hash_unordered` reducer (Python) will differ; Elixir combiner lacks that reducer (see Data Handling doc).
 
 ## Elixir-Only Features (Improvements)
 
@@ -101,6 +40,7 @@ regularizers
 |---------|-------------|
 | `encode/3`, `decode/3` | Integrated tokenizer helpers on TrainingClient |
 | `unload_model/2` | Explicit model unloading (not exposed in Python TrainingClient) |
+| Regularizer pipeline | Composition, optional parallelism, grad norms |
 
 ## Files Reference
 

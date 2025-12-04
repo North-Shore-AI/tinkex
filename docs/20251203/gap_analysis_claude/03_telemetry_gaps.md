@@ -2,7 +2,7 @@
 
 ## Overview
 
-Telemetry achieves ~70% parity. Both implementations capture events and exceptions, but the event model and server upload differ significantly.
+Telemetry achieves ~90% parity. Both SDKs batch events, respect queue limits, and upload to `/api/v1/telemetry`. Differences are in retry semantics and decorator vs macro capture style.
 
 ## Feature Comparison
 
@@ -14,51 +14,16 @@ Telemetry achieves ~70% parity. Both implementations capture events and exceptio
 | Session start/end events | Yes | Yes | Parity |
 | Generic events | Yes | Yes | Parity |
 | Exception capture | Decorator | Macro | Different pattern |
-| Server upload | Yes | No | **Gap** |
-| Retry on upload | Infinite | Max retries | Different |
+| Server upload | Yes (`POST /api/v1/telemetry`) | Yes (`POST /api/v1/telemetry`) | Parity |
+| Retry on upload | Infinite retry loop | Bounded (max_retries=3, exponential backoff) | Different |
 
-## Missing Features
+## Differences
 
-### 1. Server-Side Telemetry Upload (High Priority)
+### 1. Retry semantics
+- **Python:** Infinite retry loop on upload failures (1s backoff).
+- **Elixir:** Bounded retries (default max_retries=3 with exponential backoff); async and sync send variants.
 
-**Python Implementation:**
-```python
-# telemetry.py lines 130-137
-async def _send_batch_with_retry(self, batch: TelemetryBatch) -> TelemetryResponse:
-    while True:  # Infinite retry
-        try:
-            return await self._send_batch(batch)
-        except APIError as e:
-            logger.warning("Failed to send telemetry batch", exc_info=e)
-            await asyncio.sleep(1)
-            continue
-```
-
-**Python API Endpoint:** `POST /api/v1/telemetry`
-
-**Elixir Status:**
-- Events collected locally
-- No server upload implemented
-- Uses `:telemetry` library for local event emission
-
-**Implementation Recommendation:**
-```elixir
-# lib/tinkex/telemetry/uploader.ex
-defmodule Tinkex.Telemetry.Uploader do
-  use GenServer
-
-  def upload_batch(events, config) do
-    payload = %{
-      events: Enum.map(events, &serialize_event/1),
-      session_id: config.session_id
-    }
-
-    Tinkex.API.post(config, "/api/v1/telemetry", payload)
-  end
-end
-```
-
-### 2. Exception Chain Traversal (Low Priority)
+### 2. Exception chain traversal (Low Priority)
 
 **Python Implementation:**
 ```python
@@ -76,21 +41,9 @@ def _get_user_error(exception, visited=None):
 
 **Note:** Different error chain models. Elixir approach is idiomatic.
 
-### 3. Async Context Manager for Capture (Low Priority)
-
-**Python Implementation:**
-```python
-async def acapture_exceptions(self, fatal=False, severity="ERROR"):
-    try:
-        yield
-    except Exception as e:
-        self.capture_exception(e, fatal, severity)
-        raise
-```
-
-**Elixir Status:** Only synchronous capture via macros
-
-**Note:** Less critical in Elixir due to different concurrency model.
+### 3. Capture pattern (Low Priority)
+- **Python:** Decorator/contextmanager (sync and async).
+- **Elixir:** Macros (`TelemetryCapture`) around GenServer handlers/tasks; no async context manager wrapper but functionally equivalent capture points.
 
 ## Architecture Differences
 
@@ -136,9 +89,8 @@ Both support: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`
 
 ## Recommendations
 
-1. **Add server telemetry upload** if server-side analytics are needed
-2. Keep local `:telemetry` integration for BEAM ecosystem compatibility
-3. Consider hybrid: local events + optional server upload
+1. Consider exposing retry/backoff knobs to align with Python’s infinite retry behavior when desired.
+2. Keep `:telemetry` integration for BEAM ecosystem compatibility; document capture macro usage vs Python decorators.
 
 ## Files Reference
 

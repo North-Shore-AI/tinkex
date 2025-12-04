@@ -11,7 +11,7 @@ The Elixir CLI has **more features** than Python CLI. Python focuses on asset ma
 | `version` | Yes | Yes + `--json`, `--deps` | Elixir |
 | `checkpoint list` | Yes | Yes + `--offset` | Elixir |
 | `checkpoint info` | Yes | Yes | Parity |
-| `checkpoint download` | Yes (with extraction) | Yes (URL only) | Python |
+| `checkpoint download` | Yes (with extraction + progress bars) | Yes (streaming download + extraction) | Parity* |
 | `checkpoint publish` | Yes | Yes | Parity |
 | `checkpoint unpublish` | Yes | Yes | Parity |
 | `checkpoint delete` | Yes (single) | Yes (batch) | Elixir |
@@ -20,48 +20,14 @@ The Elixir CLI has **more features** than Python CLI. Python focuses on asset ma
 | `run info` | Yes | Yes | Parity |
 | `run sample` | **No** | Yes | Elixir |
 
+*Python surfaces progress bars by default; Elixir streams and extracts but keeps CLI output simple unless a progress callback is injected via deps.
+
 ## Python-Only Features
 
-### 1. Progress Bars (Intentionally Excluded)
+### 1. Progress Bars
 
-**Python Implementation:**
-```python
-# Uses click.progressbar() for:
-# - Checkpoint listing (large result sets)
-# - Checkpoint download
-# - Archive extraction
-```
-
-**Elixir Status:** Not implemented (per requirements)
-
-**Note:** Intentionally excluded from parity scope.
-
-### 2. Automatic Archive Extraction
-
-**Python Implementation:**
-```python
-# checkpoint.py
-def download(tinker_path, output_dir, force):
-    url = client.get_checkpoint_archive_url(...)
-    with tempfile.NamedTemporaryFile() as f:
-        download_with_progress(url, f)
-        extract_tar(f, output_dir)
-        # Auto-cleanup temp file
-```
-
-**Elixir Status:** Returns download URL only
-
-**Implementation Recommendation:**
-```elixir
-def download_and_extract(tinker_path, output_dir, opts \\ []) do
-  with {:ok, url} <- get_archive_url(tinker_path),
-       {:ok, tar_path} <- download_file(url),
-       :ok <- extract_tar(tar_path, output_dir) do
-    File.rm(tar_path)
-    {:ok, output_dir}
-  end
-end
-```
+**Python Implementation:** `click.progressbar()` for large list/download/extract operations.  
+**Elixir Status:** Plain output by design; `Tinkex.CheckpointDownload` supports an optional progress callback but CLI keeps output minimal.
 
 ## Elixir-Only Features
 
@@ -101,12 +67,7 @@ tinkex checkpoint delete path1 path2 path3 --yes
 
 ### 4. Extended Pagination
 
-```bash
-tinkex checkpoint list --limit 50 --offset 100
-tinkex run list --limit 20 --offset 40
-```
-
-**Both list commands support offset for pagination.**
+Both list commands support `--limit` and `--offset`.
 
 ## Options Comparison
 
@@ -198,14 +159,8 @@ end
 
 ## Recommendations
 
-### To Achieve Full Python Parity:
-1. Add archive extraction to `checkpoint download`
-
-### To Maintain Elixir Advantages:
-- Keep `checkpoint save` command
-- Keep `run sample` command
-- Keep batch delete support
-- Keep `--offset` pagination
+1. Add optional progress display hooks to the CLI (progress exists in the download module, not exposed by default).
+2. Keep Elixir-only commands (`checkpoint save`, `run sample`, batch delete) as differentiators.
 
 ## Files Reference
 

@@ -2,15 +2,15 @@
 
 ## Overview
 
-Data handling achieves ~80% parity. Core types (TensorData, ModelInput, Datum) are fully implemented. Gaps exist in chunking utilities and convenience methods.
+Data handling achieves ~90% parity. Core types (TensorData, ModelInput, Datum) are implemented; differences are limited to tensor conversion backends, a missing metric reducer, and a few convenience builders.
 
 ## Type Parity Matrix
 
 | Type | Python | Elixir | Status |
 |------|--------|--------|--------|
-| `TensorData` | Full | Full | Parity |
-| `ModelInput` | Full | Partial | Missing builders |
-| `Datum` | Full | Full | Parity |
+| `TensorData` | NumPy/PyTorch + list conversions | Nx + list conversions | Different (backend-specific) |
+| `ModelInput` | Builders + converters | from_ints/from_text only | Missing builders |
+| `Datum` | Key-based dtype inference | List/Nx inference only | Different |
 | `EncodedTextChunk` | Full | Full | Parity |
 | `ImageChunk` | Full | Full | Parity |
 | `ImageAssetPointerChunk` | Full | Full | Parity |
@@ -18,46 +18,13 @@ Data handling achieves ~80% parity. Core types (TensorData, ModelInput, Datum) a
 | `ForwardBackwardOutput` | Full | Full | Parity |
 | `SamplingParams` | Full | Full | Parity |
 
-## Missing Features
+**Note:** Chunked forward/backward combiner exists in both SDKs (`chunked_fwdbwd_helpers.combine_fwd_bwd_output_results` vs `Tinkex.Future.Combiner`). Metric reducer coverage differs (see Gaps).
 
-### 1. Chunked Output Combiner (High Priority)
+## Gaps
 
-**Python Implementation:**
-```python
-# chunked_fwdbwd_helpers.py
-def combine_fwd_bwd_output_results(
-    results: List[ForwardBackwardOutput]
-) -> ForwardBackwardOutput:
-    """Combines results from multiple chunks into single output."""
-    # Merges metrics with weighted averaging
-    # Flattens loss_fn_outputs
-    # Handles metric suffixes: :mean, :sum, :min, :max, :slack, :hash_unordered, :unique
-```
-
-**Elixir Status:**
-- `MetricsReduction.reduce/1` exists for metrics only
-- No unified `combine_fwd_bwd_output_results/1` function
-
-**Implementation Recommendation:**
-```elixir
-# lib/tinkex/chunked_helpers.ex
-defmodule Tinkex.ChunkedHelpers do
-  def combine_fwd_bwd_outputs(outputs) when is_list(outputs) do
-    loss_fn_outputs = Enum.flat_map(outputs, & &1.loss_fn_outputs)
-    weights = Enum.map(outputs, &length(&1.loss_fn_outputs))
-    metrics = MetricsReduction.reduce_weighted(
-      Enum.map(outputs, & &1.metrics),
-      weights
-    )
-
-    %ForwardBackwardOutput{
-      loss_fn_output_type: hd(outputs).loss_fn_output_type,
-      loss_fn_outputs: loss_fn_outputs,
-      metrics: metrics
-    }
-  end
-end
-```
+### 1. Metric reducer coverage (Medium)
+- **Python:** `combine_fwd_bwd_output_results` supports `hash_unordered` and other reducers.
+- **Elixir:** Combiner exists (`Tinkex.Future.Combiner`) but `MetricsReduction` lacks `hash_unordered`, so order-insensitive metrics will differ.
 
 ### 2. ModelInput Builder Methods (Medium Priority)
 
@@ -117,34 +84,9 @@ _key_to_type = {
 
 **Note:** Current approach works for most cases. Key-based inference would be an optimization.
 
-### 4. TensorData.tolist/1 (Low Priority)
-
-**Python Implementation:**
-```python
-def tolist(self) -> List[int] | List[float]:
-    return self.data
-```
-
-**Elixir Status:** Can use `tensor_data.data` directly
-
-**Recommendation:** Add for API consistency:
-```elixir
-def tolist(%__MODULE__{data: data}), do: data
-```
-
-## Tensor Conversion Comparison
-
-| Conversion | Python | Elixir |
-|------------|--------|--------|
-| From NumPy | `from_numpy()` | N/A (no NumPy) |
-| From PyTorch | `from_torch()` | N/A (no PyTorch) |
-| From Nx | N/A | `from_nx()` |
-| To NumPy | `to_numpy()` | N/A |
-| To PyTorch | `to_torch()` | N/A |
-| To Nx | N/A | `to_nx()` |
-| To List | `tolist()` | `.data` field |
-
-**Note:** Elixir uses Nx as the tensor library. NumPy/PyTorch conversions are not applicable.
+### 4. Tensor conversion backends (Low Priority)
+- **Python:** NumPy and PyTorch helpers (`from_numpy`, `from_torch`, `to_numpy`, `to_torch`).
+- **Elixir:** Nx-only (`from_nx`, `to_nx`); list access via `data` field.
 
 ## Elixir-Only Features
 
@@ -152,7 +94,7 @@ def tolist(%__MODULE__{data: data}), do: data
 |---------|-------------|
 | `ModelInput.from_text/2` | Direct text→tokens via Tokenizer |
 | `ModelInput.from_text!/2` | Raising variant |
-| Nested list support | `TensorData.from_nx/1` handles nested lists |
+| Nx casting | `TensorData.from_nx/1` aggressively casts to Python-compatible dtypes |
 
 ## Files Reference
 
