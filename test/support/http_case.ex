@@ -31,7 +31,9 @@ defmodule Tinkex.HTTPCase do
       Tinkex.Config.new(
         api_key: "test-key",
         base_url: endpoint_url(bypass),
-        http_pool: finch_name
+        http_pool: finch_name,
+        timeout: 1_000,
+        max_retries: 2
       )
 
     ExUnit.Callbacks.on_exit(fn ->

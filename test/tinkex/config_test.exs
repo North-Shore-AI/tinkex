@@ -17,8 +17,8 @@ defmodule Tinkex.ConfigTest do
 
       assert config.api_key == "test-key"
       assert config.base_url =~ "tinker.thinkingmachines.dev"
-      assert config.timeout == 120_000
-      assert config.max_retries == 2
+      assert config.timeout == 60_000
+      assert config.max_retries == 10
       assert config.http_pool == Tinkex.HTTP.Pool
       assert config.http_client == Tinkex.API
       assert config.tags == ["tinkex-elixir"]

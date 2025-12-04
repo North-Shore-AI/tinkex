@@ -13,10 +13,11 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.19 Highlights
+## 0.1.20 Highlights
 
-- Gap analysis and parity docs updated after review: README and detailed reports now reflect confirmed Elixir regularizer/telemetry support, sampling `retry_config`, Python-only tensor backends, and the remaining reducer/model-input gaps.
-- Review results captured in `docs/20251203/gap_analysis_claude/REVIEW_RESULTS.md` to track verified errors, omissions, and follow-up actions.
+- Default parity mode now matches Python out of the box (`timeout: 60_000`, `max_retries: 10`); set `parity_mode: :beam` or `TINKEX_PARITY=beam` to restore 120s/2-retry defaults.
+- `loss_fn_inputs` lists follow Python’s key-based dtype map and raise on unknown keys (use TensorData/Nx.Tensor for custom inputs); closes the dtype inference gap.
+- Changelog/docs updated for the new defaults and dtype behavior.
 
 ## Features
 
@@ -61,7 +62,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.19"}
+    {:tinkex, "~> 0.1.20"}
   ]
 end
 ```

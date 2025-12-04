@@ -6,6 +6,15 @@ All notable changes to this project will be documented in this file.
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.20] - 2025-12-03
+
+### Changed
+- **Default parity:** Config now defaults to Python parity (`timeout: 60_000`, `max_retries: 10`); use `parity_mode: :beam` or `TINKEX_PARITY=beam` to opt back into the 120s/2-retry defaults.
+- **Datum dtype parity:** `loss_fn_inputs` lists use the Python `_key_to_type` map (`target_tokens` → int64; `weights`/`advantages`/`logprobs`/`clip_*` → float32) and raise on list values under unknown keys; typed tensors remain allowed for custom keys.
+
+### Added
+- Tests covering the key-based dtype map and error behavior for unknown list keys; docs/README bumped to 0.1.20.
+
 ## [0.1.19] - 2025-12-03
 
 ### Added

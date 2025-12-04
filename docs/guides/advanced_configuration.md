@@ -44,8 +44,8 @@ The `Tinkex.Config` struct contains all configuration needed for API requests:
   api_key: String.t(),             # API authentication key (required)
   http_pool: atom(),               # Finch pool base name/prefix (default: Tinkex.HTTP.Pool)
   http_client: module(),           # HTTP client module (default: Tinkex.API)
-  timeout: pos_integer(),          # Request timeout in milliseconds (default: 120_000)
-  max_retries: non_neg_integer(),  # Additional retry attempts (default: 2)
+  timeout: pos_integer(),          # Request timeout in milliseconds (default: 60_000; set parity_mode: :beam for 120_000)
+  max_retries: non_neg_integer(),  # Additional retry attempts (default: 10; set parity_mode: :beam for 2)
   telemetry_enabled?: boolean(),   # Toggle client telemetry (default: true)
   log_level: :debug | :info | :warn | :error | nil, # Logger level (applied at startup)
   dump_headers?: boolean(),        # Dump HTTP headers (redacted)
@@ -82,16 +82,15 @@ The `Tinkex.Config` struct contains all configuration needed for API requests:
 - Module implementing the `Tinkex.HTTPClient` behaviour
 - Override for custom HTTP adapters or test stubs
 
-**timeout** (default: `120_000` ms = 2 minutes)
+**timeout** (default: `60_000` ms = 1 minute; use parity_mode: :beam for 120_000)
 - Maximum time for a single HTTP request
 - Can be overridden per-request with `timeout:` option
 - Does not include retry delays
 
-**max_retries** (default: `2`)
+**max_retries** (default: `10`; use parity_mode: :beam for 2)
 - Number of additional attempts after initial request fails
-- Total attempts = 1 + max_retries (default: 3 total)
-- Uses exponential backoff: 500ms, 1000ms, 2000ms, capped at 8000ms
-- Maximum retry duration: 30 seconds
+- Total attempts = 1 + max_retries (default: 11 total)
+- Uses exponential backoff: starts at 500ms and caps at 10_000ms
 
 **user_metadata** (optional)
 - Custom key-value pairs attached to sessions
@@ -161,8 +160,8 @@ import Config
 config :tinkex,
   api_key: System.get_env("TINKER_API_KEY"),
   base_url: "https://tinker.thinkingmachines.dev/services/tinker-prod",
-  timeout: 120_000,
-  max_retries: 2,
+  timeout: 60_000,
+  max_retries: 10,
   http_pool: Tinkex.HTTP.Pool,
   enable_http_pools: true,
   heartbeat_interval_ms: 10_000,
@@ -184,11 +183,11 @@ config :tinkex,
 - Determines which Finch pool is created at startup
 
 **:timeout**
-- Default: `120_000` ms
+- Default: `60_000` ms (set `parity_mode: :beam` for `120_000`)
 - Global default for all requests
 
 **:max_retries**
-- Default: `2`
+- Default: `10` (set `parity_mode: :beam` for `2`)
 - Number of retry attempts after initial failure
 
 **:http_pool**

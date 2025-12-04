@@ -227,6 +227,7 @@ defmodule Tinkex.RestClientAsyncTest do
     test "network errors propagate through tasks", %{bypass: bypass, config: config} do
       Bypass.down(bypass)
 
+      config = %{config | timeout: 1_000, max_retries: 0}
       client = RestClient.new("session-123", config)
       task = RestClient.list_sessions_async(client)
 

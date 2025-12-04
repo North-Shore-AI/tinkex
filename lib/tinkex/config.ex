@@ -70,28 +70,24 @@ defmodule Tinkex.Config do
   Build a config struct using runtime options + application/env defaults.
 
   `max_retries` is the number of additional attempts after the initial request.
-  With the default of 2, the SDK will perform up to three total attempts.
+  With the default of 10, the SDK will perform up to eleven total attempts.
 
   ## Parity Mode
 
-  By default, Tinkex uses BEAM-conservative defaults:
-    * `timeout: 120_000` (2 minutes)
-    * `max_retries: 2` (3 total attempts)
-
-  To match Python SDK defaults, enable parity mode:
-
-      # Via options
-      config = Tinkex.Config.new(parity_mode: :python)
-
-      # Via application config
-      config :tinkex, parity_mode: :python
-
-      # Via environment variable
-      export TINKEX_PARITY=python
-
-  Python parity mode sets:
+  Tinkex defaults to Python SDK parity values to ease cross-language migration:
     * `timeout: 60_000` (1 minute)
     * `max_retries: 10` (11 total attempts)
+
+  To opt into BEAM-conservative defaults instead, set parity mode to `:beam`:
+
+      # Via options
+      config = Tinkex.Config.new(parity_mode: :beam)
+
+      # Via application config
+      config :tinkex, parity_mode: :beam
+
+      # Via environment variable
+      export TINKEX_PARITY=beam
 
   Explicit timeout/max_retries options always override parity defaults.
   """
@@ -441,18 +437,29 @@ defmodule Tinkex.Config do
   # Parity mode helpers
 
   defp determine_parity_mode(opts, env) do
-    pick([
-      opts[:parity_mode],
-      Application.get_env(:tinkex, :parity_mode),
-      parse_parity_env(env)
-    ])
+    pick(
+      [
+        opts[:parity_mode],
+        Application.get_env(:tinkex, :parity_mode),
+        parse_parity_env(env)
+      ],
+      :python
+    )
   end
 
-  defp parse_parity_env(%{parity_mode: mode}) when mode in [:python, "python"], do: :python
+  defp parse_parity_env(%{parity_mode: mode})
+       when mode in [:python, "python", "Python", "PYTHON"],
+       do: :python
+
+  defp parse_parity_env(%{parity_mode: mode})
+       when mode in [:beam, :elixir, "beam", "BEAM", "elixir", "ELIXIR"],
+       do: :beam
+
   defp parse_parity_env(_), do: nil
 
+  defp defaults_for_parity(:beam), do: {@default_timeout, @default_max_retries}
   defp defaults_for_parity(:python), do: {@python_timeout, @python_max_retries}
-  defp defaults_for_parity(_), do: {@default_timeout, @default_max_retries}
+  defp defaults_for_parity(_), do: {@python_timeout, @python_max_retries}
 
   # Proxy parsing and validation
 

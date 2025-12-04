@@ -99,9 +99,11 @@ defmodule Tinkex.Env do
   @doc """
   Get parity mode from environment.
 
-  Set `TINKEX_PARITY=python` to use Python SDK defaults for timeout and retries.
+  Defaults to Python parity. Set `TINKEX_PARITY=beam` to use BEAM-conservative
+  defaults (`timeout: 120_000`, `max_retries: 2`), or `TINKEX_PARITY=python` to
+  explicitly select Python SDK defaults (`timeout: 60_000`, `max_retries: 10`).
   """
-  @spec parity_mode(env_source()) :: :python | nil
+  @spec parity_mode(env_source()) :: :python | :beam | nil
   def parity_mode(env \\ :system) do
     env
     |> fetch("TINKEX_PARITY")
@@ -242,6 +244,10 @@ defmodule Tinkex.Env do
   defp parse_parity_mode("python"), do: :python
   defp parse_parity_mode("Python"), do: :python
   defp parse_parity_mode("PYTHON"), do: :python
+  defp parse_parity_mode("beam"), do: :beam
+  defp parse_parity_mode("BEAM"), do: :beam
+  defp parse_parity_mode("elixir"), do: :beam
+  defp parse_parity_mode("ELIXIR"), do: :beam
   defp parse_parity_mode(_), do: nil
 
   defp parse_json_map(nil), do: %{}
