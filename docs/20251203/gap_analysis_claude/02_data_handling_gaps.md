@@ -2,14 +2,14 @@
 
 ## Overview
 
-Data handling achieves ~90% parity. Core types (TensorData, ModelInput, Datum) are implemented; differences are limited to tensor conversion backends, a missing metric reducer, and a few convenience builders.
+Data handling achieves ~95% parity. Core types (TensorData, ModelInput, Datum) are implemented with full builder support. Remaining differences are limited to tensor conversion backends (Nx vs NumPy/PyTorch) and key-based dtype inference.
 
 ## Type Parity Matrix
 
 | Type | Python | Elixir | Status |
 |------|--------|--------|--------|
-| `TensorData` | NumPy/PyTorch + list conversions | Nx + list conversions | Different (backend-specific) |
-| `ModelInput` | Builders + converters | from_ints/from_text only | Missing builders |
+| `TensorData` | NumPy/PyTorch + list conversions | Nx + `tolist/1` | Different (backend-specific) |
+| `ModelInput` | Builders + converters | `empty/0`, `append/2`, `append_int/2`, `from_ints`, `from_text` | ✅ Parity |
 | `Datum` | Key-based dtype inference | List/Nx inference only | Different |
 | `EncodedTextChunk` | Full | Full | Parity |
 | `ImageChunk` | Full | Full | Parity |
@@ -18,15 +18,16 @@ Data handling achieves ~90% parity. Core types (TensorData, ModelInput, Datum) a
 | `ForwardBackwardOutput` | Full | Full | Parity |
 | `SamplingParams` | Full | Full | Parity |
 
-**Note:** Chunked forward/backward combiner exists in both SDKs (`chunked_fwdbwd_helpers.combine_fwd_bwd_output_results` vs `Tinkex.Future.Combiner`). Metric reducer coverage differs (see Gaps).
+**Note:** Chunked forward/backward combiner exists in both SDKs (`chunked_fwdbwd_helpers.combine_fwd_bwd_output_results` vs `Tinkex.Future.Combiner`). Metric reducers now have full parity including `hash_unordered`.
 
 ## Gaps
 
-### 1. Metric reducer coverage (Medium)
+### 1. ~~Metric reducer coverage~~ (RESOLVED)
 - **Python:** `combine_fwd_bwd_output_results` supports `hash_unordered` and other reducers.
-- **Elixir:** Combiner exists (`Tinkex.Future.Combiner`) but `MetricsReduction` lacks `hash_unordered`, so order-insensitive metrics will differ.
+- **Elixir:** ✅ `MetricsReduction` now includes `hash_unordered` reducer. Uses `Enum.sort/1` + `:erlang.phash2/1` for order-insensitive hashing.
+- **Note:** `hash_unordered` returns an **integer** (unlike other reducers which return floats). This is intentional for identity/fingerprinting use cases where the hash is used for equality checks, not arithmetic.
 
-### 2. ModelInput Builder Methods (Medium Priority)
+### 2. ~~ModelInput Builder Methods~~ (RESOLVED)
 
 **Python Implementation:**
 ```python
@@ -43,27 +44,10 @@ class ModelInput:
         # Appends to last EncodedTextChunk or creates new one
 ```
 
-**Elixir Status:** Not implemented
-
-**Implementation Recommendation:**
-```elixir
-# lib/tinkex/types/model_input.ex
-def empty, do: %__MODULE__{chunks: []}
-
-def append(%__MODULE__{chunks: chunks}, chunk) do
-  %__MODULE__{chunks: chunks ++ [chunk]}
-end
-
-def append_int(%__MODULE__{chunks: chunks}, token) when is_integer(token) do
-  case List.last(chunks) do
-    %EncodedTextChunk{tokens: tokens} = last ->
-      updated = %{last | tokens: tokens ++ [token]}
-      %__MODULE__{chunks: List.replace_at(chunks, -1, updated)}
-    _ ->
-      append(%__MODULE__{chunks: chunks}, %EncodedTextChunk{tokens: [token]})
-  end
-end
-```
+**Elixir Status:** ✅ Implemented in `lib/tinkex/types/model_input.ex`:
+- `empty/0` - Creates empty ModelInput
+- `append/2` - Appends any chunk type
+- `append_int/2` - Token-aware append (extends last EncodedTextChunk or creates new one)
 
 ### 3. Key-Based Dtype Inference (Low Priority)
 
@@ -86,7 +70,7 @@ _key_to_type = {
 
 ### 4. Tensor conversion backends (Low Priority)
 - **Python:** NumPy and PyTorch helpers (`from_numpy`, `from_torch`, `to_numpy`, `to_torch`).
-- **Elixir:** Nx-only (`from_nx`, `to_nx`); list access via `data` field.
+- **Elixir:** Nx-only (`from_nx`, `to_nx`); list access via `tolist/1` (added for parity) or `data` field.
 
 ## Elixir-Only Features
 
@@ -94,6 +78,10 @@ _key_to_type = {
 |---------|-------------|
 | `ModelInput.from_text/2` | Direct text→tokens via Tokenizer |
 | `ModelInput.from_text!/2` | Raising variant |
+| `ModelInput.empty/0` | Create empty ModelInput |
+| `ModelInput.append/2` | Append any chunk type |
+| `ModelInput.append_int/2` | Token-aware append (extends last text chunk or creates new) |
+| `TensorData.tolist/1` | Return flat data list (Python parity) |
 | Nx casting | `TensorData.from_nx/1` aggressively casts to Python-compatible dtypes |
 
 ## Files Reference

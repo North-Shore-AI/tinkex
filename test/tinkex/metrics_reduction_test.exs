@@ -123,6 +123,61 @@ defmodule Tinkex.MetricsReductionTest do
       assert reduced["loss:mean"] == 0.0
       assert reduced["drift:slack"] == 0.0
     end
+
+    test "hash_unordered produces same hash regardless of input order" do
+      # Values in different orders across chunks
+      results_order_a = [
+        fb_output(%{"batch_ids:hash_unordered" => 1.0}),
+        fb_output(%{"batch_ids:hash_unordered" => 3.0}),
+        fb_output(%{"batch_ids:hash_unordered" => 2.0})
+      ]
+
+      results_order_b = [
+        fb_output(%{"batch_ids:hash_unordered" => 3.0}),
+        fb_output(%{"batch_ids:hash_unordered" => 1.0}),
+        fb_output(%{"batch_ids:hash_unordered" => 2.0})
+      ]
+
+      results_order_c = [
+        fb_output(%{"batch_ids:hash_unordered" => 2.0}),
+        fb_output(%{"batch_ids:hash_unordered" => 1.0}),
+        fb_output(%{"batch_ids:hash_unordered" => 3.0})
+      ]
+
+      reduced_a = MetricsReduction.reduce(results_order_a)
+      reduced_b = MetricsReduction.reduce(results_order_b)
+      reduced_c = MetricsReduction.reduce(results_order_c)
+
+      # All should produce the same hash (order-insensitive)
+      assert reduced_a["batch_ids:hash_unordered"] == reduced_b["batch_ids:hash_unordered"]
+      assert reduced_b["batch_ids:hash_unordered"] == reduced_c["batch_ids:hash_unordered"]
+      assert is_integer(reduced_a["batch_ids:hash_unordered"])
+    end
+
+    test "hash_unordered produces different hash for different value sets" do
+      results_a = [
+        fb_output(%{"ids:hash_unordered" => 1.0}),
+        fb_output(%{"ids:hash_unordered" => 2.0})
+      ]
+
+      results_b = [
+        fb_output(%{"ids:hash_unordered" => 1.0}),
+        fb_output(%{"ids:hash_unordered" => 3.0})
+      ]
+
+      reduced_a = MetricsReduction.reduce(results_a)
+      reduced_b = MetricsReduction.reduce(results_b)
+
+      # Different value sets should produce different hashes
+      assert reduced_a["ids:hash_unordered"] != reduced_b["ids:hash_unordered"]
+    end
+
+    test "hash_unordered with single value" do
+      results = [fb_output(%{"single:hash_unordered" => 42.0})]
+      reduced = MetricsReduction.reduce(results)
+
+      assert is_integer(reduced["single:hash_unordered"])
+    end
   end
 
   describe "combine_forward_backward_results/1" do

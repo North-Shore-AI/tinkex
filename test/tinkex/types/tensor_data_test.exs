@@ -66,6 +66,32 @@ defmodule Tinkex.Types.TensorDataTest do
     end
   end
 
+  describe "tolist/1" do
+    test "returns flat data list" do
+      td = %TensorData{
+        data: [1.0, 2.0, 3.0],
+        dtype: :float32,
+        shape: [3]
+      }
+
+      assert TensorData.tolist(td) == [1.0, 2.0, 3.0]
+    end
+
+    test "returns flat data for multi-dimensional tensor" do
+      tensor = Nx.tensor([[1, 2], [3, 4]], type: {:s, 64})
+      td = TensorData.from_nx(tensor)
+
+      assert TensorData.tolist(td) == [1, 2, 3, 4]
+    end
+
+    test "returns single-element list for scalar" do
+      tensor = Nx.tensor(42.5, type: {:f, 64})
+      td = TensorData.from_nx(tensor)
+
+      assert TensorData.tolist(td) == [42.5]
+    end
+  end
+
   describe "JSON encoding" do
     test "encodes to correct wire format" do
       td = %TensorData{

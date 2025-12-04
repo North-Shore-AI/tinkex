@@ -20,6 +20,69 @@ defmodule Tinkex.Types.ModelInput do
         }
 
   @doc """
+  Create an empty ModelInput with no chunks.
+
+  ## Examples
+
+      iex> ModelInput.empty()
+      %ModelInput{chunks: []}
+  """
+  @spec empty() :: t()
+  def empty, do: %__MODULE__{chunks: []}
+
+  @doc """
+  Append a chunk to the ModelInput.
+
+  Returns a new ModelInput with the given chunk appended to the end.
+
+  ## Examples
+
+      iex> input = ModelInput.empty()
+      iex> chunk = %EncodedTextChunk{tokens: [1, 2, 3], type: "encoded_text"}
+      iex> ModelInput.append(input, chunk)
+      %ModelInput{chunks: [%EncodedTextChunk{tokens: [1, 2, 3], type: "encoded_text"}]}
+  """
+  @spec append(t(), chunk()) :: t()
+  def append(%__MODULE__{chunks: chunks}, chunk) do
+    %__MODULE__{chunks: chunks ++ [chunk]}
+  end
+
+  @doc """
+  Append a single token to the ModelInput.
+
+  Token-aware append: if the last chunk is an EncodedTextChunk, extends its
+  tokens; otherwise adds a new EncodedTextChunk with that single token.
+
+  ## Examples
+
+      iex> input = ModelInput.from_ints([1, 2])
+      iex> ModelInput.append_int(input, 3) |> ModelInput.to_ints()
+      [1, 2, 3]
+
+      iex> input = ModelInput.empty()
+      iex> ModelInput.append_int(input, 42) |> ModelInput.to_ints()
+      [42]
+  """
+  @spec append_int(t(), integer()) :: t()
+  def append_int(%__MODULE__{chunks: []}, token) when is_integer(token) do
+    %__MODULE__{chunks: [%EncodedTextChunk{tokens: [token], type: "encoded_text"}]}
+  end
+
+  def append_int(%__MODULE__{chunks: chunks}, token) when is_integer(token) do
+    case List.last(chunks) do
+      %EncodedTextChunk{tokens: tokens} = last ->
+        updated = %{last | tokens: tokens ++ [token]}
+        %__MODULE__{chunks: List.replace_at(chunks, -1, updated)}
+
+      _other ->
+        append(%__MODULE__{chunks: chunks}, %EncodedTextChunk{
+          tokens: [token],
+          type: "encoded_text"
+        })
+    end
+  end
+
+  @doc """
   Create ModelInput from a list of token IDs.
   """
   @spec from_ints([integer()]) :: t()

@@ -6,6 +6,18 @@ All notable changes to this project will be documented in this file.
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.19] - 2025-12-03
+
+### Added
+- **Metric reducer parity:** `hash_unordered` reducer in `Tinkex.MetricsReduction` for order-insensitive hash aggregation, matching Python's chunked metrics behavior.
+- **ModelInput builders:** `empty/0`, `append/2`, and `append_int/2` helpers for building ModelInput incrementally. `append_int/2` is token-aware: extends the last EncodedTextChunk when possible, otherwise creates a new chunk.
+- **TensorData.tolist/1:** Returns the flat data list for API parity with Python's `TensorData.tolist()`.
+
+### Documentation
+- Gap analysis docs corrected per review: parity matrices now reflect Elixir regularizer/telemetry support, sampling `retry_config`, Python-only tensor backends, and the remaining reducer/model-input gaps.
+- Captured verification results in `docs/20251203/gap_analysis_claude/REVIEW_RESULTS.md` and refreshed README/install snippets/prompts to 0.1.19 for consistency.
+- Updated gap analysis to mark `hash_unordered` reducer and ModelInput builders as resolved.
+
 ## [0.1.18] - 2025-12-03
 
 ### Added

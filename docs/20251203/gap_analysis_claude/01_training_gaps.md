@@ -31,8 +31,8 @@ TrainingClient achieves ~95% parity. Core training loop (forward, backward, opti
    - Python: No regularizer async handling.  
    - Elixir: Supports `async: true` specs with `Task.async_stream/3`.
 
-3. **Coverage gap: metric reducer parity**  
-   - Training results that depend on `hash_unordered` reducer (Python) will differ; Elixir combiner lacks that reducer (see Data Handling doc).
+3. ~~**Coverage gap: metric reducer parity**~~ (RESOLVED)
+   - ✅ `hash_unordered` reducer now implemented; training results using this reducer will match Python behavior.
 
 ## Elixir-Only Features (Improvements)
 

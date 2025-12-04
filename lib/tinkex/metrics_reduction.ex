@@ -18,7 +18,8 @@ defmodule Tinkex.MetricsReduction do
     "max" => :max,
     "mean" => :mean,
     "slack" => :slack,
-    "unique" => :unique
+    "unique" => :unique,
+    "hash_unordered" => :hash_unordered
   }
 
   @doc """
@@ -28,6 +29,8 @@ defmodule Tinkex.MetricsReduction do
   * Unknown suffixes fall back to the weighted mean reducer.
   * `:unique` metrics retain every value by emitting suffixed keys (`key_2`, `key_3`, ...).
   * Weighted reducers return `0.0` when the total weight is `0`.
+  * `:hash_unordered` returns an **integer** hash (not a float) for order-insensitive
+    identity checks. Suitable for verifying batch composition across distributed chunks.
   """
   @spec reduce([ForwardBackwardOutput.t()]) :: metrics()
   def reduce([]), do: %{}
@@ -93,6 +96,10 @@ defmodule Tinkex.MetricsReduction do
     end)
   end
 
+  defp apply_reduction(key, "hash_unordered", values, _weights) do
+    %{key => execute_reducer(:hash_unordered, values, [])}
+  end
+
   defp apply_reduction(key, suffix, values, weights) do
     reducer = Map.get(@reducers, suffix, :mean)
     reduced_value = execute_reducer(reducer, values, weights)
@@ -129,4 +136,17 @@ defmodule Tinkex.MetricsReduction do
 
   defp execute_reducer(:unique, _values, _weights),
     do: raise("unique reducer should be handled separately")
+
+  defp execute_reducer(:hash_unordered, values, _weights) do
+    # Order-insensitive hash: sort values numerically, then hash.
+    # Python uses: hash(tuple(sorted(values))) - we use :erlang.phash2 for consistency.
+    #
+    # NOTE: Returns an integer hash (not a float like other reducers). This is
+    # intentional for identity/fingerprinting use cases. Consumers should be
+    # aware that :hash_unordered metrics are integers used for equality checks,
+    # not for arithmetic aggregation.
+    values
+    |> Enum.sort()
+    |> :erlang.phash2()
+  end
 end

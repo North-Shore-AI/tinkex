@@ -1,7 +1,7 @@
 # Tinkex Gap Analysis: Python → Elixir Parity
 
 **Date:** 2025-12-03
-**Versions:** Python tinker 0.6.3 → Elixir tinkex 0.1.18
+**Versions:** Python tinker 0.6.3 → Elixir tinkex 0.1.19
 
 ## Executive Summary
 
@@ -32,9 +32,9 @@ Per project requirements, the following are **not gaps**:
 None identified.
 
 ### Remaining Gaps (Impact: Medium/Low)
-1. **Metric reducer coverage** – `hash_unordered` missing in Elixir combiner
-2. **Tensor conversion backends** – Python offers NumPy/PyTorch helpers; Elixir is Nx-only
-3. **ModelInput builder helpers** – `empty/0`, `append/2`, `append_int/2` absent in Elixir
+1. ~~**Metric reducer coverage**~~ – ✅ `hash_unordered` now implemented in Elixir combiner
+2. **Tensor conversion backends** – Python offers NumPy/PyTorch helpers; Elixir is Nx-only (+ `tolist/1`)
+3. ~~**ModelInput builder helpers**~~ – ✅ `empty/0`, `append/2`, `append_int/2` now implemented
 4. **Retry/timeout defaults** – Elixir defaults differ unless `parity_mode: :python` is set
 
 ## Detailed Reports
@@ -47,13 +47,14 @@ None identified.
 
 ## Recommendations
 
-### Priority 1: Parity polish
-1. Add `hash_unordered` metric reducer to match Python combiner
-2. Add `ModelInput.empty/0`, `append/2`, `append_int/2` helpers
+### Priority 1: Parity polish (COMPLETED)
+1. ✅ `hash_unordered` metric reducer implemented
+2. ✅ `ModelInput.empty/0`, `append/2`, `append_int/2` helpers implemented
+3. ✅ `TensorData.tolist/1` added for API parity
 
 ### Priority 2: Developer experience
-3. Document/optionally expose NumPy/PyTorch-friendly conversions or call out Nx-only scope
-4. Make parity defaults obvious (`parity_mode: :python`) for timeout/retry alignment
+4. Document/optionally expose NumPy/PyTorch-friendly conversions or call out Nx-only scope
+5. Make parity defaults obvious (`parity_mode: :python`) for timeout/retry alignment
 
 ## Architecture Notes
 

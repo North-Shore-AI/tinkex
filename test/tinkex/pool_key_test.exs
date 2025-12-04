@@ -52,24 +52,24 @@ defmodule Tinkex.PoolKeyTest do
   end
 
   describe "build/2" do
-    test "creates tuple for training pool" do
+    test "creates normalized URL + pool type" do
       assert PoolKey.build("https://example.com:443", :training) ==
-               {{:https, "example.com", 443}, :training}
+               {"https://example.com", :training}
     end
 
-    test "creates tuple for default pool" do
+    test "creates normalized URL for default pool" do
       assert PoolKey.build("https://example.com", :default) ==
-               {{:https, "example.com", 443}, :default}
+               {"https://example.com", :default}
     end
 
-    test "creates tuple for sampling pool" do
+    test "downcases host for sampling pool" do
       assert PoolKey.build("https://EXAMPLE.COM", :sampling) ==
-               {{:https, "example.com", 443}, :sampling}
+               {"https://example.com", :sampling}
     end
 
     test "normalizes URL in pool key" do
       assert PoolKey.build("https://example.com:443", :futures) ==
-               {{:https, "example.com", 443}, :futures}
+               {"https://example.com", :futures}
     end
   end
 

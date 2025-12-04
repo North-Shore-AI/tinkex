@@ -13,11 +13,10 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.18 Highlights
+## 0.1.19 Highlights
 
-- **Feature gate parity**: `feature_gates` now default to `["async_sampling"]` when unset/empty to match the Python SDK; opts/app/env still override in that order.
-- **Checkpoint path parser**: New `Tinkex.Types.ParsedCheckpointTinkerPath` helper (used by REST + CLI) returns structured `tinker://` components and surfaces user-category errors for invalid paths.
-- **Docs & defaults**: Environment guide and config defaults call out the new feature gate baseline; checkpoint guide references the public parser helper.
+- Gap analysis and parity docs updated after review: README and detailed reports now reflect confirmed Elixir regularizer/telemetry support, sampling `retry_config`, Python-only tensor backends, and the remaining reducer/model-input gaps.
+- Review results captured in `docs/20251203/gap_analysis_claude/REVIEW_RESULTS.md` to track verified errors, omissions, and follow-up actions.
 
 ## Features
 
@@ -41,6 +40,7 @@ Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-
 - **Checkpoint persistence**: `TrainingClient.save_state/3`, `TrainingClient.load_state/3`, `TrainingClient.load_state_with_optimizer/3`, and `ServiceClient.create_training_client_from_state/3` enable saving checkpoints and resuming training with optimizer state.
 - **Multipart uploads**: The `:files` option builds multipart/form-data bodies automatically (path and tuple normalization, bracketed form fields, boundary generation, and tuple metadata) while preserving JSON requests when no files are present; includes a runnable multipart example and path-based helpers.
 - **Proxy-aware HTTP**: Finch pools pick up proxies from `Tinkex.Config` (or `TINKEX_PROXY`/`TINKEX_PROXY_HEADERS`) while masking credentials in logs and inspect output.
+- **ModelInput builders**: `empty/0`, `append/2`, `append_int/2` for incremental prompt construction; `append_int` extends the last text chunk or creates a new one after images.
 
 ## Disclaimer
 
@@ -61,7 +61,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.18"}
+    {:tinkex, "~> 0.1.19"}
   ]
 end
 ```

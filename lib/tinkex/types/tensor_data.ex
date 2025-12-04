@@ -52,6 +52,20 @@ defmodule Tinkex.Types.TensorData do
     |> Nx.reshape(List.to_tuple(shape))
   end
 
+  @doc """
+  Return the flat data list from TensorData.
+
+  Provides API parity with Python's `TensorData.tolist()`.
+
+  ## Examples
+
+      iex> tensor = TensorData.from_nx(Nx.tensor([1.0, 2.0, 3.0]))
+      iex> TensorData.tolist(tensor)
+      [1.0, 2.0, 3.0]
+  """
+  @spec tolist(t()) :: [number()]
+  def tolist(%__MODULE__{data: data}), do: data
+
   defp normalize_tensor(%Nx.Tensor{} = tensor) do
     case Nx.type(tensor) do
       {:f, 32} ->

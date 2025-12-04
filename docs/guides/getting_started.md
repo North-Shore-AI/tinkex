@@ -10,7 +10,7 @@ Add the dependency and fetch packages:
 # mix.exs
 def deps do
   [
-    {:tinkex, "~> 0.1.18"}
+    {:tinkex, "~> 0.1.19"}
   ]
 end
 ```

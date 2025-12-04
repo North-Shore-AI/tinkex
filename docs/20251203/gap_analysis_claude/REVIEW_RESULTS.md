@@ -107,10 +107,10 @@
 
 ## Additional Gaps Discovered
 
-### Gap 1: Missing `hash_unordered` metric reducer
+### ~~Gap 1: Missing `hash_unordered` metric reducer~~ (RESOLVED)
 - **Python:** Supports order-insensitive hash reduction in chunked metrics
-- **Elixir:** Lacks `hash_unordered` reducer, which can change aggregated metric values for distributed training
-- **Priority:** Medium
+- **Elixir:** ✅ `hash_unordered` reducer now implemented in `Tinkex.MetricsReduction` using `Enum.sort/1` + `:erlang.phash2/1`
+- **Priority:** Medium → Resolved
 
 ### Gap 2: Retry/timeout defaults diverge from Python unless parity mode set
 - **Python:** 60s timeout, 10 retries by default

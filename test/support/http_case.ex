@@ -139,10 +139,8 @@ defmodule Tinkex.HTTPCase do
     :telemetry.attach_many(
       handler_id,
       events,
-      fn event, measurements, metadata, _config ->
-        send(parent, {:telemetry, event, measurements, metadata})
-      end,
-      nil
+      &__MODULE__.handle_event/4,
+      parent
     )
 
     ExUnit.Callbacks.on_exit(fn ->
@@ -150,5 +148,9 @@ defmodule Tinkex.HTTPCase do
     end)
 
     handler_id
+  end
+
+  def handle_event(event, measurements, metadata, parent) do
+    send(parent, {:telemetry, event, measurements, metadata})
   end
 end
