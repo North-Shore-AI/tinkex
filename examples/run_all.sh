@@ -31,6 +31,8 @@ EXAMPLES=(
   "checkpoint_multi_delete_live.exs"
   "save_weights_and_sample.exs"
   "queue_state_observer_demo.exs"
+  "recovery_simulated.exs"
+  "recovery_live_injected.exs"
 )
 
 if [[ -z "${TINKER_API_KEY:-}" ]]; then

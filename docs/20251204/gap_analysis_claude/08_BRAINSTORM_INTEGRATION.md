@@ -247,12 +247,11 @@ end
 
 ### Phase A: Standalone Improvements (Current Focus)
 
-Fix SDK parity gaps without platform dependencies:
+Hardening + recovery automation without platform dependencies:
 
-1. TrainingRun.corrupted parsing
-2. load_weights_with_optimizer()
-3. compute_logprobs()
-4. Recovery.Monitor/Executor
+1. Regression tests for `corrupted` parsing + optimizer-aware load
+2. Recovery.Monitor/Executor + telemetry
+3. Timestamp normalization for checkpoints/metadata
 
 ### Phase B: TrainingIR Adoption
 

@@ -9,12 +9,12 @@
 | Readiness Area | Score | Status |
 |----------------|-------|--------|
 | Core Training Operations | 95% | ✅ Production Ready |
-| Sampling/Inference | 90% | ✅ Production Ready |
-| Checkpoint Management | 75% | ⚠️ Gaps Exist |
-| Error Recovery | 40% | ❌ Not Production Ready |
+| Sampling/Inference | 95% | ✅ Production Ready |
+| Checkpoint Management | 88% | ⚠️ Gaps Exist (automation) |
+| Error Recovery | 60% | ⚠️ Manual Only |
 | Observability | 85% | ✅ Production Ready |
-| Type Safety | 80% | ⚠️ Minor Gaps |
-| **Overall** | **78%** | ⚠️ **Partially Ready** |
+| Type Safety | 90% | ⚠️ Timestamp normalization |
+| **Overall** | **85%** | ⚠️ **Partially Ready** |
 
 ---
 
@@ -69,7 +69,7 @@
 |---------|--------|-----|
 | save_state() | ✅ | |
 | load_state() | ✅ | Weights only |
-| load_state_with_optimizer() | ❌ | **MISSING** |
+| load_state_with_optimizer() | ✅ | |
 | list_checkpoints() | ✅ | |
 | delete_checkpoint() | ✅ | |
 | publish/unpublish | ✅ | |
@@ -77,15 +77,15 @@
 | Checkpoint validation | ❌ | Not implemented |
 | Auto-scheduling | ❌ | Not implemented |
 
-**Impact**: Cannot fully resume training with optimizer state
+**Impact**: Recovery is manual; optimizer path exists but no orchestration
 
 ### Type Safety
 
 | Issue | Impact | Severity |
 |-------|--------|----------|
-| ImageChunk missing fields | Cannot use images | High |
-| Checkpoint.time as string | No datetime ops | Low |
-| 8 missing type categories | Limited introspection | Medium |
+| Checkpoint/metadata timestamps as strings | No datetime ops | Low |
+| Enum atoms vs strings | Wire-compatible | Low |
+| Limited tests around parsing | Possible regressions | Medium |
 
 ---
 
@@ -95,14 +95,14 @@
 
 | Feature | Status | Gap |
 |---------|--------|-----|
-| Detect corrupted jobs | ⚠️ | Verify parsing |
+| Detect corrupted jobs | ✅ | |
 | Query job status | ✅ | |
-| Manual recovery | ⚠️ | Missing optimizer load |
+| Manual recovery | ✅ | Optimizer-aware load supported |
 | Automated recovery | ❌ | **NOT IMPLEMENTED** |
 | Recovery telemetry | ❌ | Not implemented |
 | Graceful degradation | ❌ | Not implemented |
 
-**Impact**: Users cannot automatically recover from backend failures
+**Impact**: Users must wire their own monitor/executor despite having primitives
 
 ---
 
@@ -121,15 +121,13 @@
 
 ### Required Before Production ⚠️
 
-- [ ] Verify TrainingRun.corrupted parsing
-- [ ] Add load_state_with_optimizer()
-- [ ] Fix ImageChunk type (if using images)
-- [ ] Add missing response types for introspection
-- [ ] Document recovery procedures
+- [ ] Integration tests: corrupted-run parsing + optimizer-state load
+- [ ] Normalize/document checkpoint timestamps (`Checkpoint.time`)
+- [ ] Publish manual recovery runbook (weights-only vs optimizer)
 
 ### Recommended for Production 📋
 
-- [ ] Implement automated recovery
+- [ ] Implement automated recovery (monitor + executor)
 - [ ] Add checkpoint validation
 - [ ] Add recovery telemetry
 - [ ] Implement graceful shutdown
@@ -144,15 +142,14 @@
 **Scenario**: Backend incident causes jobs to become "poisoned"
 
 **Current State**:
-- Users cannot detect poisoned jobs (unverified)
-- Users cannot fully restore training state
-- No automated recovery exists
+- `corrupted` flag is parsed; optimizer-aware restore exists
+- Recovery is manual; no monitor/executor
+- No recovery-specific telemetry
 
 **Mitigation**:
-1. Verify corrupted field parsing (P0)
-2. Add load_state_with_optimizer (P0)
+1. Add recovery automation (P0)
+2. Instrument recovery telemetry (P1)
 3. Document manual recovery steps (P1)
-4. Implement automated recovery (P2)
 
 ### Medium Risk: Long-Running Training
 
@@ -238,19 +235,17 @@ IO.puts("Failed jobs: #{length(failed)}")
 {:ok, checkpoints} = Tinkex.API.Rest.list_checkpoints(config, run_id)
 last = List.first(checkpoints.checkpoints)
 
-# 2. Get checkpoint metadata
-{:ok, info} = Tinkex.API.Rest.get_weights_info_by_tinker_path(config, last.tinker_path)
+# 2. Start a ServiceClient (if not already running)
+{:ok, service} = Tinkex.ServiceClient.start_link(config: config)
 
-# 3. Create new training client
-{:ok, client} = Tinkex.Client.create_training_client(config,
-  base_model: info.base_model,
-  lora_rank: info.lora_rank
-)
+# 3. Create a new training client with optimizer state restored
+{:ok, client} =
+  Tinkex.ServiceClient.create_training_client_from_state_with_optimizer(
+    service,
+    last.tinker_path
+  )
 
-# 4. Load weights (CANNOT restore optimizer currently)
-:ok = Tinkex.TrainingClient.load_weights(client, last.tinker_path)
-
-# 5. Resume training
+# 4. Resume training
 # ... training loop ...
 ```
 

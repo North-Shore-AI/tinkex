@@ -241,6 +241,58 @@ kl_spec = RegularizerSpec.new(%{
 })
 ```
 
+### NxPenalties adapter options: KL direction/symmetric and entropy temperature
+
+The built-in NxPenalties-backed adapters expose additional controls:
+
+```elixir
+# Forward (default) vs reverse KL, plus symmetric averaging
+kl_forward = RegularizerSpec.new(%{
+  fn: fn data, logprobs ->
+    Regularizers.KLDivergence.compute(data, logprobs,
+      reference_field: :reference_logprobs,
+      direction: :forward
+    )
+  end,
+  weight: 0.01,
+  name: "kl_forward"
+})
+
+kl_reverse = RegularizerSpec.new(%{
+  fn: fn data, logprobs ->
+    Regularizers.KLDivergence.compute(data, logprobs,
+      reference_field: :reference_logprobs,
+      direction: :reverse # mode-seeking; penalizes mass outside sharp targets
+    )
+  end,
+  weight: 0.01,
+  name: "kl_reverse"
+})
+
+kl_symmetric = RegularizerSpec.new(%{
+  fn: fn data, logprobs ->
+    Regularizers.KLDivergence.compute(data, logprobs,
+      reference_field: :reference_logprobs,
+      symmetric: true # (KL(P||Q) + KL(Q||P)) / 2
+    )
+  end,
+  weight: 0.01,
+  name: "kl_symmetric"
+})
+
+# Entropy temperature scaling (sharper < 1.0, flatter > 1.0)
+entropy_cool = RegularizerSpec.new(%{
+  fn: fn data, logprobs ->
+    Regularizers.Entropy.compute(data, logprobs,
+      mode: :maximize,
+      temperature: 0.5
+    )
+  end,
+  weight: 0.001,
+  name: "entropy_cool"
+})
+```
+
 ## Composing Regularizer Pipelines
 
 ### Basic Pipeline Execution

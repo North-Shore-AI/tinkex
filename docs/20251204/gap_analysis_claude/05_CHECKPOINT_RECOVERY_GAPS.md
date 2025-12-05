@@ -84,60 +84,32 @@ training_client = service_client.create_training_client_from_state_with_optimize
 
 ---
 
-## Current Elixir SDK Gaps
+## Current Elixir SDK Support
 
-### Gap 1: Cannot Detect Corrupted Jobs
-
-**Status**: ⚠️ Partial - Need to verify `corrupted` field parsing
-
-```elixir
-# Current Elixir
-{:ok, run} = Tinkex.API.Rest.get_training_run(config, "run-id")
-
-# Does run.corrupted exist and parse correctly?
-# Need to verify TrainingRun.from_map/1 handles this
-```
-
-**Fix Required**: Ensure `TrainingRun` type includes and parses `corrupted` field
-
----
-
-### Gap 2: Cannot Load State With Optimizer
-
-**Status**: ❌ MISSING
+- `TrainingRun.corrupted` is parsed in `Tinkex.Types.TrainingRun`
+- `load_state_with_optimizer/3` is available in `Tinkex.TrainingClient`
+- `create_training_client_from_state_with_optimizer/3` is available in `Tinkex.ServiceClient` (sync + async)
 
 ```elixir
-# Python equivalent
-training_client = service_client.create_training_client_from_state_with_optimizer(path)
-
-# Elixir - NOT AVAILABLE
-# Only have:
-Tinkex.TrainingClient.load_weights(client, path)  # Weights only, no optimizer
-```
-
-**Fix Required**: Add `load_weights_with_optimizer/2` function
-
-```elixir
-# In Tinkex.TrainingClient
-def load_weights_with_optimizer(client, path) do
-  request = %LoadWeightsRequest{
-    model_id: client.model_id,
-    path: path,
-    optimizer: true,  # ← This parameter exists in the type
-    seq_id: next_seq_id(client)
-  }
-
-  API.Weights.load_weights(request, client.config)
+# Detect poisoned jobs
+{:ok, run} = Tinkex.API.Rest.get_training_run(config, run_id)
+if run.corrupted do
+  IO.puts("Job is poisoned; last checkpoint: #{run.last_checkpoint.tinker_path}")
 end
+
+# Recover with optimizer state
+{:ok, client} =
+  Tinkex.ServiceClient.create_training_client_from_state_with_optimizer(
+    service_pid,
+    run.last_checkpoint.tinker_path
+  )
 ```
 
----
-
-### Gap 3: No Recovery Orchestration
+### Remaining Gap: No Recovery Orchestration
 
 **Status**: ❌ NOT IMPLEMENTED
 
-Neither Python nor Elixir SDK provides automated recovery. However, Elixir's OTP model is ideal for this:
+Neither SDK automates detection + restart. Elixir needs a monitor/executor to poll runs, pick checkpoints, and rebuild training clients automatically:
 
 **Proposed Architecture:**
 
@@ -217,7 +189,7 @@ end
 |---------|--------|--------|--------|
 | Save checkpoint | ✅ | ✅ | Parity |
 | Load checkpoint (weights) | ✅ | ✅ | Parity |
-| Load checkpoint (full) | ✅ | ❌ | **MISSING** |
+| Load checkpoint (full) | ✅ | ✅ | Parity |
 | List checkpoints | ✅ | ✅ | Parity |
 | Delete checkpoint | ✅ | ✅ | Parity |
 | Publish/unpublish | ✅ | ✅ | Parity |
@@ -285,21 +257,19 @@ end
 
 ## Recommended Implementation Roadmap
 
-### Phase 1: SDK Parity (Immediate)
+### Phase 1: SDK Hardening (Immediate)
 
-1. **Verify TrainingRun.corrupted parsing**
-   - Check `lib/tinkex/types/training_run.ex`
-   - Ensure `from_map/1` handles `corrupted` field
-   - Add test case
+1. **Add regression tests**
+   - `TrainingRun.from_map/1` parses `corrupted`
+   - `load_state_with_optimizer/3` sends `optimizer: true` and succeeds end-to-end
+   - `create_training_client_from_state_with_optimizer/3` rebuilds a client from a checkpoint
 
-2. **Add load_weights_with_optimizer/2**
-   - Modify `LoadWeightsRequest` if needed
-   - Add function to `TrainingClient`
-   - Add test case
+2. **Normalize timestamps**
+   - Parse `Checkpoint.time` (and related fields) to `DateTime.t()` where possible
+   - Document fallback behavior when parsing fails
 
-3. **Add create_training_client_from_state_with_optimizer/3**
-   - Combine existing functions
-   - Test end-to-end recovery
+3. **Document manual recovery**
+   - Provide cookbook snippets for weights-only vs optimizer-aware recovery
 
 ### Phase 2: Recovery Layer (Short-term)
 
@@ -363,8 +333,10 @@ config = %Tinkex.Config{
   }
 }
 
-# Training loop with automatic recovery
-{:ok, client} = Tinkex.Client.create_training_client(config, base_model: "llama-3.2-1b")
+# Training loop with automatic recovery (proposed)
+{:ok, service} = Tinkex.ServiceClient.start_link(config: config)
+{:ok, client} =
+  Tinkex.ServiceClient.create_training_client(service, "llama-3.2-1b")
 
 # If job becomes corrupted during training...
 # 1. Monitor detects corrupted=true
@@ -376,10 +348,10 @@ config = %Tinkex.Config{
 # User can also manually check and recover
 {:ok, run} = Tinkex.API.Rest.get_training_run(config, run_id)
 if run.corrupted do
-  {:ok, new_client} = Tinkex.Recovery.recover_from_checkpoint(
-    config,
-    run.last_checkpoint.tinker_path,
-    restore_optimizer: true
-  )
+  {:ok, new_client} =
+    Tinkex.ServiceClient.create_training_client_from_state_with_optimizer(
+      service,
+      run.last_checkpoint.tinker_path
+    )
 end
 ```

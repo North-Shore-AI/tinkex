@@ -90,22 +90,85 @@ defmodule Tinkex.Examples.StructuredRegularizersLive do
 
     loss_fn = fn _data, [logprobs] ->
       base = Nx.negate(Nx.mean(logprobs))
-      l1 = Nx.multiply(0.01, Nx.sum(Nx.abs(logprobs)))
-      probs = Nx.exp(logprobs)
-      entropy = Nx.sum(Nx.multiply(probs, logprobs))
-      entropy_term = Nx.multiply(0.001, entropy)
+
+      vocab_size = Nx.axis_size(logprobs, -1)
+      uniform = Nx.divide(Nx.tensor(1.0, type: Nx.type(logprobs)), vocab_size)
+      reference_logprobs = uniform |> Nx.broadcast(Nx.shape(logprobs)) |> Nx.log()
+      pair_logprobs = rotate_last_axis(logprobs)
+
+      l1 = NxPenalties.Penalties.l1(logprobs, reduction: :mean)
+      l2 = NxPenalties.Penalties.l2(logprobs, reduction: :mean, center: :mean)
+      elastic = NxPenalties.Penalties.elastic_net(logprobs, l1_ratio: 0.6, reduction: :mean)
+
+      entropy =
+        NxPenalties.Divergences.entropy(logprobs,
+          mode: :bonus,
+          reduction: :mean,
+          temperature: 0.5
+        )
+
+      kl_forward =
+        NxPenalties.Divergences.kl_divergence(logprobs, reference_logprobs,
+          reduction: :mean,
+          direction: :forward
+        )
+
+      kl_reverse =
+        NxPenalties.Divergences.kl_divergence(logprobs, reference_logprobs,
+          reduction: :mean,
+          direction: :reverse
+        )
+
+      kl_symmetric =
+        NxPenalties.Divergences.kl_divergence(logprobs, reference_logprobs,
+          reduction: :mean,
+          symmetric: true
+        )
+
+      consistency =
+        NxPenalties.Constraints.consistency(logprobs, pair_logprobs,
+          metric: :mse,
+          reduction: :mean
+        )
+
+      orthogonality = NxPenalties.Constraints.orthogonality(logprobs, mode: :soft)
+      loss_fn_for_grad = fn lp -> Nx.sum(lp) end
+
+      gradient_penalty =
+        NxPenalties.GradientPenalty.gradient_penalty(loss_fn_for_grad, logprobs, target_norm: 1.0)
 
       total =
         base
-        |> Nx.add(l1)
-        |> Nx.add(entropy_term)
+        |> Nx.add(Nx.multiply(l1, 0.01))
+        |> Nx.add(Nx.multiply(l2, 0.005))
+        |> Nx.add(Nx.multiply(elastic, 0.002))
+        |> Nx.add(Nx.multiply(entropy, 0.001))
+        |> Nx.add(Nx.multiply(kl_forward, 0.01))
+        |> Nx.add(Nx.multiply(kl_reverse, 0.01))
+        |> Nx.add(Nx.multiply(kl_symmetric, 0.005))
+        |> Nx.add(Nx.multiply(consistency, 0.02))
+        |> Nx.add(Nx.multiply(orthogonality, 0.003))
+        |> Nx.add(Nx.multiply(gradient_penalty, 0.001))
 
-      metrics = %{
-        "base_nll" => base,
-        "l1" => l1,
-        "entropy" => entropy_term,
-        "custom_perplexity" => Nx.exp(base)
-      }
+      metrics =
+        if tracing?(logprobs) do
+          %{}
+        else
+          %{
+            "base_nll" => Nx.to_number(base),
+            "l1" => Nx.to_number(l1),
+            "l2" => Nx.to_number(l2),
+            "elastic_net" => Nx.to_number(elastic),
+            "entropy" => Nx.to_number(entropy),
+            "kl_forward" => Nx.to_number(kl_forward),
+            "kl_reverse" => Nx.to_number(kl_reverse),
+            "kl_symmetric" => Nx.to_number(kl_symmetric),
+            "consistency" => Nx.to_number(consistency),
+            "orthogonality" => Nx.to_number(orthogonality),
+            "gradient_penalty" => Nx.to_number(gradient_penalty),
+            "custom_perplexity" => Nx.to_number(Nx.exp(base))
+          }
+        end
 
       {total, metrics}
     end
@@ -126,6 +189,14 @@ defmodule Tinkex.Examples.StructuredRegularizersLive do
       {:error, other} ->
         halt("Custom loss computation failed: #{inspect(other)}")
     end
+  end
+
+  defp rotate_last_axis(tensor) do
+    size = Nx.axis_size(tensor, -1)
+    # Simple rotate-right by 1 along last axis using slice/concat (Nx 0.9 safe)
+    tail = Nx.slice_along_axis(tensor, size - 1, 1, axis: -1)
+    head = Nx.slice_along_axis(tensor, 0, size - 1, axis: -1)
+    Nx.concatenate([tail, head], axis: -1)
   end
 
   defp display_results(output, duration_ms) do
@@ -170,6 +241,9 @@ defmodule Tinkex.Examples.StructuredRegularizersLive do
   end
 
   defp to_tensor(_, dtype), do: %TensorData{data: [], dtype: dtype, shape: [0]}
+
+  defp tracing?(%Nx.Tensor{data: %Nx.Defn.Expr{}}), do: true
+  defp tracing?(_), do: false
 end
 
 Tinkex.Examples.StructuredRegularizersLive.run()

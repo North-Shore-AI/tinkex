@@ -18,6 +18,7 @@
 
 alias Tinkex.Types.RegularizerSpec
 alias Tinkex.Regularizer.{Pipeline, Executor, GradientTracker, Telemetry}
+alias Tinkex.Regularizers
 
 IO.puts("""
 ================================================================================
@@ -38,50 +39,166 @@ Each regularizer can track gradient norms for monitoring training dynamics.
 
 IO.puts("\n--- 1. Creating RegularizerSpec Configurations ---\n")
 
-# L1 Sparsity Regularizer - encourages sparse activations
-# NOTE: For gradient tracking compatibility, metrics are computed separately
-# from the loss. Nx.to_number cannot be called inside traced functions.
+# L1 Sparsity Regularizer (NxPenalties adapter)
 l1_regularizer =
   RegularizerSpec.new(%{
-    fn: fn _data, logprobs ->
-      l1_sum = Nx.sum(Nx.abs(logprobs))
-      # Return empty metrics - we compute metrics from the loss value later
-      {l1_sum, %{}}
-    end,
+    fn: fn data, logprobs -> Regularizers.L1.compute(data, logprobs, target: :logprobs) end,
     weight: 0.01,
-    name: "l1_sparsity"
+    name: Regularizers.L1.name()
   })
 
-IO.puts("Created L1 sparsity regularizer: weight=#{l1_regularizer.weight}")
+IO.puts(
+  "Created L1 sparsity regularizer via NxPenalties adapter (weight=#{l1_regularizer.weight})"
+)
 
-# Entropy Regularizer - encourages diversity in predictions
+# Entropy Regularizer (maximize entropy = exploration bonus)
 entropy_regularizer =
   RegularizerSpec.new(%{
-    fn: fn _data, logprobs ->
-      # Convert logprobs to probabilities
-      probs = Nx.exp(logprobs)
-      # Compute negative entropy (we want to maximize entropy, so minimize negative)
-      neg_entropy = Nx.sum(Nx.multiply(probs, logprobs))
-      {neg_entropy, %{}}
+    fn: fn data, logprobs -> Regularizers.Entropy.compute(data, logprobs, mode: :maximize) end,
+    weight: 0.001,
+    name: Regularizers.Entropy.name()
+  })
+
+IO.puts(
+  "Created entropy regularizer via NxPenalties adapter (weight=#{entropy_regularizer.weight})"
+)
+
+# Entropy with temperature scaling (sharper distribution)
+entropy_sharp_regularizer =
+  RegularizerSpec.new(%{
+    fn: fn data, logprobs ->
+      Regularizers.Entropy.compute(data, logprobs, mode: :maximize, temperature: 0.5)
     end,
     weight: 0.001,
-    name: "entropy"
+    name: "entropy_sharp"
   })
 
-IO.puts("Created entropy regularizer: weight=#{entropy_regularizer.weight}")
+IO.puts(
+  "Created entropy (temperature-scaled) regularizer via NxPenalties adapter (weight=#{entropy_sharp_regularizer.weight}, temperature=0.5)"
+)
 
-# L2 Regularizer - weight decay
+# L2 Regularizer (weight decay)
 l2_regularizer =
   RegularizerSpec.new(%{
-    fn: fn _data, logprobs ->
-      l2_squared = Nx.sum(Nx.pow(logprobs, 2))
-      {l2_squared, %{}}
-    end,
+    fn: fn data, logprobs -> Regularizers.L2.compute(data, logprobs, center: :mean) end,
     weight: 0.005,
-    name: "l2_weight_decay"
+    name: Regularizers.L2.name()
   })
 
-IO.puts("Created L2 regularizer: weight=#{l2_regularizer.weight}")
+IO.puts("Created L2 regularizer via NxPenalties adapter (weight=#{l2_regularizer.weight})")
+
+# Elastic Net Regularizer
+elastic_net_regularizer =
+  RegularizerSpec.new(%{
+    fn: fn data, logprobs -> Regularizers.ElasticNet.compute(data, logprobs, l1_ratio: 0.6) end,
+    weight: 0.002,
+    name: Regularizers.ElasticNet.name()
+  })
+
+IO.puts(
+  "Created Elastic Net regularizer via NxPenalties adapter (weight=#{elastic_net_regularizer.weight})"
+)
+
+# KL Divergence Regularizer variants (reference provided in loss_fn_inputs)
+kl_forward_regularizer =
+  RegularizerSpec.new(%{
+    fn: fn data, logprobs ->
+      Regularizers.KLDivergence.compute(data, logprobs,
+        reference_field: :reference_logprobs,
+        direction: :forward,
+        reduction: :mean
+      )
+    end,
+    weight: 0.01,
+    name: "kl_forward"
+  })
+
+IO.puts(
+  "Created KL divergence regularizer (forward) via NxPenalties adapter (weight=#{kl_forward_regularizer.weight})"
+)
+
+kl_reverse_regularizer =
+  RegularizerSpec.new(%{
+    fn: fn data, logprobs ->
+      Regularizers.KLDivergence.compute(data, logprobs,
+        reference_field: :reference_logprobs,
+        direction: :reverse,
+        reduction: :mean
+      )
+    end,
+    weight: 0.01,
+    name: "kl_reverse"
+  })
+
+IO.puts(
+  "Created KL divergence regularizer (reverse) via NxPenalties adapter (mode-seeking, weight=#{kl_reverse_regularizer.weight})"
+)
+
+kl_symmetric_regularizer =
+  RegularizerSpec.new(%{
+    fn: fn data, logprobs ->
+      Regularizers.KLDivergence.compute(data, logprobs,
+        reference_field: :reference_logprobs,
+        symmetric: true,
+        reduction: :mean
+      )
+    end,
+    weight: 0.01,
+    name: "kl_symmetric"
+  })
+
+IO.puts(
+  "Created KL divergence regularizer (symmetric) via NxPenalties adapter (balanced, weight=#{kl_symmetric_regularizer.weight})"
+)
+
+# Consistency Regularizer (paired outputs)
+consistency_regularizer =
+  RegularizerSpec.new(%{
+    fn: fn data, logprobs ->
+      Regularizers.Consistency.compute(data, logprobs,
+        pair_field: :original_logprobs,
+        metric: :mse
+      )
+    end,
+    weight: 0.02,
+    name: Regularizers.Consistency.name()
+  })
+
+IO.puts(
+  "Created consistency regularizer via NxPenalties adapter (weight=#{consistency_regularizer.weight})"
+)
+
+# Orthogonality Regularizer
+orthogonality_regularizer =
+  RegularizerSpec.new(%{
+    fn: fn data, logprobs -> Regularizers.Orthogonality.compute(data, logprobs, mode: :soft) end,
+    weight: 0.003,
+    name: Regularizers.Orthogonality.name()
+  })
+
+IO.puts(
+  "Created orthogonality regularizer via NxPenalties adapter (weight=#{orthogonality_regularizer.weight})"
+)
+
+# Gradient Penalty Regularizer (output mode)
+gradient_penalty_regularizer =
+  RegularizerSpec.new(%{
+    fn: fn data, logprobs ->
+      loss_fn = fn lp -> Nx.sum(lp) end
+
+      Regularizers.GradientPenalty.compute(data, logprobs,
+        mode: :output,
+        loss_fn: loss_fn,
+        target_norm: 1.0
+      )
+    end,
+    weight: 0.001,
+    name: Regularizers.GradientPenalty.name()
+  })
+
+IO.puts(
+  "Created gradient penalty regularizer via NxPenalties adapter (weight=#{gradient_penalty_regularizer.weight})"
+)
 
 # =============================================================================
 # 2. BASE LOSS FUNCTION
@@ -125,8 +242,47 @@ logprobs =
 IO.puts("Mock logprobs shape: #{inspect(Nx.shape(logprobs))}")
 IO.puts("Mock logprobs values: #{inspect(Nx.to_flat_list(logprobs))}")
 
-# Empty data list (regularizers only use logprobs in this example)
-data = []
+# Reference distributions for adapters that need them
+reference_probs =
+  Nx.tensor([
+    0.22,
+    0.18,
+    0.12,
+    0.1,
+    0.08,
+    0.07,
+    0.06,
+    0.06,
+    0.06,
+    0.05
+  ])
+
+reference_logprobs = Nx.log(reference_probs)
+
+pair_logprobs =
+  Nx.tensor([
+    -0.45,
+    -1.05,
+    -0.75,
+    -2.05,
+    -0.25,
+    -1.35,
+    -0.85,
+    -1.65,
+    -0.55,
+    -1.05
+  ])
+
+# Single datum carrying reference fields for KL/consistency adapters
+data = [
+  %{
+    loss_fn_inputs: %{
+      reference_logprobs: reference_logprobs,
+      original_logprobs: pair_logprobs
+    },
+    model_input: :placeholder
+  }
+]
 
 # =============================================================================
 # 4. PIPELINE EXECUTION - NO REGULARIZERS (BASELINE)
@@ -148,7 +304,19 @@ IO.puts("  perplexity: #{Float.round(perplexity, 4)}")
 
 IO.puts("\n--- 5. With Regularizers (Parallel Execution) ---\n")
 
-regularizers = [l1_regularizer, entropy_regularizer, l2_regularizer]
+regularizers = [
+  l1_regularizer,
+  entropy_regularizer,
+  entropy_sharp_regularizer,
+  l2_regularizer,
+  elastic_net_regularizer,
+  kl_forward_regularizer,
+  kl_reverse_regularizer,
+  kl_symmetric_regularizer,
+  consistency_regularizer,
+  orthogonality_regularizer,
+  gradient_penalty_regularizer
+]
 
 {:ok, output} =
   Pipeline.compute(data, logprobs, base_loss_fn,

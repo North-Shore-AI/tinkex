@@ -116,11 +116,14 @@ lib/tinkex/
 |----------|--------|
 | `forward/2` | ✅ Implemented |
 | `forward_backward/2` | ✅ Implemented |
+| `forward_backward_custom/3` | ✅ Implemented (Nx-based custom loss) |
 | `optim_step/2` | ✅ Implemented |
-| `save_weights/2` | ✅ Implemented |
-| `load_weights/2` | ✅ Implemented |
+| `save_state/2` | ✅ Implemented |
+| `load_state/2` | ✅ Implemented |
+| `load_state_with_optimizer/2` | ✅ Implemented |
+| `save_weights_for_sampler/2` | ✅ Implemented |
+| `save_weights_and_get_sampling_client/2` | ✅ Implemented |
 | `get_tokenizer/2` | ✅ Implemented |
-| `load_weights_with_optimizer/2` | ❌ **MISSING** |
 
 **Architecture:**
 - GenServer managing single model training
@@ -134,7 +137,7 @@ lib/tinkex/
 | Function | Status |
 |----------|--------|
 | `sample/4` | ✅ Implemented |
-| `compute_logprobs/2` | ❌ **MISSING** |
+| `compute_logprobs/2` | ✅ Implemented (wraps sample with prompt logprobs) |
 
 ### RestClient
 
@@ -195,26 +198,29 @@ defstruct [
 
 ## 4. Type System
 
-### Implemented Types (69 files)
+### Implemented Types (74 modules)
 
 **Core Data:**
 - TensorData, TensorDtype
 - Datum, ModelInput
 - EncodedTextChunk, ImageChunk, ImageAssetPointerChunk
 
-**Requests:**
+**Requests/Responses:**
 - CreateSessionRequest/Response
 - CreateModelRequest/Response
 - ForwardRequest, ForwardBackwardRequest, ForwardBackwardInput
 - OptimStepRequest/Response
 - SampleRequest/Response, SampledSequence, SamplingParams
 - CreateSamplingSessionRequest/Response
+- SaveWeightsRequest/Response, LoadWeightsRequest/Response
+- SaveWeightsForSamplerRequest/Response
+- SessionHeartbeatRequest/Response
+- FutureRetrieveRequest/Response, FutureResponses
 
 **Checkpoints:**
 - Checkpoint
 - ParsedCheckpointTinkerPath
-- SaveWeightsRequest/Response
-- LoadWeightsRequest/Response
+- CheckpointsListResponse, CheckpointArchiveUrlResponse
 
 **Configuration:**
 - AdamParams (defaults match Python: lr=0.0001, beta1=0.9, beta2=0.95, eps=1e-12)
@@ -224,6 +230,8 @@ defstruct [
 - TelemetryEvent (union)
 - EventType, Severity
 - GenericEvent, SessionStartEvent, SessionEndEvent
+- TelemetryBatch, TelemetrySendRequest, TelemetryResponse
+- UnhandledExceptionEvent
 
 **Errors:**
 - RequestErrorCategory
@@ -232,12 +240,14 @@ defstruct [
 - QueueState, StopReason, LossFnType
 
 **Metadata:**
-- TrainingRun (partial - see gaps)
+- TrainingRun (includes `corrupted`)
 - SupportedModel
 - GetServerCapabilitiesResponse
 - HealthResponse
 - Cursor, ModelData, GetInfoResponse
 - WeightsInfoResponse
+- GetSessionResponse, ListSessionsResponse
+- TrainingRunsResponse
 
 ### Elixir-Specific Extensions
 
@@ -334,11 +344,11 @@ defstruct [
 | Retry logic | ✅ Complete | Matches Python SDK |
 | Training ops | ✅ Complete | All 3 operations |
 | Weight ops | ✅ Complete | Save/load basic |
-| Sampling | ✅ Complete | With backpressure |
+| Sampling | ✅ Complete | Backpressure + logprob helper |
 | REST endpoints | ✅ Complete | All 14 endpoints |
 | Session mgmt | ✅ Complete | Heartbeats, persistence |
 | Checkpoint download | ✅ Complete | Streaming |
 | Future polling | ✅ Complete | With queue state |
 | Error handling | ✅ Complete | Categorized |
 | Telemetry | ✅ Complete | Full instrumentation |
-| Types | ⚠️ Partial | 69/71 files, gaps exist |
+| Types | ⚠️ Minor | All Python types present; normalize checkpoint timestamps if needed |
