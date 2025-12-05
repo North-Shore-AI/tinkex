@@ -12,7 +12,7 @@ defmodule Tinkex.Types.CheckpointTypesTest do
         training_run_id: "run-1",
         size_bytes: 1_000_000,
         public: false,
-        time: "2025-11-20T10:00:00Z"
+        time: ~U[2025-11-20 10:00:00Z]
       }
 
       assert checkpoint.checkpoint_id == "ckpt-123"
@@ -21,7 +21,7 @@ defmodule Tinkex.Types.CheckpointTypesTest do
       assert checkpoint.training_run_id == "run-1"
       assert checkpoint.size_bytes == 1_000_000
       assert checkpoint.public == false
-      assert checkpoint.time == "2025-11-20T10:00:00Z"
+      assert checkpoint.time == ~U[2025-11-20 10:00:00Z]
     end
 
     test "size_bytes can be nil" do
@@ -32,7 +32,7 @@ defmodule Tinkex.Types.CheckpointTypesTest do
         training_run_id: "run-1",
         size_bytes: nil,
         public: true,
-        time: "2025-11-20T10:00:00Z"
+        time: ~U[2025-11-20 10:00:00Z]
       }
 
       assert checkpoint.size_bytes == nil
@@ -54,6 +54,7 @@ defmodule Tinkex.Types.CheckpointTypesTest do
       assert checkpoint.checkpoint_id == "ckpt-456"
       assert checkpoint.size_bytes == 2_000_000
       assert checkpoint.training_run_id == "run-2"
+      assert %DateTime{} = checkpoint.time
     end
 
     test "from_map/1 handles nil size_bytes" do
@@ -69,6 +70,7 @@ defmodule Tinkex.Types.CheckpointTypesTest do
       checkpoint = Checkpoint.from_map(map)
 
       assert checkpoint.size_bytes == nil
+      assert %DateTime{} = checkpoint.time
     end
 
     test "parses training_run_id from tinker_path when missing" do
@@ -84,6 +86,19 @@ defmodule Tinkex.Types.CheckpointTypesTest do
       checkpoint = Checkpoint.from_map(map)
 
       assert checkpoint.training_run_id == "run-2"
+    end
+
+    test "preserves non-ISO timestamps" do
+      map = %{
+        "checkpoint_id" => "ckpt-999",
+        "checkpoint_type" => "weights",
+        "tinker_path" => "tinker://run-9/weights/0009",
+        "time" => "Thu, 05 Dec 2025 10:00:00 GMT"
+      }
+
+      checkpoint = Checkpoint.from_map(map)
+
+      assert checkpoint.time == "Thu, 05 Dec 2025 10:00:00 GMT"
     end
   end
 

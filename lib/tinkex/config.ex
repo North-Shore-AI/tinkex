@@ -11,6 +11,7 @@ defmodule Tinkex.Config do
 
   require Logger
   alias Tinkex.Env
+  alias Tinkex.Recovery.Policy, as: RecoveryPolicy
 
   @enforce_keys [:base_url, :api_key]
   defstruct base_url: nil,
@@ -30,7 +31,8 @@ defmodule Tinkex.Config do
             proxy: nil,
             proxy_headers: [],
             default_headers: %{},
-            default_query: %{}
+            default_query: %{},
+            recovery: nil
 
   @type proxy ::
           {:http | :https, host :: String.t(), port :: 1..65535, opts :: keyword()} | nil
@@ -53,7 +55,8 @@ defmodule Tinkex.Config do
           proxy: proxy(),
           proxy_headers: [{String.t(), String.t()}],
           default_headers: map(),
-          default_query: map()
+          default_query: map(),
+          recovery: RecoveryPolicy.t() | nil
         }
 
   @default_base_url "https://tinker.thinkingmachines.dev/services/tinker-prod"
@@ -214,6 +217,13 @@ defmodule Tinkex.Config do
       )
       |> default_proxy_headers(derived_proxy_headers)
 
+    recovery =
+      pick(
+        [opts[:recovery], Application.get_env(:tinkex, :recovery)],
+        nil
+      )
+      |> normalize_recovery_policy()
+
     config = %__MODULE__{
       base_url: base_url,
       api_key: api_key,
@@ -232,7 +242,8 @@ defmodule Tinkex.Config do
       proxy: proxy,
       proxy_headers: proxy_headers,
       default_headers: default_headers,
-      default_query: default_query
+      default_query: default_query,
+      recovery: recovery
     }
 
     # Fail fast on malformed URLs so pool creation does not explode deeper in the stack.
@@ -300,6 +311,7 @@ defmodule Tinkex.Config do
     validate_proxy_headers!(config.proxy_headers)
     validate_default_headers!(config.default_headers)
     validate_default_query!(config.default_query)
+    validate_recovery!(config.recovery)
 
     maybe_warn_about_base_url(config)
     config
@@ -431,6 +443,18 @@ defmodule Tinkex.Config do
     raise ArgumentError, "must use string-able values, got: #{inspect(value)}"
   end
 
+  defp normalize_recovery_policy(nil), do: nil
+  defp normalize_recovery_policy(%RecoveryPolicy{} = policy), do: policy
+
+  defp normalize_recovery_policy(policy) when is_map(policy) or is_list(policy) do
+    RecoveryPolicy.new(policy)
+  end
+
+  defp normalize_recovery_policy(other) do
+    raise ArgumentError,
+          "recovery must be a map or %Tinkex.Recovery.Policy{}, got: #{inspect(other)}"
+  end
+
   defp default_tags([]), do: ["tinkex-elixir"]
   defp default_tags(tags) when is_list(tags), do: tags
 
@@ -559,6 +583,14 @@ defmodule Tinkex.Config do
   defp validate_default_query!(other) do
     raise ArgumentError,
           "default_query must be a map or keyword list with string-able values, got: #{inspect(other)}"
+  end
+
+  defp validate_recovery!(nil), do: :ok
+  defp validate_recovery!(%RecoveryPolicy{}), do: :ok
+
+  defp validate_recovery!(other) do
+    raise ArgumentError,
+          "recovery must be nil or a %Tinkex.Recovery.Policy{}, got: #{inspect(other)}"
   end
 
   defp valid_http_client?(client) when is_atom(client) do

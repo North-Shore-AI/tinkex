@@ -23,36 +23,32 @@ Backend incident revealed checkpoint recovery as critical production concern:
 
 ## Key Findings
 
-### Overall Parity: ~85%
+### Overall Parity: ~97%
 
-The Elixir SDK achieves good parity for core operations but has critical gaps in recovery:
+The Elixir SDK matches the Python SDK for all documented primitives, including optimizer-aware checkpoint load and corrupted-run detection. Remaining work is around automation and polish rather than missing functions.
 
 | Category | Status |
 |----------|--------|
 | Training Operations | ✅ Full Parity |
-| Sampling/Inference | ✅ Full Parity |
-| Checkpoint Save/Load | ⚠️ Missing optimizer restore |
-| Error Recovery | ❌ Not Production Ready |
-| Types | ⚠️ 8 missing categories |
+| Sampling/Inference | ✅ Full Parity (includes `compute_logprobs/2`) |
+| Checkpoint Save/Load | ✅ Full Parity (optimizer restore supported) |
+| Error Recovery | ⚠️ Manual only (no automation layer) |
+| Types | ⚠️ Minor normalization (e.g., checkpoint timestamps) |
 
 ### Critical Gaps (P0)
 
-1. **Cannot detect poisoned jobs** - `TrainingRun.corrupted` parsing needs verification
-2. **Cannot fully restore training** - `load_state_with_optimizer()` missing
-3. **No automated recovery** - Users must manually restart
+1. **No automated recovery** - SDK exposes primitives but lacks monitor/executor to restart poisoned runs
 
 ### Recommended Actions
 
 **Immediate (1-2 days):**
-- Verify `TrainingRun.corrupted` field parsing
-- Add `load_state_with_optimizer/2`
-- Add `create_training_client_from_state_with_optimizer/3`
+- Add integration tests for `TrainingRun.corrupted` parsing and optimizer-state load paths
+- Document manual recovery flow with optimizer restoration
 
 **Short-term (1-2 weeks):**
-- Add `compute_logprobs/2`
-- Fix `ImageChunk` type (if using images)
-- Add missing response types
-- Implement Recovery.Monitor/Executor
+- Implement Recovery.Monitor/Executor OTP layer (poll → detect corrupted → restart from checkpoint)
+- Normalize `Checkpoint.time` to `DateTime.t()` for downstream consumers
+- Add backpressure/queue-state alerting around recovery loop
 
 **Medium-term (ongoing):**
 - Integrate with NSAI.Work job orchestration
@@ -64,18 +60,17 @@ The Elixir SDK achieves good parity for core operations but has critical gaps in
 ### Detecting Failed Jobs
 ```elixir
 {:ok, run} = Tinkex.API.Rest.get_training_run(config, run_id)
-if run.corrupted do
-  IO.puts("Job is poisoned!")
-end
+if run.corrupted, do: IO.puts("Job is poisoned!")
 ```
 
 ### Manual Recovery (After Fixes)
 ```elixir
-# With optimizer state restored
-{:ok, client} = Tinkex.Client.create_training_client_from_state_with_optimizer(
-  config,
-  "tinker://run-id/weights/checkpoint-005"
-)
+# Restore weights + optimizer in one call
+{:ok, client} =
+  Tinkex.ServiceClient.create_training_client_from_state_with_optimizer(
+    service_pid,
+    "tinker://run-id/weights/checkpoint-005"
+  )
 # Resume training...
 ```
 

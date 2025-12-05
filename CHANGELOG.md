@@ -2,9 +2,22 @@
 
 All notable changes to this project will be documented in this file.
 
-# Changelog
+## [Unreleased]
 
-All notable changes to this project will be documented in this file.
+## [0.2.0] - 2025-12-04
+
+### Added
+- Opt-in recovery automation: `Tinkex.Recovery.Policy`/`Monitor`/`Executor` restart corrupted runs from checkpoints with callbacks, telemetry, and capped concurrency (disabled by default).
+- Recovery telemetry events (`:detected`, `:started`, `:checkpoint_selected`, `:client_created`, `:completed`, `:failed`, `:exhausted`) and config wiring (`Config.recovery`) for reuse in supervisors.
+- NxPenalties-backed regularizer adapters (L1, L2, Elastic Net, Entropy, KL divergence, Consistency, Orthogonality, Gradient Penalty) under `Tinkex.Regularizers`.
+- Structured regularizer examples (offline + live) exercise all adapters with reference/pair data wiring, KL direction/symmetric variants, and entropy temperature scaling.
+
+### Changed
+- `Regularizers.KLDivergence` now forwards NxPenalties `:direction` (`:forward`/`:reverse`) and `:symmetric` options and surfaces the chosen mode in metrics.
+- `Regularizers.Entropy` now accepts a `:temperature` option for entropy scaling.
+- Checkpoint timestamps now normalize to `DateTime` when ISO-8601 strings are returned (original strings are preserved on parse failure).
+- README and guides updated for 0.2.0 install and the new regularizer examples.
+- Dependency note: uses `nx_penalties ~> 0.1.2` for tensor primitives.
 
 ## [0.1.20] - 2025-12-03
 

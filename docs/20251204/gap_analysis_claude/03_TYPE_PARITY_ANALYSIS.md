@@ -8,12 +8,11 @@
 
 | Metric | Count |
 |--------|-------|
-| Python Types | 71 files |
-| Elixir Types | 69 files |
-| Full Parity | 42 types |
-| Wire-Compatible | 15 types |
-| Mismatches | 3 types |
-| Missing in Elixir | 8 categories |
+| Python Types (documented) | 71 files |
+| Elixir Types | 74 modules |
+| Full/Wire Parity | All documented |
+| Mismatches | 1 (timestamp normalization) |
+| Missing in Elixir | 0 |
 | Elixir-Only | 3 types |
 
 ---
@@ -115,40 +114,9 @@ These types work correctly but use different Elixir conventions:
 
 ---
 
-## Type Mismatches (3)
+## Type Mismatches (1)
 
-### 1. ImageChunk - CRITICAL
-
-**Python (Required Fields):**
-```python
-class ImageChunk:
-    data: bytes
-    format: Literal["png", "jpeg"]
-    height: int          # ← REQUIRED
-    width: int           # ← REQUIRED
-    tokens: int          # ← REQUIRED
-    expected_tokens: int | None
-    type: Literal["image"]
-```
-
-**Elixir (Missing Fields):**
-```elixir
-defstruct [
-  :data,               # base64 string
-  :format,             # :png | :jpeg
-  :expected_tokens,    # optional
-  :type                # "image"
-  # MISSING: height, width, tokens
-]
-```
-
-**Impact**: Cannot construct valid ImageChunk for multimodal inputs
-
-**Fix Required**: Add `height`, `width`, `tokens` fields to Elixir struct
-
----
-
-### 2. Checkpoint.time - Type Mismatch
+### Checkpoint.time - Type Normalization
 
 **Python:**
 ```python
@@ -169,154 +137,9 @@ defstruct [
 
 ---
 
-### 3. TrainingRun - Partial Implementation
+## Missing Type Categories
 
-**Python:**
-```python
-class TrainingRun:
-    training_run_id: str
-    base_model: str
-    model_owner: str
-    is_lora: bool
-    corrupted: bool = False    # ← CRITICAL FIELD
-    lora_rank: int | None
-    last_request_time: datetime
-    last_checkpoint: Checkpoint | None
-    last_sampler_checkpoint: Checkpoint | None
-    user_metadata: dict[str, str] | None
-```
-
-**Elixir:**
-```elixir
-# Fields exist but need verification of complete parsing
-defstruct [
-  :training_run_id,
-  :base_model,
-  :model_owner,
-  :is_lora,
-  :corrupted,              # ← Verify this exists and is parsed
-  :lora_rank,
-  :last_request_time,
-  :last_checkpoint,
-  :last_sampler_checkpoint,
-  :user_metadata
-]
-```
-
-**Impact**: Cannot detect poisoned/corrupted jobs without `corrupted` field
-
----
-
-## Missing Type Categories (8)
-
-### 1. Session Query Types
-
-**Missing:**
-- `GetSessionResponse` - Session info with training_run_ids, sampler_ids
-- `ListSessionsResponse` - Paginated session list
-
-**Python:**
-```python
-class GetSessionResponse(BaseModel):
-    training_run_ids: list[ModelID]
-    sampler_ids: list[str]
-
-class ListSessionsResponse(BaseModel):
-    sessions: list[SessionInfo]
-    cursor: Cursor
-```
-
----
-
-### 2. Telemetry Batch Types
-
-**Missing:**
-- `TelemetryBatch` - Batch container
-- `TelemetrySendRequest` - Send request with events, platform, sdk_version
-- `TelemetryResponse` - Send response
-
-**Python:**
-```python
-class TelemetrySendRequest(BaseModel):
-    events: List[TelemetryEvent]
-    platform: str
-    sdk_version: str
-    session_id: str
-```
-
----
-
-### 3. Future Polling Types
-
-**Missing:**
-- `FutureRetrieveRequest` - Request to poll future
-- `FutureRetrieveResponse` - Response with result or pending status
-- `FutureResponses` - Union of response types
-
----
-
-### 4. Checkpoint Archive Types
-
-**Missing (or incomplete):**
-- `CheckpointArchiveUrlResponse` - Signed URL + expiration
-- `CheckpointsListResponse` - List of checkpoints
-
-**Python:**
-```python
-class CheckpointArchiveUrlResponse(BaseModel):
-    url: str        # Signed download URL
-    expires: datetime  # Expiration timestamp
-```
-
----
-
-### 5. Sampler Weights Types
-
-**Missing:**
-- `SaveWeightsForSamplerRequest` - Save for sampler request
-- `SaveWeightsForSamplerResponse` - Response with path
-
----
-
-### 6. Session Heartbeat Types
-
-**Missing:**
-- `SessionHeartbeatRequest` - Heartbeat request
-- `SessionHeartbeatResponse` - Heartbeat response
-
----
-
-### 7. Unhandled Exception Event
-
-**Missing:**
-- `UnhandledExceptionEvent` - Exception telemetry with traceback
-
-**Python:**
-```python
-class UnhandledExceptionEvent(BaseModel):
-    error_message: str
-    error_type: str
-    event: EventType
-    event_id: str
-    event_session_index: int
-    severity: Severity
-    timestamp: datetime
-    traceback: Optional[str]
-```
-
----
-
-### 8. Training Runs Response
-
-**Missing:**
-- `TrainingRunsResponse` - Paginated training runs list
-
-**Python:**
-```python
-class TrainingRunsResponse(BaseModel):
-    training_runs: list[TrainingRun]
-    cursor: Cursor
-```
+None. Session queries, telemetry batch/send, future polling, sampler weights, heartbeat, unhandled exception events, and training run pagination are all implemented in `lib/tinkex/types/`.
 
 ---
 
@@ -364,22 +187,12 @@ These are research extensions for advanced regularization workflows.
 
 ## Priority Fix List
 
-### P0 (Critical)
-1. **ImageChunk** - Add `height`, `width`, `tokens` fields
-2. **TrainingRun.corrupted** - Ensure field is parsed correctly
-
 ### P1 (High)
-3. **GetSessionResponse** - Add type
-4. **ListSessionsResponse** - Add type
-5. **TelemetrySendRequest** - Add for batched telemetry
-6. **CheckpointArchiveUrlResponse** - Complete type
+1. Normalize checkpoint timestamps (`Checkpoint.time`) to `DateTime.t()` for downstream consumers.
 
 ### P2 (Medium)
-7. **FutureRetrieveRequest/Response** - Add types
-8. **SessionHeartbeatRequest/Response** - Add types
-9. **TrainingRunsResponse** - Add type
-10. **UnhandledExceptionEvent** - Add type
+2. Add integration/property tests for `TrainingRun.from_map/1` to keep `corrupted` parsing regression-proof.
+3. Standardize timestamp parsing across related types (CheckpointsListResponse, TrainingRunsResponse).
 
 ### P3 (Low)
-11. **Checkpoint.time** - Consider DateTime parsing
-12. Document Elixir-only extensions
+4. Document Elixir-only extensions and custom loss helpers alongside Python equivalents.

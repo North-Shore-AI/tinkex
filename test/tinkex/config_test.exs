@@ -27,6 +27,7 @@ defmodule Tinkex.ConfigTest do
       refute config.dump_headers?
       assert config.default_headers == %{}
       assert config.default_query == %{}
+      assert config.recovery == nil
     end
 
     test "overrides defaults with options" do
@@ -53,6 +54,12 @@ defmodule Tinkex.ConfigTest do
     test "accepts user_metadata" do
       config = Config.new(api_key: "test-key", user_metadata: %{user_id: "123"})
       assert config.user_metadata == %{user_id: "123"}
+    end
+
+    test "normalizes recovery policy maps" do
+      config = Config.new(api_key: "test-key", recovery: %{enabled: true, max_attempts: 5})
+
+      assert %Tinkex.Recovery.Policy{enabled: true, max_attempts: 5} = config.recovery
     end
 
     test "uses env and app config precedence" do

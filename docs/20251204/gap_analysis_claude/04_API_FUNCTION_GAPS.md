@@ -10,122 +10,21 @@
 |----------|-----------------|------------------|-----|
 | Training Operations | 8 | 12 | +4 (enhanced) |
 | Weight Operations | 6 | 12 | +6 (enhanced) |
-| Sampling Operations | 4 | 2 | -2 (missing) |
+| Sampling Operations | 4 | 4 | Parity |
 | REST Operations | 28 | 28 | 0 |
 | Service Operations | 4 | 4 | 0 |
-| Client Creation | 8 | 6 | -2 (missing) |
-| **Total** | 58 | 64 | +6 overall |
+| Client Creation | 8 | 8 | Parity |
+| **Total** | 58 | 68 | +10 (typed/sync helpers) |
 
 ---
 
-## Missing Functions (Critical Gaps)
+## Missing Functions
 
-### 1. `compute_logprobs()` - MISSING
-
-**Python:**
-```python
-# sampling_client.py:258-296
-def compute_logprobs(self, prompt: types.ModelInput) -> ConcurrentFuture[list[float | None]]:
-    """Computes log probabilities for prompt tokens."""
-```
-
-**Elixir Status**: NOT IMPLEMENTED
-
-**Impact**: Cannot compute perplexity, cannot evaluate model confidence on prompts
-
-**Implementation Notes**:
-- Internally calls `sample()` with `max_tokens=1, prompt_logprobs=True`
-- Simple wrapper function
-
-**Suggested Elixir Implementation**:
-```elixir
-def compute_logprobs(client, prompt) do
-  request = %SampleRequest{
-    prompt: prompt,
-    num_samples: 1,
-    sampling_params: %SamplingParams{max_tokens: 1},
-    prompt_logprobs: true
-  }
-
-  case sample(client, request) do
-    {:ok, %{prompt_logprobs: logprobs}} -> {:ok, logprobs}
-    error -> error
-  end
-end
-```
-
----
-
-### 2. `load_state_with_optimizer()` - MISSING
-
-**Python:**
-```python
-# training_client.py:594-615
-def load_state_with_optimizer(self, path: str) -> APIFuture[types.LoadWeightsResponse]:
-    """Load model weights AND optimizer state from a checkpoint."""
-```
-
-**Elixir Status**: NOT IMPLEMENTED
-
-**Impact**: Cannot fully resume training with optimizer momentum preserved
-
-**Implementation Notes**:
-- Same as `load_state()` but with `optimizer: true` parameter
-- Critical for exact training resumption
-
-**Suggested Elixir Implementation**:
-```elixir
-# In Tinkex.TrainingClient
-def load_state_with_optimizer(client, path) do
-  request = %LoadWeightsRequest{
-    model_id: client.model_id,
-    path: path,
-    optimizer: true,  # ← Key difference
-    seq_id: next_seq_id(client)
-  }
-
-  API.Weights.load_weights(request, client.config)
-end
-```
-
----
-
-### 3. `create_training_client_from_state_with_optimizer()` - MISSING
-
-**Python:**
-```python
-# service_client.py:280-320
-def create_training_client_from_state_with_optimizer(
-    self, path: str, user_metadata: dict[str, str] | None = None
-) -> TrainingClient:
-```
-
-**Elixir Status**: NOT IMPLEMENTED
-
-**Impact**: Cannot create new training client with full state restoration
-
-**Implementation Notes**:
-- Combines `create_lora_training_client()` + `load_state_with_optimizer()`
-- Queries checkpoint metadata first to get model config
-
----
-
-### 4. `forward_backward_custom()` - PARTIAL
-
-**Python:**
-```python
-# training_client.py:335-419
-def forward_backward_custom(
-    self, data: List[types.Datum], loss_fn: CustomLossFnV1
-) -> APIFuture[ForwardBackwardOutput]:
-    """Compute forward/backward with a custom loss function."""
-```
-
-**Elixir Status**: May exist via regularizers, needs verification
-
-**Impact**: Cannot use custom PyTorch-based loss functions
-
----
+None. Previously flagged gaps are implemented:
+- `compute_logprobs/2` exists in `Tinkex.SamplingClient` (wraps `sample/4` with `prompt_logprobs`)
+- `load_state_with_optimizer/3` exists in `Tinkex.TrainingClient` (sets `optimizer: true`)
+- `create_training_client_from_state_with_optimizer/3` exists in `Tinkex.ServiceClient` (optionally async)
+- `forward_backward_custom/3` exists in `Tinkex.TrainingClient` (Nx gradients + linearized loss)
 
 ## Enhanced Functions (Elixir Exceeds Python)
 
@@ -162,7 +61,7 @@ def forward_backward_custom(
 | `ServiceClient()` | `Tinkex.Client.new()` | ✅ Parity |
 | `create_lora_training_client()` | `Tinkex.Client.create_training_client()` | ✅ Parity |
 | `create_training_client_from_state()` | `Tinkex.Client.create_training_client_from_state()` | ✅ Parity |
-| `create_training_client_from_state_with_optimizer()` | N/A | ❌ **MISSING** |
+| `create_training_client_from_state_with_optimizer()` | `Tinkex.Client.create_training_client_from_state_with_optimizer()` | ✅ Parity |
 | `create_sampling_client()` | `Tinkex.Client.create_sampling_client()` | ✅ Parity |
 | `create_rest_client()` | `Tinkex.RestClient.new()` | ✅ Parity |
 | `get_server_capabilities()` | `Tinkex.API.Service.get_server_capabilities()` | ✅ Parity |
@@ -176,11 +75,11 @@ def forward_backward_custom(
 | `forward_async()` | (implicit) | ✅ Parity |
 | `forward_backward()` | `Tinkex.TrainingClient.forward_backward()` | ✅ Parity |
 | `forward_backward_async()` | (implicit) | ✅ Parity |
-| `forward_backward_custom()` | N/A | ⚠️ Partial |
+| `forward_backward_custom()` | `Tinkex.TrainingClient.forward_backward_custom()` | ✅ Parity |
 | `optim_step()` | `Tinkex.TrainingClient.optim_step()` | ✅ Parity |
 | `save_state()` | `Tinkex.TrainingClient.save_weights()` | ✅ Parity |
 | `load_state()` | `Tinkex.TrainingClient.load_weights()` | ✅ Parity |
-| `load_state_with_optimizer()` | N/A | ❌ **MISSING** |
+| `load_state_with_optimizer()` | `Tinkex.TrainingClient.load_state_with_optimizer()` | ✅ Parity |
 | `save_weights_for_sampler()` | `Tinkex.API.Weights.save_weights_for_sampler()` | ✅ Parity |
 | `get_info()` | `Tinkex.API.Models.get_info()` | ✅ Parity |
 | `get_tokenizer()` | `Tinkex.TrainingClient.get_tokenizer()` | ✅ Parity |
@@ -193,8 +92,8 @@ def forward_backward_custom(
 |--------|--------|--------|
 | `sample()` | `Tinkex.SamplingClient.sample()` | ✅ Parity |
 | `sample_async()` | (implicit) | ✅ Parity |
-| `compute_logprobs()` | N/A | ❌ **MISSING** |
-| `compute_logprobs_async()` | N/A | ❌ **MISSING** |
+| `compute_logprobs()` | `Tinkex.SamplingClient.compute_logprobs()` | ✅ Parity |
+| `compute_logprobs_async()` | Task-returning variant | ✅ Parity |
 
 ### RestClient / Tinkex.RestClient
 
@@ -218,31 +117,17 @@ def forward_backward_custom(
 
 ## Implementation Priority
 
-### P0 (Critical for Recovery)
+### P0 (Critical for Recovery UX)
 
-1. **`load_state_with_optimizer/2`**
-   - Required for full training resumption
-   - Simple addition: pass `optimizer: true` to existing load
-
-2. **TrainingRun.corrupted parsing**
-   - Required to detect poisoned jobs
-   - Ensure `from_map/1` parses this field
+1. **Recovery automation** – add monitor/executor that polls `TrainingRun.corrupted` and restarts via `create_training_client_from_state_with_optimizer/3`.
 
 ### P1 (High Priority)
 
-3. **`compute_logprobs/2`**
-   - Wrapper around existing `sample/4`
-   - Enables model evaluation workflows
-
-4. **`create_training_client_from_state_with_optimizer/3`**
-   - Combines existing functions
-   - Enables one-step recovery
+2. **Hardening tests** – integration coverage for optimizer-state load, corrupted-run parsing, and `compute_logprobs/2`.
 
 ### P2 (Medium Priority)
 
-5. **`forward_backward_custom/3`**
-   - Advanced training feature
-   - May require per-datum logprobs support
+3. **Docs/telemetry clarity** – document `get_telemetry/1` pattern and backpressure semantics for sampling/logprob helpers.
 
 ---
 

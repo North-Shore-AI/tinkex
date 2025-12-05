@@ -2,7 +2,9 @@ defmodule Tinkex.Types.Checkpoint do
   @moduledoc """
   Checkpoint metadata.
 
-  Represents a saved model checkpoint with its metadata.
+  Represents a saved model checkpoint with its metadata. Timestamps are parsed
+  into `DateTime.t()` when ISO-8601 formatted; otherwise the original string is
+  preserved.
   """
 
   alias Tinkex.Types.ParsedCheckpointTinkerPath
@@ -14,7 +16,7 @@ defmodule Tinkex.Types.Checkpoint do
           training_run_id: String.t() | nil,
           size_bytes: integer() | nil,
           public: boolean(),
-          time: String.t()
+          time: DateTime.t() | String.t() | nil
         }
 
   defstruct [
@@ -41,9 +43,21 @@ defmodule Tinkex.Types.Checkpoint do
           training_run_from_path(map["tinker_path"] || map[:tinker_path]),
       size_bytes: map["size_bytes"] || map[:size_bytes],
       public: map["public"] || map[:public] || false,
-      time: map["time"] || map[:time]
+      time: parse_time(map["time"] || map[:time])
     }
   end
+
+  defp parse_time(nil), do: nil
+  defp parse_time(%DateTime{} = dt), do: dt
+
+  defp parse_time(value) when is_binary(value) do
+    case DateTime.from_iso8601(value) do
+      {:ok, dt, _offset} -> dt
+      _ -> value
+    end
+  end
+
+  defp parse_time(other), do: other
 
   defp training_run_from_path(path) do
     case ParsedCheckpointTinkerPath.from_tinker_path(path) do

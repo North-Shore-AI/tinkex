@@ -1,7 +1,7 @@
 defmodule Tinkex.MixProject do
   use Mix.Project
 
-  @version "0.1.20"
+  @version "0.2.0"
   @source_url "https://github.com/North-Shore-AI/tinkex"
   @docs_url "https://hexdocs.pm/tinkex"
 
@@ -45,10 +45,10 @@ defmodule Tinkex.MixProject do
       {:jason, "~> 1.4"},
 
       # Numerical computing (tensor operations)
-      {:nx, "~> 0.7"},
+      {:nx, "~> 0.9"},
 
       # GPU/CPU-accelerated backend for Nx
-      {:exla, "~> 0.7"},
+      {:exla, "~> 0.9"},
 
       # Tokenization (HuggingFace models)
       {:tokenizers, "~> 0.5"},
@@ -61,6 +61,9 @@ defmodule Tinkex.MixProject do
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:ex_doc, "~> 0.30", only: :dev, runtime: false},
+
+      # Regularization primitives
+      {:nx_penalties, "~> 0.1.2"},
 
       # Testing
       {:mox, "~> 1.0", only: :test},
@@ -105,6 +108,7 @@ defmodule Tinkex.MixProject do
         # Async & Reliability
         "docs/guides/futures_and_async.md",
         "docs/guides/retry_and_error_handling.md",
+        "docs/guides/recovery.md",
         # Observability
         "docs/guides/telemetry.md",
         "docs/guides/metrics.md",
@@ -133,7 +137,8 @@ defmodule Tinkex.MixProject do
         ],
         "Async & Reliability": [
           "docs/guides/futures_and_async.md",
-          "docs/guides/retry_and_error_handling.md"
+          "docs/guides/retry_and_error_handling.md",
+          "docs/guides/recovery.md"
         ],
         Observability: [
           "docs/guides/telemetry.md",

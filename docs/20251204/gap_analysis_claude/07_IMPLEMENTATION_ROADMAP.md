@@ -10,249 +10,51 @@ This roadmap addresses the gaps identified in the tinkex SDK analysis, prioritiz
 
 ---
 
-## Phase 1: Critical SDK Parity (P0)
+## Phase 1: SDK Hardening (P0)
 
 **Duration**: 1-2 days
-**Goal**: Enable full training state recovery
+**Goal**: Lock in existing recovery primitives and make them regression-proof
 
-### 1.1 Verify TrainingRun.corrupted Parsing
+### 1.1 Regression Tests for Recovery Primitives
 
-**File**: `lib/tinkex/types/training_run.ex`
+- `TrainingRun.from_map/1` parses `corrupted`
+- `load_state_with_optimizer/3` sends `optimizer: true` and succeeds end-to-end
+- `create_training_client_from_state_with_optimizer/3` rebuilds a client from a checkpoint
 
-**Task**: Ensure `corrupted` field is parsed from API response
+### 1.2 Timestamp Normalization
 
-```elixir
-# Verify this exists in the struct
-defstruct [
-  :training_run_id,
-  :base_model,
-  :model_owner,
-  :is_lora,
-  :corrupted,  # ← Must be here
-  :lora_rank,
-  :last_request_time,
-  :last_checkpoint,
-  :last_sampler_checkpoint,
-  :user_metadata
-]
+- Parse `Checkpoint.time` (and related fields) to `DateTime.t()` with graceful fallback
+- Document serialization expectations for downstream consumers
 
-# Verify from_map/1 parses it
-def from_map(map) do
-  %__MODULE__{
-    training_run_id: map["training_run_id"],
-    corrupted: map["corrupted"] || false,  # ← Must parse
-    # ...
-  }
-end
-```
+### 1.3 Recovery Runbook
 
-**Test**:
-```elixir
-test "parses corrupted field" do
-  map = %{"training_run_id" => "run-1", "corrupted" => true}
-  run = TrainingRun.from_map(map)
-  assert run.corrupted == true
-end
-```
+- Add docs for weights-only vs optimizer-aware recovery flows
+- Include queue-state/backpressure guidance
 
 ---
 
-### 1.2 Add load_weights_with_optimizer/2
+## Phase 2: Recovery Automation (P1)
 
-**File**: `lib/tinkex/training_client.ex`
+**Duration**: 3-5 days  
+**Goal**: Ship an OTP-native recovery loop that restarts corrupted runs automatically
 
-**Task**: Add function to load weights with optimizer state
+### 2.1 Recovery Policy
+- Define `Tinkex.Recovery.Policy` (enabled flag, backoff, checkpoint strategy, restore_optimizer flag)
+- Wire optional policy into `Tinkex.Config`
 
-```elixir
-@doc """
-Load model weights AND optimizer state from a checkpoint.
+### 2.2 Recovery Monitor
+- Poll `Rest.get_training_run/2` for monitored run_ids
+- Emit telemetry on detection (`[:tinkex, :recovery, :detected]`)
+- Dispatch recovery work to executor
 
-This restores the exact training state, including Adam momentum.
-Use this for exact resumption of training.
-"""
-@spec load_weights_with_optimizer(t(), String.t()) :: :ok | {:error, Error.t()}
-def load_weights_with_optimizer(client, path) do
-  request = %LoadWeightsRequest{
-    model_id: client.model_id,
-    path: path,
-    optimizer: true,
-    seq_id: next_seq_id(client)
-  }
-
-  case API.Weights.load_weights(request, client.config) do
-    {:ok, _response} -> :ok
-    error -> error
-  end
-end
-```
-
-**Test**:
-```elixir
-test "load_weights_with_optimizer sends optimizer: true" do
-  # Mock or integration test
-end
-```
+### 2.3 Recovery Executor
+- Select checkpoint (latest/best/custom)
+- Recreate client via `create_training_client_from_state_with_optimizer/3`
+- Emit telemetry for start/success/failure/exhausted
 
 ---
 
-### 1.3 Add create_training_client_from_state_with_optimizer/3
-
-**File**: `lib/tinkex/client.ex`
-
-**Task**: Add factory function for full state recovery
-
-```elixir
-@doc """
-Create a training client from a saved checkpoint, restoring optimizer state.
-
-This enables exact resumption of training from any checkpoint.
-"""
-@spec create_training_client_from_state_with_optimizer(Config.t(), String.t(), keyword()) ::
-        {:ok, TrainingClient.t()} | {:error, Error.t()}
-def create_training_client_from_state_with_optimizer(config, path, opts \\ []) do
-  with {:ok, info} <- API.Rest.get_weights_info_by_tinker_path(config, path),
-       {:ok, client} <- create_training_client(config,
-         base_model: info.base_model,
-         lora_rank: info.lora_rank,
-         user_metadata: opts[:user_metadata]
-       ),
-       :ok <- TrainingClient.load_weights_with_optimizer(client, path) do
-    {:ok, client}
-  end
-end
-```
-
----
-
-## Phase 2: High Priority Features (P1)
-
-**Duration**: 3-5 days
-**Goal**: Complete API parity for common workflows
-
-### 2.1 Add compute_logprobs/2
-
-**File**: `lib/tinkex/sampling_client.ex`
-
-```elixir
-@doc """
-Compute log probabilities for prompt tokens.
-
-Returns the logprob for each token in the prompt.
-"""
-@spec compute_logprobs(t(), ModelInput.t()) :: {:ok, [float() | nil]} | {:error, Error.t()}
-def compute_logprobs(client, prompt) do
-  request = %SampleRequest{
-    sampling_session_id: client.sampling_session_id,
-    prompt: prompt,
-    num_samples: 1,
-    sampling_params: %SamplingParams{max_tokens: 1},
-    prompt_logprobs: true,
-    seq_id: next_seq_id(client)
-  }
-
-  case sample(client, request) do
-    {:ok, %{prompt_logprobs: logprobs}} -> {:ok, logprobs}
-    {:ok, _} -> {:error, %Error{type: :validation, message: "No logprobs returned"}}
-    error -> error
-  end
-end
-```
-
----
-
-### 2.2 Add Missing Response Types
-
-**Files**: `lib/tinkex/types/`
-
-Create the following type modules:
-
-```elixir
-# lib/tinkex/types/get_session_response.ex
-defmodule Tinkex.Types.GetSessionResponse do
-  defstruct [:training_run_ids, :sampler_ids]
-
-  def from_map(map) do
-    %__MODULE__{
-      training_run_ids: map["training_run_ids"] || [],
-      sampler_ids: map["sampler_ids"] || []
-    }
-  end
-end
-
-# lib/tinkex/types/list_sessions_response.ex
-defmodule Tinkex.Types.ListSessionsResponse do
-  defstruct [:sessions, :cursor]
-
-  def from_map(map) do
-    %__MODULE__{
-      sessions: Enum.map(map["sessions"] || [], &SessionInfo.from_map/1),
-      cursor: Cursor.from_map(map["cursor"])
-    }
-  end
-end
-
-# lib/tinkex/types/training_runs_response.ex
-defmodule Tinkex.Types.TrainingRunsResponse do
-  defstruct [:training_runs, :cursor]
-
-  def from_map(map) do
-    %__MODULE__{
-      training_runs: Enum.map(map["training_runs"] || [], &TrainingRun.from_map/1),
-      cursor: Cursor.from_map(map["cursor"])
-    }
-  end
-end
-```
-
----
-
-### 2.3 Fix ImageChunk Type
-
-**File**: `lib/tinkex/types/image_chunk.ex`
-
-```elixir
-defmodule Tinkex.Types.ImageChunk do
-  @moduledoc """
-  Image input chunk for multimodal models.
-  """
-
-  defstruct [
-    :data,             # Base64-encoded image data
-    :format,           # :png | :jpeg
-    :height,           # Image height in pixels (REQUIRED)
-    :width,            # Image width in pixels (REQUIRED)
-    :tokens,           # Token count (REQUIRED)
-    :expected_tokens,  # Expected token count (optional)
-    type: "image"
-  ]
-
-  @type t :: %__MODULE__{
-    data: String.t(),
-    format: :png | :jpeg,
-    height: non_neg_integer(),
-    width: non_neg_integer(),
-    tokens: non_neg_integer(),
-    expected_tokens: non_neg_integer() | nil,
-    type: String.t()
-  }
-
-  def to_map(%__MODULE__{} = chunk) do
-    %{
-      "data" => chunk.data,
-      "format" => Atom.to_string(chunk.format),
-      "height" => chunk.height,
-      "width" => chunk.width,
-      "tokens" => chunk.tokens,
-      "expected_tokens" => chunk.expected_tokens,
-      "type" => chunk.type
-    }
-  end
-end
-```
-
----
-
-## Phase 3: Recovery Layer (P2)
+## Recovery Layer Design (for Phase 2)
 
 **Duration**: 1-2 weeks
 **Goal**: Automated checkpoint recovery
@@ -430,9 +232,10 @@ defmodule Tinkex.Recovery.Executor do
     {:noreply, state}
   end
 
-  defp attempt_recovery(config, run_id, info, policy, attempt) when attempt < policy.max_attempts do
+  defp attempt_recovery(config, run_id, %{service_client: service} = info, policy, attempt)
+       when attempt < policy.max_attempts do
     with {:ok, checkpoint} <- select_checkpoint(config, run_id, policy.checkpoint_strategy),
-         {:ok, new_client} <- create_recovered_client(config, checkpoint, policy) do
+         {:ok, new_client} <- create_recovered_client(service, checkpoint, policy) do
       {:ok, new_client, checkpoint}
     else
       {:error, reason} ->
@@ -454,15 +257,15 @@ defmodule Tinkex.Recovery.Executor do
     end
   end
 
-  defp create_recovered_client(config, checkpoint, policy) do
+  defp create_recovered_client(service, checkpoint, policy) do
     if policy.restore_optimizer do
-      Tinkex.Client.create_training_client_from_state_with_optimizer(
-        config,
+      Tinkex.ServiceClient.create_training_client_from_state_with_optimizer(
+        service,
         checkpoint.tinker_path
       )
     else
-      Tinkex.Client.create_training_client_from_state(
-        config,
+      Tinkex.ServiceClient.create_training_client_from_state(
+        service,
         checkpoint.tinker_path
       )
     end
@@ -472,7 +275,7 @@ end
 
 ---
 
-## Phase 4: Integration (P3)
+## Phase 3: Integration (P2)
 
 **Duration**: Ongoing
 **Goal**: Connect to broader NSAI ecosystem
@@ -531,25 +334,25 @@ end
 
 ```
 Week 1:
-├── Day 1-2: Phase 1 (P0 - Critical)
-│   ├── Verify TrainingRun.corrupted
-│   ├── Add load_weights_with_optimizer
-│   └── Add create_training_client_from_state_with_optimizer
+├── Day 1-2: Phase 1 (P0 - Hardening)
+│   ├── Regression tests for corrupted + optimizer restore
+│   ├── Timestamp normalization
+│   └── Recovery runbook/docs
 │
-├── Day 3-5: Phase 2 (P1 - High)
-│   ├── Add compute_logprobs
-│   ├── Add missing response types
-│   └── Fix ImageChunk type
+├── Day 3-5: Phase 2 (P1 - Recovery Automation)
+│   ├── Recovery.Policy struct
+│   ├── Recovery.Monitor GenServer
+│   ├── Recovery.Executor GenServer
+│   └── Recovery telemetry
 
 Week 2-3:
-└── Phase 3 (P2 - Recovery)
-    ├── Recovery.Policy struct
-    ├── Recovery.Monitor GenServer
-    ├── Recovery.Executor GenServer
-    └── Integration tests
+└── Stabilize recovery
+    ├── Integration tests
+    ├── Backpressure/queue-state alerts
+    └── Tune backoff + selection strategy
 
 Week 4+:
-└── Phase 4 (P3 - Integration)
+└── Phase 3 (P2 - Integration)
     ├── NSAI.Work integration
     ├── Crucible backend adapter
     └── Documentation
@@ -563,7 +366,7 @@ Week 4+:
 
 ```elixir
 # test/tinkex/training_client_test.exs
-describe "load_weights_with_optimizer/2" do
+describe "load_state_with_optimizer/3" do
   test "sends optimizer: true in request" do
     # Test request formation
   end

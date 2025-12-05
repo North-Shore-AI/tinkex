@@ -4,7 +4,7 @@ This directory contains examples demonstrating the core functionality of the Tin
 
 ## Overview
 
-The examples are organized by functionality and complexity, ranging from simple single-operation demonstrations to complete end-to-end workflows. All examples require a valid Tinker API key and can be configured through environment variables to customize their behavior.
+The examples are organized by functionality and complexity, ranging from simple single-operation demonstrations to complete end-to-end workflows. Most examples require a valid Tinker API key and can be configured through environment variables to customize their behavior; offline-only scripts are noted below.
 
 ## Example Index
 
@@ -12,13 +12,15 @@ The examples are organized by functionality and complexity, ranging from simple 
 - `training_loop.exs` – forward/backward pass, optim step, save weights, and optional sampling
 - `custom_loss_training.exs` – live custom loss training that sends gradients to the backend via `forward_backward_custom/4`
 - `forward_inference.exs` – forward-only pass returning logprobs for custom loss computation/evaluation with Nx/EXLA
-- `structured_regularizers.exs` – composable regularizer pipeline demo with mock data (runs offline)
-- `structured_regularizers_live.exs` – custom loss with inline regularizer terms via live Tinker API
+- `structured_regularizers.exs` – composable regularizer pipeline demo with all NxPenalties-backed adapters (offline)
+- `structured_regularizers_live.exs` – live custom loss run applying all adapters against the API
+- `recovery_live_injected.exs` – live recovery demo that injects a single `corrupted: true` poll, restores from the latest checkpoint, and writes a new checkpoint from the recovered client (requires API key)
 - `live_capabilities_and_logprobs.exs` – live health/capabilities check plus prompt logprobs (requires API key)
 - `model_info_and_unload.exs` – fetch active model metadata (tokenizer id, arch) and unload the session (requires API key)
 - `sessions_management.exs` – REST session listing and detail queries
 - `checkpoints_management.exs` – user checkpoint listing with metadata inspection
 - `checkpoint_download.exs` – streaming checkpoint download (O(1) memory) with progress callbacks and extraction
+- `recovery_simulated.exs` – offline recovery demo that marks a run as corrupted, triggers `Monitor` + `Executor`, and advances to the next checkpoint (no API key required)
 - `weights_inspection.exs` – sampler/weights metadata inspection for LoRA+training run validation
 - `async_client_creation.exs` – parallel sampling client creation via Task-based flows
 - `cli_run_text.exs` – programmatic `tinkex run` invocation with inline prompts
@@ -580,13 +582,11 @@ For more detailed information about specific SDK features and APIs, refer to the
 $ ./examples/run_all.sh
 
 ==> Running examples/sampling_basic.exs
-Compiling 7 files (.ex)
-Generated tinkex app
 Sampling 1 sequence(s) from meta-llama/Llama-3.1-8B ...
 Received 1 sequence(s):
-Sample 1:  A new brand of personalised stationery that is all about adding joy to your day. We create unique personalised stationery that you can use for yourself or gift to your loved ones.
-Tinkex is founded by a mother of 3 who is a stationery geek.
-We create unique designer stationery that is not readily
+Sample 1:  How are you? I haven’t been around much lately, have I?
+I have been busy with my job, I have been busy with my family, I have been busy with the house, I have been busy with getting ready for Christmas, and I have been busy with all sorts of other things.
+I am sorry
 
 ==> Running examples/training_loop.exs
 ----------------------------------------
@@ -596,24 +596,24 @@ Prompt: 'Fine-tuning sample prompt'
 Sample after training: false
 
 [step] creating ServiceClient...
-[step] creating ServiceClient completed in 606ms
+[step] creating ServiceClient completed in 549ms
 [step] creating TrainingClient (LoRA rank=16)...
 [note] this may take 30-120s on first run (model loading)...
-[step] creating TrainingClient (LoRA rank=16) completed in 317ms
+[step] creating TrainingClient (LoRA rank=16) completed in 263ms
 [step] building model input...
 [step] got 6 tokens: [128000, 64816, 2442, 38302, 6205, 10137]
-[step] building model input completed in 1.87s
+[step] building model input completed in 1.31s
 [step] running forward_backward...
-[step] forward_backward completed in 9.8s
-[metrics] forward_backward: %{"clock_cycle:unique" => 668517.0, "loss:sum" => 85.29592895507812}
+[step] forward_backward completed in 3.95s
+[metrics] forward_backward: %{"clock_cycle:unique" => 3128535.0, "loss:sum" => 85.29592895507812}
 [step] running optim_step...
-[step] optim_step completed in 873ms
+[step] optim_step completed in 1.36s
 [metrics] optim_step: (none - optimizer doesn't compute metrics)
 [step] saving weights for sampler...
-[step] save_weights_for_sampler completed in 4.03s
-[result] save_weights: %{"path" => "tinker://39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0/sampler_weights/sampler-weights", "sampling_session_id" => nil, "size_bytes" => nil, "type" => "save_weights_for_sampler"}
+[step] save_weights_for_sampler completed in 7.57s
+[result] save_weights: %{"path" => "tinker://18985ee5-4dd4-556a-96ef-ed73df10b976:train:0/sampler_weights/sampler-weights", "sampling_session_id" => nil, "size_bytes" => nil, "type" => "save_weights_for_sampler"}
 
-[done] Training loop finished in 14.71s
+[done] Training loop finished in 12.89s
 
 ==> Running examples/custom_loss_training.exs
 ================================================================================
@@ -627,14 +627,14 @@ Creating training client...
 Preparing training datum for prompt: Name three planets in the solar system.
 
 Running forward_backward_custom...
-Custom loss completed in 20292 ms
+Custom loss completed in 10227 ms
 
 Running optim_step...
 optim_step succeeded.
 
 === ForwardBackwardOutput ===
 loss_fn_output_type: CrossEntropyLossReturn
-metrics: %{"clock_cycle:unique" => 668522.0, "custom_perplexity" => 201762.703125, "loss:sum" => 12.214847564697266}
+metrics: %{"clock_cycle:unique" => 5864459.0, "custom_perplexity" => 201762.703125, "loss:sum" => 12.214847564697266}
 loss_fn_outputs (truncated):
 [
   %{
@@ -669,9 +669,9 @@ Token count: 6
 
 Running forward pass (inference only, no backward)...
 
-Forward pass completed in 10357ms
+Forward pass completed in 7282ms
 Output type: CrossEntropyLossReturn
-Metrics: %{"clock_cycle:unique" => 3556618.0, "loss:sum" => 71.73094177246094}
+Metrics: %{"clock_cycle:unique" => 3128539.0, "loss:sum" => 71.73094177246094}
 Number of loss_fn_outputs: 1
 
 === Nx Tensor Conversion Demo ===
@@ -701,9 +701,17 @@ Each regularizer can track gradient norms for monitoring training dynamics.
 
 --- 1. Creating RegularizerSpec Configurations ---
 
-Created L1 sparsity regularizer: weight=0.01
-Created entropy regularizer: weight=0.001
-Created L2 regularizer: weight=0.005
+Created L1 sparsity regularizer via NxPenalties adapter (weight=0.01)
+Created entropy regularizer via NxPenalties adapter (weight=0.001)
+Created entropy (temperature-scaled) regularizer via NxPenalties adapter (weight=0.001, temperature=0.5)
+Created L2 regularizer via NxPenalties adapter (weight=0.005)
+Created Elastic Net regularizer via NxPenalties adapter (weight=0.002)
+Created KL divergence regularizer (forward) via NxPenalties adapter (weight=0.01)
+Created KL divergence regularizer (reverse) via NxPenalties adapter (mode-seeking, weight=0.01)
+Created KL divergence regularizer (symmetric) via NxPenalties adapter (balanced, weight=0.01)
+Created consistency regularizer via NxPenalties adapter (weight=0.02)
+Created orthogonality regularizer via NxPenalties adapter (weight=0.003)
+Created gradient penalty regularizer via NxPenalties adapter (weight=0.001)
 
 --- 2. Defining Base Loss Function ---
 
@@ -722,47 +730,103 @@ Base loss only:
 
 --- 5. With Regularizers (Parallel Execution) ---
 
-Composed loss with 3 regularizers:
-  loss_total: 1.2583
+Composed loss with 11 regularizers:
+  loss_total: 1.3016
   base_loss: 1.08
-  regularizer_total: 0.1783
+  regularizer_total: 0.2216
 
 Per-regularizer breakdown:
+  consistency:
+    value: 0.0085
+    weight: 0.02
+    contribution: 0.0002
+  elastic_net:
+    value: 12.36
+    weight: 0.002
+    contribution: 0.0247
   entropy:
     value: -3.1972
     weight: 0.001
     contribution: -0.0032
+  entropy_sharp:
+    value: -1.9354
+    weight: 0.001
+    contribution: -0.0019
+  gradient_penalty:
+    value: 4.6754
+    weight: 0.001
+    contribution: 0.0047
+  kl_forward:
+    value: 6.087
+    weight: 0.01
+    contribution: 0.0609
+  kl_reverse:
+    value: -1.1569
+    weight: 0.01
+    contribution: -0.0116
+  kl_symmetric:
+    value: 2.465
+    weight: 0.01
+    contribution: 0.0247
   l1_sparsity:
     value: 10.8
     weight: 0.01
     contribution: 0.108
   l2_weight_decay:
-    value: 14.7
+    value: 3.036
     weight: 0.005
-    contribution: 0.0735
+    contribution: 0.0152
+  orthogonality:
+    value: 0.0
+    weight: 0.003
+    contribution: 0.0
 
 --- 6. With Gradient Norm Tracking ---
 
 Gradient norms for training dynamics monitoring:
   base_loss grad_norm: 0.3162
-  total_grad_norm: 0.3822
+  total_grad_norm: 0.3575
 
 Per-regularizer gradient norms:
+  consistency:
+    grad_norm: 0.0
+    grad_norm_weighted: 0.0
+  elastic_net:
+    grad_norm: 4.8349
+    grad_norm_weighted: 0.00967
   entropy:
     grad_norm: 0.6867
     grad_norm_weighted: 6.87e-4
+  entropy_sharp:
+    grad_norm: 0.4833
+    grad_norm_weighted: 4.83e-4
+  gradient_penalty:
+    grad_norm: 0.0
+    grad_norm_weighted: 0.0
+  kl_forward:
+    grad_norm: 0.0
+    grad_norm_weighted: 0.0
+  kl_reverse:
+    grad_norm: 0.0
+    grad_norm_weighted: 0.0
+  kl_symmetric:
+    grad_norm: 0.0
+    grad_norm_weighted: 0.0
   l1_sparsity:
     grad_norm: 3.1623
     grad_norm_weighted: 0.031623
   l2_weight_decay:
-    grad_norm: 7.6681
-    grad_norm_weighted: 0.038341
+    grad_norm: 3.4848
+    grad_norm_weighted: 0.017424
+  orthogonality:
+    grad_norm: 0.0
+    grad_norm_weighted: 0.0
 
 --- 7. Sequential vs Parallel Execution ---
 
 Execution time comparison:
-  Parallel: 471 μs
-  Sequential: 242 μs
+  Parallel: 2461 μs
+  Sequential: 3244 μs
   Results match: true
 
 --- 8. Async Regularizers (for I/O-bound operations) ---
@@ -771,7 +835,7 @@ Created async regularizer (simulates external API call)
 Async regularizer result:
   loss_total: 1.1016
   async_external_validation contribution: 0.0216
-  Execution time: 11387 μs
+  Execution time: 11135 μs
 
 --- 9. Direct Executor Usage ---
 
@@ -784,7 +848,15 @@ Single regularizer execution via Executor:
 All regularizers via Executor.execute_all:
   l1_sparsity: value=10.8, grad_norm=3.1623
   entropy: value=-3.1972, grad_norm=0.6867
-  l2_weight_decay: value=14.7, grad_norm=7.6681
+  entropy_sharp: value=-1.9354, grad_norm=0.4833
+  l2_weight_decay: value=3.036, grad_norm=3.4848
+  elastic_net: value=12.36, grad_norm=4.8349
+  kl_forward: value=6.087, grad_norm=0.0
+  kl_reverse: value=-1.1569, grad_norm=0.0
+  kl_symmetric: value=2.465, grad_norm=0.0
+  consistency: value=0.0085, grad_norm=0.0
+  orthogonality: value=0.0, grad_norm=0.0
+  gradient_penalty: value=4.6754, grad_norm=0.0
 
 --- 10. Direct GradientTracker Usage ---
 
@@ -799,44 +871,47 @@ Gradient norm for sum(x^2):
 --- 11. Telemetry Integration ---
 
 
-10:32:48.777 [info] The function passed as a handler with ID "tinkex-regularizer-5186" is a local function.
+14:48:47.612 [info] The function passed as a handler with ID "tinkex-regularizer-3" is a local function.
 This means that it is either an anonymous function or a capture of a function without a module specified. That may cause a performance penalty when calling that handler. For more details see the note in `telemetry:attach/4` documentation.
 
 https://hexdocs.pm/telemetry/telemetry.html#attach/4
-Attached telemetry handler: tinkex-regularizer-5186
+Attached telemetry handler: tinkex-regularizer-3
 
 Running pipeline with telemetry (watch for log output):
 
-10:32:48.784 [info] Custom loss starting: regularizers=1 track_grad_norms=true
+14:48:47.624 [info] Custom loss starting: regularizers=1 track_grad_norms=true
 
-10:32:48.784 [info] Regularizer l1_sparsity starting
+14:48:47.625 [info] Regularizer l1_sparsity starting
 
-10:32:48.784 [info] Regularizer l1_sparsity value=10.8 contribution=0.108 in 0ms grad_norm=3.1623
+14:48:47.625 [info] Regularizer l1_sparsity value=10.8 contribution=0.108 in 0ms grad_norm=3.1623
 
-10:32:48.784 [info] Custom loss computed in 0ms total=1.188 regularizer_total=0.108 regularizers=1
+14:48:47.625 [info] Custom loss computed in 1ms total=1.188 regularizer_total=0.108 regularizers=1
 Detached telemetry handler
 
 --- 12. JSON Serialization ---
 
 CustomLossOutput as JSON:
 {
-  "loss_total": 1.2583030109405517,
+  "loss_total": 1.3015642880909144,
   "regularizers": {
-    "entropy": {
-      "value": -3.1971569061279297,
-      "custom": {},
-      "weight": 0.001,
-      "contribution": -0.0031971569061279297,
-      "grad_norm": 0.6867480278015137,
-      "grad_norm_weighted": 6.867480278015136e-4
+    "consistency": {
+      "value": 0.008500001393258572,
+      "custom": {
+        "consistency_metric": "mse"
+      },
+      "weight": 0.02,
+      "contribution": 1.7000002786517145e-4,
+      "grad_norm": 0.0,
+      "grad_norm_weighted": 0.0
     },
-    "l1_sparsity": {
-      "value": 10.80000114440918,
-      "custom": {},
-      "weight": 0.01,
-      "contribution": 0.1080000114440918,
-      "grad_norm": 3.1622776985168457,
-      "grad_norm_weighted":...
+    "elastic_net": {
+      "value": 12.360000610351562,
+      "custom": {
+        "elastic_net": 12.360000610351562,
+        "l1_ratio": 0.6
+      },
+      "weight": 0.002,
+      "contributio...
 
 (Output truncated for display)
 
@@ -844,7 +919,10 @@ RegularizerOutput as JSON:
 {
   "name": "l1_sparsity",
   "value": 10.80000114440918,
-  "custom": {},
+  "custom": {
+    "l1_mean": 1.0800001621246338,
+    "l1_raw": 10.80000114440918
+  },
   "weight": 0.01,
   "contribution": 0.1080000114440918,
   "grad_norm": 3.1622776985168457,
@@ -977,15 +1055,23 @@ Token count: 11
 
 --- Running forward_backward_custom (Live API) ---
 
-Completed in 6125ms
+Completed in 11312ms
 
 === Metrics ===
 base_nll: 12.02071
-clock_cycle:unique: 668526.0
+clock_cycle:unique: 5864466.0
+consistency: 14.65879
 custom_perplexity: 166160.59375
-entropy: -5.0e-6
-l1: 1.322278
-loss:sum: 13.343032
+elastic_net: 71.157845
+entropy: 1.35026
+gradient_penalty: 5.366751
+kl_forward: -0.003815
+kl_reverse: 9.622814
+kl_symmetric: 4.809499
+l1: 12.02071
+l2: 15.366093
+loss:sum: 13.150629
+orthogonality: 0.0
 
 ================================================================================
 Success! Custom loss with regularizer terms computed via live Tinker API.
@@ -999,18 +1085,18 @@ Creating RestClient...
 
 --- Listing Sessions ---
 Found 10 sessions:
-  • 1b237267-9f76-5a03-9ea8-96578ddbe935
-  • bef237d2-e7dc-54ae-8055-55b143264cbd
-  • 046c901d-5e46-5982-a80d-32fcc2acfb9f
-  • e461bab9-a627-5c7b-889b-26b744d46df3
-  • 39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4
-  • ae3e031a-e2a4-512a-8d85-708e93dd4f1b
-  • 0ba9f266-961a-5c66-8bed-a5103ed577bd
-  • f9ee4b55-c2b5-59da-9c4a-e15b50d13845
-  • f66b0737-c942-5f75-831a-b86dbd5c4d7e
-  • c86fee95-7c04-5163-a4ca-9f9002fd49c7
+  • cd0d41a3-51c2-5a14-9ba8-af64d1e094c7
+  • 68d03eaa-9b06-5863-95bc-c3acdb3545eb
+  • def55c59-9dbc-5833-aa7b-b763dbb38c75
+  • 4967ce58-2090-5211-af93-6c0acabbb477
+  • 18985ee5-4dd4-556a-96ef-ed73df10b976
+  • 09ef40a7-fc76-54dc-8145-39d0fbf23a10
+  • 966d6790-9fe3-54dd-9dbe-4f61f6840bde
+  • 098378b0-5cdd-5c5f-b566-4d3905bddeee
+  • 6ec7d725-f0b6-59f5-8bf8-029ea7b36459
+  • 3b373960-23fc-5626-a491-73ddccf2c465
 
---- Session Details: 1b237267-9f76-5a03-9ea8-96578ddbe935 ---
+--- Session Details: cd0d41a3-51c2-5a14-9ba8-af64d1e094c7 ---
 Training Runs: 0
 Samplers: 0
 
@@ -1020,802 +1106,851 @@ Samplers: 0
 === Tinkex Checkpoint Management Example ===
 
 --- All User Checkpoints ---
-Found 20 of 93 checkpoints:
+Found 20 of 100 checkpoints:
+
+  sampler_weights/sampler-weights
+    Path: tinker://18985ee5-4dd4-556a-96ef-ed73df10b976:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-12-05 00:48:20.055773Z
+
+  weights/recovery-live-2
+    Path: tinker://966d6790-9fe3-54dd-9dbe-4f61f6840bde:train:1/weights/recovery-live-2
+    Type: training
+    Size: 252.2 MB
+    Public: false
+    Created: 2025-12-04 23:17:00.814946Z
+
+  weights/recovery-live-1
+    Path: tinker://966d6790-9fe3-54dd-9dbe-4f61f6840bde:train:0/weights/recovery-live-1
+    Type: training
+    Size: 252.2 MB
+    Public: false
+    Created: 2025-12-04 23:16:35.106294Z
+
+  weights/recovery-live-2
+    Path: tinker://098378b0-5cdd-5c5f-b566-4d3905bddeee:train:1/weights/recovery-live-2
+    Type: training
+    Size: 252.2 MB
+    Public: false
+    Created: 2025-12-04 23:14:45.325072Z
+
+  weights/recovery-live-1
+    Path: tinker://098378b0-5cdd-5c5f-b566-4d3905bddeee:train:0/weights/recovery-live-1
+    Type: training
+    Size: 252.2 MB
+    Public: false
+    Created: 2025-12-04 23:14:25.359194Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://c0fe4b75-d2a6-5dfc-9b5f-bd243c4b8690:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-12-04 03:27:53.190382Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://5fa8e8b9-6eaa-57c8-bc2b-7a89c2783243:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-12-04 02:31:39.923898Z
 
   weights/async_demo_checkpoint
     Path: tinker://9677c040-d833-5325-8a9d-4c3a1f816328:train:0/weights/async_demo_checkpoint
     Type: training
     Size: 153.0 MB
     Public: false
-    Created: 2025-12-03T20:35:36.090807Z
+    Created: 2025-12-03 20:35:36.090807Z
 
   sampler_weights/sampler-weights
     Path: tinker://39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-12-03T20:32:09.677474Z
+    Created: 2025-12-03 20:32:09.677474Z
 
   weights/async_demo_checkpoint
     Path: tinker://170beeb9-9fa9-5011-b896-ba0616c7e94d:train:0/weights/async_demo_checkpoint
     Type: training
     Size: 153.0 MB
     Public: false
-    Created: 2025-11-28T02:43:17.958810Z
+    Created: 2025-11-28 02:43:17.958810Z
 
   sampler_weights/sampler-weights
     Path: tinker://50398661-7150-5042-9891-5611cb535340:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-28T02:40:09.047757Z
+    Created: 2025-11-28 02:40:09.047757Z
 
   sampler_weights/sampler-weights
     Path: tinker://a5d5031a-72a5-5180-8417-e32c5c0a9598:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-28T02:32:20.546936Z
+    Created: 2025-11-28 02:32:20.546936Z
 
   weights/async_demo_checkpoint
     Path: tinker://47f7276e-454e-5dde-9188-1c1e3c3536b5:train:0/weights/async_demo_checkpoint
     Type: training
     Size: 153.0 MB
     Public: false
-    Created: 2025-11-28T02:31:18.060463Z
+    Created: 2025-11-28 02:31:18.060463Z
 
   sampler_weights/async_demo_weights
     Path: tinker://a7517405-527c-571e-9fe2-c94e6b3cf548:train:0/sampler_weights/async_demo_weights
     Type: sampler
     Size: 51.0 MB
     Public: false
-    Created: 2025-11-28T02:30:25.465448Z
+    Created: 2025-11-28 02:30:25.465448Z
 
   sampler_weights/async_demo_weights
     Path: tinker://73c466d3-b063-56a2-86d0-d035a1392c23:train:0/sampler_weights/async_demo_weights
     Type: sampler
     Size: 51.0 MB
     Public: false
-    Created: 2025-11-28T02:29:56.731159Z
+    Created: 2025-11-28 02:29:56.731159Z
 
   sampler_weights/sampler-weights
     Path: tinker://53f0586d-3f98-58e5-b04e-297ea717378e:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-27T18:58:37.961274Z
+    Created: 2025-11-27 18:58:37.961274Z
 
   sampler_weights/sampler-weights
     Path: tinker://f4521144-ef58-53ec-950c-29260c9b1a41:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-27T18:44:47.285732Z
+    Created: 2025-11-27 18:44:47.285732Z
 
   sampler_weights/sampler-weights
     Path: tinker://1ec257a9-28bf-559c-aa73-e54a09cce5bd:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-27T18:37:23.205082Z
+    Created: 2025-11-27 18:37:23.205082Z
 
   sampler_weights/sampler-weights
     Path: tinker://046c91d9-d9f4-5dd6-ac42-0135bbde947e:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-27T18:15:50.316094Z
+    Created: 2025-11-27 18:15:50.316094Z
 
   sampler_weights/sampler-weights
     Path: tinker://fdf7af94-bcce-5bf7-847b-a159e8bfb025:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-27T18:11:28.567500Z
-
-  sampler_weights/sampler-weights
-    Path: tinker://8eba0a5a-0dcf-57f3-9d0d-65ec6ef22a1f:train:0/sampler_weights/sampler-weights
-    Type: sampler
-    Size: 84.1 MB
-    Public: false
-    Created: 2025-11-27T17:53:03.197669Z
-
-  sampler_weights/checkpoint_1764230891.2048833.pt
-    Path: tinker://fa0ecefc-83b2-5e26-a2a9-aee483b913ba:train:0/sampler_weights/checkpoint_1764230891.2048833.pt
-    Type: sampler
-    Size: 5.77 GB
-    Public: false
-    Created: 2025-11-27T08:09:13.441453Z
-
-  sampler_weights/checkpoint_1764230289.3815918.pt
-    Path: tinker://bc33563e-6730-5cbe-9a25-43e11dbe5095:train:0/sampler_weights/checkpoint_1764230289.3815918.pt
-    Type: sampler
-    Size: 5.77 GB
-    Public: false
-    Created: 2025-11-27T07:59:06.047243Z
-
-  sampler_weights/checkpoint_1764229717.8670213.pt
-    Path: tinker://bfc7c5e5-0b90-55a1-8c97-fc8bdac649c9:train:0/sampler_weights/checkpoint_1764229717.8670213.pt
-    Type: sampler
-    Size: 168.1 MB
-    Public: false
-    Created: 2025-11-27T07:48:41.184106Z
-
-  sampler_weights/checkpoint_1764229539.9387324.pt
-    Path: tinker://9922175e-533d-52e3-a433-5e0fa645462c:train:0/sampler_weights/checkpoint_1764229539.9387324.pt
-    Type: sampler
-    Size: 168.1 MB
-    Public: false
-    Created: 2025-11-27T07:45:42.982073Z
-
-  weights/demo-checkpoint-1764228622
-    Path: tinker://8c4cfd17-df85-5634-badf-e12068d2efc8:train:0/weights/demo-checkpoint-1764228622
-    Type: training
-    Size: 126.3 MB
-    Public: false
-    Created: 2025-11-27T07:30:37.300885Z
-
-  sampler_weights/checkpoint_1764215477.2502818.pt
-    Path: tinker://daba87c6-4e86-5797-81d5-efe038b44524:train:0/sampler_weights/checkpoint_1764215477.2502818.pt
-    Type: sampler
-    Size: 84.1 MB
-    Public: false
-    Created: 2025-11-27T03:51:18.921217Z
+    Created: 2025-11-27 18:11:28.567500Z
 
 
 --- All User Checkpoints (paginated) ---
-Fetched 50 (93 total)
+Fetched 50 (100 total)
+  sampler_weights/sampler-weights
+    Path: tinker://18985ee5-4dd4-556a-96ef-ed73df10b976:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-12-05 00:48:20.055773Z
+
+  weights/recovery-live-2
+    Path: tinker://966d6790-9fe3-54dd-9dbe-4f61f6840bde:train:1/weights/recovery-live-2
+    Type: training
+    Size: 252.2 MB
+    Public: false
+    Created: 2025-12-04 23:17:00.814946Z
+
+  weights/recovery-live-1
+    Path: tinker://966d6790-9fe3-54dd-9dbe-4f61f6840bde:train:0/weights/recovery-live-1
+    Type: training
+    Size: 252.2 MB
+    Public: false
+    Created: 2025-12-04 23:16:35.106294Z
+
+  weights/recovery-live-2
+    Path: tinker://098378b0-5cdd-5c5f-b566-4d3905bddeee:train:1/weights/recovery-live-2
+    Type: training
+    Size: 252.2 MB
+    Public: false
+    Created: 2025-12-04 23:14:45.325072Z
+
+  weights/recovery-live-1
+    Path: tinker://098378b0-5cdd-5c5f-b566-4d3905bddeee:train:0/weights/recovery-live-1
+    Type: training
+    Size: 252.2 MB
+    Public: false
+    Created: 2025-12-04 23:14:25.359194Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://c0fe4b75-d2a6-5dfc-9b5f-bd243c4b8690:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-12-04 03:27:53.190382Z
+
+  sampler_weights/sampler-weights
+    Path: tinker://5fa8e8b9-6eaa-57c8-bc2b-7a89c2783243:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    Size: 168.1 MB
+    Public: false
+    Created: 2025-12-04 02:31:39.923898Z
+
   weights/async_demo_checkpoint
     Path: tinker://9677c040-d833-5325-8a9d-4c3a1f816328:train:0/weights/async_demo_checkpoint
     Type: training
     Size: 153.0 MB
     Public: false
-    Created: 2025-12-03T20:35:36.090807Z
+    Created: 2025-12-03 20:35:36.090807Z
 
   sampler_weights/sampler-weights
     Path: tinker://39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-12-03T20:32:09.677474Z
+    Created: 2025-12-03 20:32:09.677474Z
 
   weights/async_demo_checkpoint
     Path: tinker://170beeb9-9fa9-5011-b896-ba0616c7e94d:train:0/weights/async_demo_checkpoint
     Type: training
     Size: 153.0 MB
     Public: false
-    Created: 2025-11-28T02:43:17.958810Z
+    Created: 2025-11-28 02:43:17.958810Z
 
   sampler_weights/sampler-weights
     Path: tinker://50398661-7150-5042-9891-5611cb535340:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-28T02:40:09.047757Z
+    Created: 2025-11-28 02:40:09.047757Z
 
   sampler_weights/sampler-weights
     Path: tinker://a5d5031a-72a5-5180-8417-e32c5c0a9598:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-28T02:32:20.546936Z
+    Created: 2025-11-28 02:32:20.546936Z
 
   weights/async_demo_checkpoint
     Path: tinker://47f7276e-454e-5dde-9188-1c1e3c3536b5:train:0/weights/async_demo_checkpoint
     Type: training
     Size: 153.0 MB
     Public: false
-    Created: 2025-11-28T02:31:18.060463Z
+    Created: 2025-11-28 02:31:18.060463Z
 
   sampler_weights/async_demo_weights
     Path: tinker://a7517405-527c-571e-9fe2-c94e6b3cf548:train:0/sampler_weights/async_demo_weights
     Type: sampler
     Size: 51.0 MB
     Public: false
-    Created: 2025-11-28T02:30:25.465448Z
+    Created: 2025-11-28 02:30:25.465448Z
 
   sampler_weights/async_demo_weights
     Path: tinker://73c466d3-b063-56a2-86d0-d035a1392c23:train:0/sampler_weights/async_demo_weights
     Type: sampler
     Size: 51.0 MB
     Public: false
-    Created: 2025-11-28T02:29:56.731159Z
+    Created: 2025-11-28 02:29:56.731159Z
 
   sampler_weights/sampler-weights
     Path: tinker://53f0586d-3f98-58e5-b04e-297ea717378e:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-27T18:58:37.961274Z
+    Created: 2025-11-27 18:58:37.961274Z
 
   sampler_weights/sampler-weights
     Path: tinker://f4521144-ef58-53ec-950c-29260c9b1a41:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-27T18:44:47.285732Z
+    Created: 2025-11-27 18:44:47.285732Z
 
   sampler_weights/sampler-weights
     Path: tinker://1ec257a9-28bf-559c-aa73-e54a09cce5bd:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-27T18:37:23.205082Z
+    Created: 2025-11-27 18:37:23.205082Z
 
   sampler_weights/sampler-weights
     Path: tinker://046c91d9-d9f4-5dd6-ac42-0135bbde947e:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-27T18:15:50.316094Z
+    Created: 2025-11-27 18:15:50.316094Z
 
   sampler_weights/sampler-weights
     Path: tinker://fdf7af94-bcce-5bf7-847b-a159e8bfb025:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-27T18:11:28.567500Z
+    Created: 2025-11-27 18:11:28.567500Z
 
   sampler_weights/sampler-weights
     Path: tinker://8eba0a5a-0dcf-57f3-9d0d-65ec6ef22a1f:train:0/sampler_weights/sampler-weights
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-27T17:53:03.197669Z
+    Created: 2025-11-27 17:53:03.197669Z
 
   sampler_weights/checkpoint_1764230891.2048833.pt
     Path: tinker://fa0ecefc-83b2-5e26-a2a9-aee483b913ba:train:0/sampler_weights/checkpoint_1764230891.2048833.pt
     Type: sampler
     Size: 5.77 GB
     Public: false
-    Created: 2025-11-27T08:09:13.441453Z
+    Created: 2025-11-27 08:09:13.441453Z
 
   sampler_weights/checkpoint_1764230289.3815918.pt
     Path: tinker://bc33563e-6730-5cbe-9a25-43e11dbe5095:train:0/sampler_weights/checkpoint_1764230289.3815918.pt
     Type: sampler
     Size: 5.77 GB
     Public: false
-    Created: 2025-11-27T07:59:06.047243Z
+    Created: 2025-11-27 07:59:06.047243Z
 
   sampler_weights/checkpoint_1764229717.8670213.pt
     Path: tinker://bfc7c5e5-0b90-55a1-8c97-fc8bdac649c9:train:0/sampler_weights/checkpoint_1764229717.8670213.pt
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-27T07:48:41.184106Z
+    Created: 2025-11-27 07:48:41.184106Z
 
   sampler_weights/checkpoint_1764229539.9387324.pt
     Path: tinker://9922175e-533d-52e3-a433-5e0fa645462c:train:0/sampler_weights/checkpoint_1764229539.9387324.pt
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-27T07:45:42.982073Z
+    Created: 2025-11-27 07:45:42.982073Z
 
   weights/demo-checkpoint-1764228622
     Path: tinker://8c4cfd17-df85-5634-badf-e12068d2efc8:train:0/weights/demo-checkpoint-1764228622
     Type: training
     Size: 126.3 MB
     Public: false
-    Created: 2025-11-27T07:30:37.300885Z
+    Created: 2025-11-27 07:30:37.300885Z
 
   sampler_weights/checkpoint_1764215477.2502818.pt
     Path: tinker://daba87c6-4e86-5797-81d5-efe038b44524:train:0/sampler_weights/checkpoint_1764215477.2502818.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-27T03:51:18.921217Z
+    Created: 2025-11-27 03:51:18.921217Z
 
   sampler_weights/checkpoint_1764127354.6624672.pt
     Path: tinker://d0fde479-adea-5e5a-9974-1196f01fbb82:train:0/sampler_weights/checkpoint_1764127354.6624672.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-26T03:22:37.215881Z
+    Created: 2025-11-26 03:22:37.215881Z
 
   sampler_weights/checkpoint_1764127169.5448663.pt
     Path: tinker://64c07d46-5af8-5290-b146-8b3b72fcd412:train:0/sampler_weights/checkpoint_1764127169.5448663.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-26T03:19:31.522096Z
+    Created: 2025-11-26 03:19:31.522096Z
 
   sampler_weights/checkpoint_1764126259.022441.pt
     Path: tinker://8ffd2ac2-df28-5c6d-959f-ca1f3b993f38:train:0/sampler_weights/checkpoint_1764126259.022441.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-26T03:04:20.853521Z
+    Created: 2025-11-26 03:04:20.853521Z
 
   sampler_weights/eval-checkpoint
     Path: tinker://1a518dcd-98f2-5dbb-8ce1-97659577228e:train:0/sampler_weights/eval-checkpoint
     Type: sampler
     Size: 12.8 MB
     Public: false
-    Created: 2025-11-23T23:43:55.884275Z
+    Created: 2025-11-23 23:43:55.884275Z
 
   sampler_weights/eval-checkpoint
     Path: tinker://4f34e47f-b6c1-5acd-9939-2e87cfd516ac:train:0/sampler_weights/eval-checkpoint
     Type: sampler
     Size: 12.8 MB
     Public: false
-    Created: 2025-11-23T23:43:13.608804Z
+    Created: 2025-11-23 23:43:13.608804Z
 
   sampler_weights/eval-checkpoint
     Path: tinker://4e5865b6-dc04-576a-9776-98935107b89a:train:0/sampler_weights/eval-checkpoint
     Type: sampler
     Size: 12.8 MB
     Public: false
-    Created: 2025-11-23T23:42:41.563024Z
+    Created: 2025-11-23 23:42:41.563024Z
 
   sampler_weights/eval-checkpoint
     Path: tinker://79772ba6-f047-5446-b82f-3467b5cb36c7:train:0/sampler_weights/eval-checkpoint
     Type: sampler
     Size: 12.8 MB
     Public: false
-    Created: 2025-11-23T23:41:53.766834Z
+    Created: 2025-11-23 23:41:53.766834Z
 
   sampler_weights/eval-checkpoint
     Path: tinker://c8874248-0e9b-5aba-9724-82c52ee91ec1:train:0/sampler_weights/eval-checkpoint
     Type: sampler
     Size: 12.8 MB
     Public: false
-    Created: 2025-11-23T23:41:01.481661Z
+    Created: 2025-11-23 23:41:01.481661Z
 
   sampler_weights/eval-checkpoint
     Path: tinker://c9ad0180-7655-50c2-a957-6fd241e7103d:train:0/sampler_weights/eval-checkpoint
     Type: sampler
     Size: 12.8 MB
     Public: false
-    Created: 2025-11-23T23:40:13.515136Z
+    Created: 2025-11-23 23:40:13.515136Z
 
   sampler_weights/eval-checkpoint
     Path: tinker://bbccf257-c3fd-5c91-a2d1-73fbbb8fd00e:train:0/sampler_weights/eval-checkpoint
     Type: sampler
     Size: 12.8 MB
     Public: false
-    Created: 2025-11-23T23:38:23.104113Z
+    Created: 2025-11-23 23:38:23.104113Z
 
   sampler_weights/eval-checkpoint
     Path: tinker://b9102c50-fbff-5f74-a06b-a3dee4d14131:train:0/sampler_weights/eval-checkpoint
     Type: sampler
     Size: 12.8 MB
     Public: false
-    Created: 2025-11-23T23:37:12.980263Z
+    Created: 2025-11-23 23:37:12.980263Z
 
   sampler_weights/eval-checkpoint
     Path: tinker://9e55e0f8-63df-5ea0-aa16-8621bdb9109c:train:0/sampler_weights/eval-checkpoint
     Type: sampler
     Size: 12.8 MB
     Public: false
-    Created: 2025-11-23T23:33:52.872673Z
+    Created: 2025-11-23 23:33:52.872673Z
 
   sampler_weights/checkpoint_1763771890.680426.pt
     Path: tinker://0478a1ab-95af-5eae-bd70-d3d3b441c021:train:0/sampler_weights/checkpoint_1763771890.680426.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-22T00:38:16.947541Z
+    Created: 2025-11-22 00:38:16.947541Z
 
   sampler_weights/checkpoint_1763771611.2195318.pt
     Path: tinker://f620a60b-7b30-5e7e-bc11-da12b0fb0765:train:0/sampler_weights/checkpoint_1763771611.2195318.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-22T00:33:35.488576Z
+    Created: 2025-11-22 00:33:35.488576Z
 
   sampler_weights/checkpoint_1763771585.3579679.pt
     Path: tinker://0ad21c1d-0eeb-5518-a6c8-1c497af7c5d5:train:0/sampler_weights/checkpoint_1763771585.3579679.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-22T00:33:06.824152Z
+    Created: 2025-11-22 00:33:06.824152Z
 
   sampler_weights/checkpoint_1763769127.646869.pt
     Path: tinker://5a3335fe-65fe-5afa-a6b4-d1294887e5bc:train:0/sampler_weights/checkpoint_1763769127.646869.pt
     Type: sampler
     Size: 42.1 MB
     Public: false
-    Created: 2025-11-21T23:52:11.116436Z
+    Created: 2025-11-21 23:52:11.116436Z
 
   sampler_weights/checkpoint_1763768362.9477212.pt
     Path: tinker://bf88076d-f29e-5366-9ab6-80e0c5f2995a:train:0/sampler_weights/checkpoint_1763768362.9477212.pt
     Type: sampler
     Size: 42.1 MB
     Public: false
-    Created: 2025-11-21T23:39:24.802998Z
+    Created: 2025-11-21 23:39:24.802998Z
 
   sampler_weights/checkpoint_1763767972.2357357.pt
     Path: tinker://f9bc9e13-1901-5818-99bd-b2b01ee8bb5b:train:0/sampler_weights/checkpoint_1763767972.2357357.pt
     Type: sampler
     Size: 42.1 MB
     Public: false
-    Created: 2025-11-21T23:32:53.740553Z
+    Created: 2025-11-21 23:32:53.740553Z
 
   sampler_weights/checkpoint_1763767641.9865937.pt
     Path: tinker://d32bb9c6-04c0-5cd1-9793-745e7043e1dc:train:0/sampler_weights/checkpoint_1763767641.9865937.pt
     Type: sampler
     Size: 42.1 MB
     Public: false
-    Created: 2025-11-21T23:27:23.422596Z
+    Created: 2025-11-21 23:27:23.422596Z
 
   sampler_weights/checkpoint_1763766626.1265566.pt
     Path: tinker://e5dfefc6-65fc-57bb-9a90-1bb3ef61f003:train:0/sampler_weights/checkpoint_1763766626.1265566.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-21T23:10:27.549888Z
+    Created: 2025-11-21 23:10:27.549888Z
 
   sampler_weights/checkpoint_1763765822.8686664.pt
     Path: tinker://96e6f7ba-426a-5854-ae78-0ce919ac48ec:train:0/sampler_weights/checkpoint_1763765822.8686664.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-21T22:57:05.276026Z
+    Created: 2025-11-21 22:57:05.276026Z
 
   sampler_weights/checkpoint_1763674749.0143857.pt
     Path: tinker://c3ebbb74-61f2-5be9-9f6b-aa8c70d60cb2:train:0/sampler_weights/checkpoint_1763674749.0143857.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-20T21:39:11.188934Z
+    Created: 2025-11-20 21:39:11.188934Z
 
   sampler_weights/checkpoint_1763674591.9668543.pt
     Path: tinker://3784f9f8-0ac3-5596-9b11-0b2c154954e1:train:0/sampler_weights/checkpoint_1763674591.9668543.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-20T21:36:33.769394Z
+    Created: 2025-11-20 21:36:33.769394Z
 
+Fetched 50 (100 total)
   sampler_weights/checkpoint_1763674539.0671499.pt
     Path: tinker://492f6734-8b07-5c76-82d9-23501232c523:train:0/sampler_weights/checkpoint_1763674539.0671499.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-20T21:35:41.390717Z
+    Created: 2025-11-20 21:35:41.390717Z
 
   sampler_weights/checkpoint_1763674470.2715266.pt
     Path: tinker://ca2be487-be03-5b7e-aead-b9baab3c2aa0:train:0/sampler_weights/checkpoint_1763674470.2715266.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-20T21:34:32.076428Z
+    Created: 2025-11-20 21:34:32.076428Z
 
   sampler_weights/checkpoint_1763674428.9740841.pt
     Path: tinker://a886468c-bc20-5257-ad57-abaf0c4c6b7b:train:0/sampler_weights/checkpoint_1763674428.9740841.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-20T21:33:51.074219Z
+    Created: 2025-11-20 21:33:51.074219Z
 
   sampler_weights/checkpoint_1763674248.9320633.pt
     Path: tinker://7921b3ab-d30f-5c76-a574-376e8cd3c12f:train:0/sampler_weights/checkpoint_1763674248.9320633.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-20T21:30:50.657760Z
+    Created: 2025-11-20 21:30:50.657760Z
 
   sampler_weights/checkpoint_1763674208.8772275.pt
     Path: tinker://457e528f-d601-565e-b1a6-5c7914fcc3f2:train:0/sampler_weights/checkpoint_1763674208.8772275.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-20T21:30:10.982809Z
+    Created: 2025-11-20 21:30:10.982809Z
 
   sampler_weights/checkpoint_1763674139.0204463.pt
     Path: tinker://eff1740d-a0bb-5d01-a42c-94e95342bb82:train:0/sampler_weights/checkpoint_1763674139.0204463.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-20T21:29:00.808793Z
+    Created: 2025-11-20 21:29:00.808793Z
 
   sampler_weights/checkpoint_1763674099.0486119.pt
     Path: tinker://8cdb2b79-83c0-5c53-a025-1e7a83d2239f:train:0/sampler_weights/checkpoint_1763674099.0486119.pt
     Type: sampler
     Size: 84.1 MB
     Public: false
-    Created: 2025-11-20T21:28:20.577549Z
+    Created: 2025-11-20 21:28:20.577549Z
 
-Fetched 43 (93 total)
   sampler_weights/claim-extractor-scifact-20251119T041117
     Path: tinker://554bb03e-1d71-58cc-824d-1625d267f8be:train:0/sampler_weights/claim-extractor-scifact-20251119T041117
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-19T04:25:05.755741Z
+    Created: 2025-11-19 04:25:05.755741Z
 
   sampler_weights/claim-extractor-scifact-micro-20251119T023422
     Path: tinker://b484da35-1b57-5519-8e20-74ac4ec6776f:train:0/sampler_weights/claim-extractor-scifact-micro-20251119T023422
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-19T02:34:46.769328Z
+    Created: 2025-11-19 02:34:46.769328Z
 
   sampler_weights/claim-extractor-scifact-micro-20251119T000437
     Path: tinker://d459b31c-3f66-59dd-8fbc-500f9570b022:train:0/sampler_weights/claim-extractor-scifact-micro-20251119T000437
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-19T00:04:42.381541Z
+    Created: 2025-11-19 00:04:42.381541Z
 
   sampler_weights/claim-extractor-scifact-20251118T220454
     Path: tinker://8ff091db-2061-5279-ac9d-1dbf50acb114:train:0/sampler_weights/claim-extractor-scifact-20251118T220454
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-18T22:22:12.903958Z
+    Created: 2025-11-18 22:22:12.903958Z
 
   sampler_weights/claim-extractor-scifact-20251118T173307
     Path: tinker://ad9b0497-d1d0-5338-b603-fece00234d86:train:0/sampler_weights/claim-extractor-scifact-20251118T173307
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-18T17:48:19.509993Z
+    Created: 2025-11-18 17:48:19.509993Z
 
   sampler_weights/claim-extractor-scifact-20251112T070048
     Path: tinker://c0e9f526-4398-486e-bb03-755037abd8a7/sampler_weights/claim-extractor-scifact-20251112T070048
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-12T07:07:48.144064Z
+    Created: 2025-11-12 07:07:48.144064Z
 
   sampler_weights/claim-extractor-scifact-debug-20251112T064537
     Path: tinker://4c2d7d55-723d-421c-be56-2e3e71950f73/sampler_weights/claim-extractor-scifact-debug-20251112T064537
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-12T06:46:48.975254Z
+    Created: 2025-11-12 06:46:48.975254Z
 
   sampler_weights/claim-extractor-scifact-debug-20251112T064537-step20
     Path: tinker://4c2d7d55-723d-421c-be56-2e3e71950f73/sampler_weights/claim-extractor-scifact-debug-20251112T064537-step20
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-12T06:46:20.681625Z
+    Created: 2025-11-12 06:46:20.681625Z
 
   sampler_weights/claim-extractor-scifact-debug-20251112T004313
     Path: tinker://61541b24-18f0-4e27-a698-40e979fe0fb7/sampler_weights/claim-extractor-scifact-debug-20251112T004313
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-12T00:45:01.525748Z
+    Created: 2025-11-12 00:45:01.525748Z
 
   sampler_weights/claim-extractor-scifact-debug-20251112T004313-step20
     Path: tinker://61541b24-18f0-4e27-a698-40e979fe0fb7/sampler_weights/claim-extractor-scifact-debug-20251112T004313-step20
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-12T00:44:29.092184Z
+    Created: 2025-11-12 00:44:29.092184Z
 
   sampler_weights/claim-extractor-scifact-20251111T225459
     Path: tinker://3d88c2d0-ec2e-4f37-90f6-ad8855e1f5bd/sampler_weights/claim-extractor-scifact-20251111T225459
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-11T23:04:09.346257Z
+    Created: 2025-11-11 23:04:09.346257Z
 
   sampler_weights/claim-extractor-scifact-debug-20251111T220611
     Path: tinker://12d00816-3c6a-4fbd-b792-f30f66c1f6e2/sampler_weights/claim-extractor-scifact-debug-20251111T220611
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-11T22:08:09.959762Z
+    Created: 2025-11-11 22:08:09.959762Z
 
   sampler_weights/claim-extractor-scifact-debug-20251111T220611-step20
     Path: tinker://12d00816-3c6a-4fbd-b792-f30f66c1f6e2/sampler_weights/claim-extractor-scifact-debug-20251111T220611-step20
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-11T22:07:05.943612Z
+    Created: 2025-11-11 22:07:05.943612Z
 
   sampler_weights/claim-extractor-scifact-debug-20251111T213557
     Path: tinker://89aa268e-9532-4e5f-97aa-c228d7f86cbf/sampler_weights/claim-extractor-scifact-debug-20251111T213557
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-11T21:37:56.986377Z
+    Created: 2025-11-11 21:37:56.986377Z
 
   sampler_weights/claim-extractor-scifact-debug-20251111T213557-step20
     Path: tinker://89aa268e-9532-4e5f-97aa-c228d7f86cbf/sampler_weights/claim-extractor-scifact-debug-20251111T213557-step20
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-11T21:37:26.498233Z
+    Created: 2025-11-11 21:37:26.498233Z
 
   sampler_weights/claim-extractor-scifact-debug
     Path: tinker://7a4a9939-61ec-4982-9240-ecf40f7de451/sampler_weights/claim-extractor-scifact-debug
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-11T21:25:27.074834Z
+    Created: 2025-11-11 21:25:27.074834Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://7808d627-6a6f-4d38-af06-7d7e17662504/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-11T21:00:12.255132Z
+    Created: 2025-11-11 21:00:12.255132Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://9314e28c-6cf6-4b62-9eed-21b24384b2ee/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T19:38:29.156765Z
+    Created: 2025-11-09 19:38:29.156765Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://05d83bde-111d-44da-9f3e-80c63053f5dc/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T19:14:46.853453Z
+    Created: 2025-11-09 19:14:46.853453Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://216c1da7-a40e-481e-9ff1-91664d32df6f/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T19:07:06.230260Z
+    Created: 2025-11-09 19:07:06.230260Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://32e517fc-8980-4244-970a-77598702bb7b/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T18:37:33.121097Z
+    Created: 2025-11-09 18:37:33.121097Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://75f238d9-788a-4b15-ad11-4a27c3b6f2fe/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T18:35:13.649385Z
+    Created: 2025-11-09 18:35:13.649385Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://ae5c9b07-d765-4fb8-aa74-fb4839781eff/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T18:28:36.080161Z
+    Created: 2025-11-09 18:28:36.080161Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://314ca5b7-d1e8-48e7-8e1a-af899f831218/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T18:20:51.042305Z
+    Created: 2025-11-09 18:20:51.042305Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://4ca82d74-9e6d-486c-baf4-610f875bbff6/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T17:37:28.524613Z
+    Created: 2025-11-09 17:37:28.524613Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://952206f4-ceef-43ff-8ee4-f0dd16557955/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T17:34:16.304290Z
+    Created: 2025-11-09 17:34:16.304290Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://7a018085-7ea8-46a2-b070-2e6f64ecc03f/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T17:24:42.000819Z
+    Created: 2025-11-09 17:24:42.000819Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://e2261cbf-571b-44ed-ab1c-fb30bad8cb23/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T17:20:57.823861Z
+    Created: 2025-11-09 17:20:57.823861Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://672ddb08-c00e-40f9-9cd6-75d96d8f3c88/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T17:19:24.871822Z
+    Created: 2025-11-09 17:19:24.871822Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://f8ecb02f-d6a2-4f94-a6e8-90d0e6e0af6e/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T17:02:26.826126Z
+    Created: 2025-11-09 17:02:26.826126Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://f97b057b-a5d4-48d0-abee-288d598b959a/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T17:01:49.882479Z
+    Created: 2025-11-09 17:01:49.882479Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://83934987-0c45-4b62-8f87-b3098edf8bb0/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T16:31:19.498985Z
+    Created: 2025-11-09 16:31:19.498985Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://f781270c-abc7-4eb3-b40d-2b30ba6351d6/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T16:29:02.384505Z
+    Created: 2025-11-09 16:29:02.384505Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://a39cba93-8ae8-4134-b440-8c4e81e07929/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T16:15:45.231432Z
+    Created: 2025-11-09 16:15:45.231432Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://7f1f72c3-7040-4b11-98b6-c1f0e545b7e7/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T16:05:38.226751Z
+    Created: 2025-11-09 16:05:38.226751Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://be882e1a-3bee-42b3-b7c5-e9b41c653dc1/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T15:56:49.115534Z
+    Created: 2025-11-09 15:56:49.115534Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://e123b112-5a4f-4957-bc92-6169b580f6fe/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T15:46:48.628154Z
+    Created: 2025-11-09 15:46:48.628154Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://fb150365-dc79-4166-812b-a941cb35123f/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T15:27:30.872534Z
+    Created: 2025-11-09 15:27:30.872534Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://13fd1023-1433-4b22-bb8d-f2dd78274fc7/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T14:11:49.407842Z
+    Created: 2025-11-09 14:11:49.407842Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://8f51c170-e69b-44a5-98a1-241bc4a8ebfd/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T14:08:34.714697Z
+    Created: 2025-11-09 14:08:34.714697Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://6565b2a7-4123-4325-bb1c-f1dd4b51f4f0/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T13:58:24.829491Z
+    Created: 2025-11-09 13:58:24.829491Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://801ac30a-78b0-4faa-850d-1196f63c38cf/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T06:18:13.847517Z
+    Created: 2025-11-09 06:18:13.847517Z
 
   sampler_weights/claim-extractor-scifact
     Path: tinker://702d77bf-7bd3-474d-817a-fbf90575eb6e/sampler_weights/claim-extractor-scifact
     Type: sampler
     Size: 168.1 MB
     Public: false
-    Created: 2025-11-09T06:13:22.659349Z
+    Created: 2025-11-09 06:13:22.659349Z
 
 
 === Example Complete ===
@@ -1826,150 +1961,150 @@ Fetched 43 (93 total)
 --- Training Runs ---
 Found 10 training runs:
 
-  bef237d2-e7dc-54ae-8055-55b143264cbd:train:0
+  68d03eaa-9b06-5863-95bc-c3acdb3545eb:train:0
     Base Model: meta-llama/Llama-3.1-8B
     Is LoRA: true, Rank: 16
     Corrupted: false
     Last Checkpoint: none
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  046c901d-5e46-5982-a80d-32fcc2acfb9f:train:0
+  def55c59-9dbc-5833-aa7b-b763dbb38c75:train:0
     Base Model: meta-llama/Llama-3.1-8B
     Is LoRA: true, Rank: 16
     Corrupted: false
     Last Checkpoint: none
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  e461bab9-a627-5c7b-889b-26b744d46df3:train:0
+  4967ce58-2090-5211-af93-6c0acabbb477:train:0
     Base Model: meta-llama/Llama-3.1-8B
     Is LoRA: true, Rank: 16
     Corrupted: false
     Last Checkpoint: none
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0
+  18985ee5-4dd4-556a-96ef-ed73df10b976:train:0
     Base Model: meta-llama/Llama-3.1-8B
     Is LoRA: true, Rank: 16
     Corrupted: false
     Last Checkpoint: none
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  0ba9f266-961a-5c66-8bed-a5103ed577bd:train:0
+  966d6790-9fe3-54dd-9dbe-4f61f6840bde:train:1
     Base Model: meta-llama/Llama-3.1-8B
     Is LoRA: true, Rank: 8
     Corrupted: false
-    Last Checkpoint: none
+    Last Checkpoint: tinker://966d6790-9fe3-54dd-9dbe-4f61f6840bde:train:1/weights/recovery-live-2
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  f9ee4b55-c2b5-59da-9c4a-e15b50d13845:train:0
+  966d6790-9fe3-54dd-9dbe-4f61f6840bde:train:0
     Base Model: meta-llama/Llama-3.1-8B
     Is LoRA: true, Rank: 8
     Corrupted: false
-    Last Checkpoint: none
+    Last Checkpoint: tinker://966d6790-9fe3-54dd-9dbe-4f61f6840bde:train:0/weights/recovery-live-1
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  598b870d-dc81-5be9-9581-d4c3bffb44be:train:0
-    Base Model: meta-llama/Llama-3.2-1B
-    Is LoRA: true, Rank: 32
+  098378b0-5cdd-5c5f-b566-4d3905bddeee:train:1
+    Base Model: meta-llama/Llama-3.1-8B
+    Is LoRA: true, Rank: 8
+    Corrupted: false
+    Last Checkpoint: tinker://098378b0-5cdd-5c5f-b566-4d3905bddeee:train:1/weights/recovery-live-2
+    Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
+
+  098378b0-5cdd-5c5f-b566-4d3905bddeee:train:0
+    Base Model: meta-llama/Llama-3.1-8B
+    Is LoRA: true, Rank: 8
+    Corrupted: false
+    Last Checkpoint: tinker://098378b0-5cdd-5c5f-b566-4d3905bddeee:train:0/weights/recovery-live-1
+    Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
+
+  6ec7d725-f0b6-59f5-8bf8-029ea7b36459:train:0
+    Base Model: meta-llama/Llama-3.1-8B
+    Is LoRA: true, Rank: 16
     Corrupted: false
     Last Checkpoint: none
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
-  cd663bca-7892-55cb-be4e-c7b646d850b2:train:0
-    Base Model: meta-llama/Llama-3.2-1B
-    Is LoRA: true, Rank: 32
-    Corrupted: false
-    Last Checkpoint: none
-    Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
-
-  a847bd03-868b-5c68-b726-5a8bd072625a:train:0
-    Base Model: meta-llama/Llama-3.2-1B
-    Is LoRA: true, Rank: 32
-    Corrupted: false
-    Last Checkpoint: none
-    Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
-
-  7c78675f-2d36-5aca-a0ec-bef786762a91:train:0
-    Base Model: meta-llama/Llama-3.2-1B
-    Is LoRA: true, Rank: 32
+  3b373960-23fc-5626-a491-73ddccf2c465:train:0
+    Base Model: meta-llama/Llama-3.1-8B
+    Is LoRA: true, Rank: 16
     Corrupted: false
     Last Checkpoint: none
     Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
 
---- Training Run Details: bef237d2-e7dc-54ae-8055-55b143264cbd:train:0 ---
-  ID: bef237d2-e7dc-54ae-8055-55b143264cbd:train:0
+--- Training Run Details: 68d03eaa-9b06-5863-95bc-c3acdb3545eb:train:0 ---
+  ID: 68d03eaa-9b06-5863-95bc-c3acdb3545eb:train:0
   Base Model: meta-llama/Llama-3.1-8B
   Is LoRA: true
   LoRA Rank: 16
   Corrupted: false
   Last Checkpoint: none
   Last Sampler Checkpoint: none
-  Last Request: 2025-12-03 20:32:55.109826Z
+  Last Request: 2025-12-05 00:49:00.929754Z
   Owner: tml:organization_user:274df404-aecf-449f-aae2-6a9ba92a62b5
 
 --- User Checkpoints ---
 Found 10 checkpoint(s):
 
+  tinker://18985ee5-4dd4-556a-96ef-ed73df10b976:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    ID: sampler_weights/sampler-weights
+    Size: 168.14 MB
+    Time: 2025-12-05 00:48:20.055773Z
+
+  tinker://966d6790-9fe3-54dd-9dbe-4f61f6840bde:train:1/weights/recovery-live-2
+    Type: training
+    ID: weights/recovery-live-2
+    Size: 252.22 MB
+    Time: 2025-12-04 23:17:00.814946Z
+
+  tinker://966d6790-9fe3-54dd-9dbe-4f61f6840bde:train:0/weights/recovery-live-1
+    Type: training
+    ID: weights/recovery-live-1
+    Size: 252.22 MB
+    Time: 2025-12-04 23:16:35.106294Z
+
+  tinker://098378b0-5cdd-5c5f-b566-4d3905bddeee:train:1/weights/recovery-live-2
+    Type: training
+    ID: weights/recovery-live-2
+    Size: 252.22 MB
+    Time: 2025-12-04 23:14:45.325072Z
+
+  tinker://098378b0-5cdd-5c5f-b566-4d3905bddeee:train:0/weights/recovery-live-1
+    Type: training
+    ID: weights/recovery-live-1
+    Size: 252.22 MB
+    Time: 2025-12-04 23:14:25.359194Z
+
+  tinker://c0fe4b75-d2a6-5dfc-9b5f-bd243c4b8690:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    ID: sampler_weights/sampler-weights
+    Size: 168.14 MB
+    Time: 2025-12-04 03:27:53.190382Z
+
+  tinker://5fa8e8b9-6eaa-57c8-bc2b-7a89c2783243:train:0/sampler_weights/sampler-weights
+    Type: sampler
+    ID: sampler_weights/sampler-weights
+    Size: 168.14 MB
+    Time: 2025-12-04 02:31:39.923898Z
+
+  tinker://9677c040-d833-5325-8a9d-4c3a1f816328:train:0/weights/async_demo_checkpoint
+    Type: training
+    ID: weights/async_demo_checkpoint
+    Size: 152.98 MB
+    Time: 2025-12-03 20:35:36.090807Z
+
   tinker://39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0/sampler_weights/sampler-weights
     Type: sampler
     ID: sampler_weights/sampler-weights
     Size: 84.1 MB
-    Time: 2025-12-03T20:32:09.677474Z
+    Time: 2025-12-03 20:32:09.677474Z
 
   tinker://170beeb9-9fa9-5011-b896-ba0616c7e94d:train:0/weights/async_demo_checkpoint
     Type: training
     ID: weights/async_demo_checkpoint
     Size: 152.98 MB
-    Time: 2025-11-28T02:43:17.958810Z
-
-  tinker://50398661-7150-5042-9891-5611cb535340:train:0/sampler_weights/sampler-weights
-    Type: sampler
-    ID: sampler_weights/sampler-weights
-    Size: 84.1 MB
-    Time: 2025-11-28T02:40:09.047757Z
-
-  tinker://a5d5031a-72a5-5180-8417-e32c5c0a9598:train:0/sampler_weights/sampler-weights
-    Type: sampler
-    ID: sampler_weights/sampler-weights
-    Size: 84.1 MB
-    Time: 2025-11-28T02:32:20.546936Z
-
-  tinker://47f7276e-454e-5dde-9188-1c1e3c3536b5:train:0/weights/async_demo_checkpoint
-    Type: training
-    ID: weights/async_demo_checkpoint
-    Size: 152.98 MB
-    Time: 2025-11-28T02:31:18.060463Z
-
-  tinker://a7517405-527c-571e-9fe2-c94e6b3cf548:train:0/sampler_weights/async_demo_weights
-    Type: sampler
-    ID: sampler_weights/async_demo_weights
-    Size: 50.98 MB
-    Time: 2025-11-28T02:30:25.465448Z
-
-  tinker://73c466d3-b063-56a2-86d0-d035a1392c23:train:0/sampler_weights/async_demo_weights
-    Type: sampler
-    ID: sampler_weights/async_demo_weights
-    Size: 50.98 MB
-    Time: 2025-11-28T02:29:56.731159Z
-
-  tinker://53f0586d-3f98-58e5-b04e-297ea717378e:train:0/sampler_weights/sampler-weights
-    Type: sampler
-    ID: sampler_weights/sampler-weights
-    Size: 84.1 MB
-    Time: 2025-11-27T18:58:37.961274Z
-
-  tinker://f4521144-ef58-53ec-950c-29260c9b1a41:train:0/sampler_weights/sampler-weights
-    Type: sampler
-    ID: sampler_weights/sampler-weights
-    Size: 84.1 MB
-    Time: 2025-11-27T18:44:47.285732Z
-
-  tinker://1ec257a9-28bf-559c-aa73-e54a09cce5bd:train:0/sampler_weights/sampler-weights
-    Type: sampler
-    ID: sampler_weights/sampler-weights
-    Size: 84.1 MB
-    Time: 2025-11-27T18:37:23.205082Z
+    Time: 2025-11-28 02:43:17.958810Z
 
 
 === Example Complete ===
@@ -1978,19 +2113,19 @@ Found 10 checkpoint(s):
 === Tinkex Checkpoint Download Example ===
 
 TINKER_CHECKPOINT_PATH not provided; downloading first available checkpoint:
-  tinker://39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0/sampler_weights/sampler-weights
+  tinker://18985ee5-4dd4-556a-96ef-ed73df10b976:train:0/sampler_weights/sampler-weights
 
-Downloading checkpoint: tinker://39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0/sampler_weights/sampler-weights
+Downloading checkpoint: tinker://18985ee5-4dd4-556a-96ef-ed73df10b976:train:0/sampler_weights/sampler-weights
 Output directory: /tmp/tinkex_checkpoints
 
-Progress: 100.0% (84.1 MB / 84.1 MB)
+Progress: 100.0% (168.1 MB / 168.1 MB)
 
 Download complete!
-Extracted to: /tmp/tinkex_checkpoints/39b4a59d-e0e4-553d-87d1-2e8ae9db0bd4:train:0_sampler_weights_sampler-weights
+Extracted to: /tmp/tinkex_checkpoints/18985ee5-4dd4-556a-96ef-ed73df10b976:train:0_sampler_weights_sampler-weights
 
 Extracted files (3):
   • adapter_config.json (736 B)
-  • adapter_model.safetensors (84.1 MB)
+  • adapter_model.safetensors (168.1 MB)
   • checkpoint_complete (0 B)
 
 === Example Complete ===
@@ -2000,17 +2135,17 @@ Extracted files (3):
 
 Creating sampling client asynchronously...
 Task created, awaiting result...
-✓ Sampling client created: #PID<0.252.0>
+✓ Sampling client created: #PID<0.321.0>
 
 Creating LoRA training client asynchronously...
 Task created, awaiting result...
-✓ LoRA training client created: #PID<0.260.0>
+✓ LoRA training client created: #PID<0.326.0>
 
 Saving training state to create checkpoint...
-✓ Saved state to: tinker://9677c040-d833-5325-8a9d-4c3a1f816328:train:0/weights/async_demo_checkpoint
+✓ Saved state to: tinker://0927bbd5-890d-5599-9856-69cce21db777:train:0/weights/async_demo_checkpoint
 
 Restoring training client from checkpoint asynchronously...
-✓ Training client restored: #PID<0.278.0>
+✓ Training client restored: #PID<0.341.0>
 
 === Example Complete ===
 
@@ -2018,35 +2153,34 @@ Restoring training client from checkpoint asynchronously...
 Running CLI with args: run --base-model meta-llama/Llama-3.1-8B --prompt Hello from the CLI runner --max-tokens 64 --temperature 0.7 --num-samples 1 --api-key tml-mIf5gSt5tyewbDuXjwgeTkbdcgCZUpntGFyVBfKvmfGpb2FpJbfJ9tcFyYC5DXjcrAAAA
 Starting sampling...
 Sample 1:
-.
-I'm not sure if this is possible, but I'd like to be able to run tests from the CLI runner that use the test runner, which in turn uses the command runner to execute the test code.
-So, for example, I have a test runner file that looks like this:
-var testRunner = require
-stop_reason=length | avg_logprob=-1.306
+
+This is the CLI runner. It is currently in an experimental state. If you face any issues please report them on the issue tracker.
+The CLI runner is a CLI tool that runs tests using your existing configuration. This means that you can use it to run tests against a single environment, multiple environments, or use it
+stop_reason=length | avg_logprob=-1.365
 Sampling complete (1 sequences)
 sampling response: %Tinkex.Types.SampleResponse{
   sequences: [
     %Tinkex.Types.SampledSequence{
-      tokens: [627, 40, 2846, 539, 2771, 422, 420, 374, 3284, 11, 719, 358,
-       4265, 1093, 311, 387, 3025, 311, 1629, 7177, 505, 279, 40377, 23055, 430,
-       1005, 279, 1296, 23055, 11, 902, 304, 2543, 5829, 279, 3290, 23055, 311,
-       9203, 279, 1296, 2082, 627, 4516, 11, 369, 3187, ...],
-      logprobs: [-3.5795583724975586, -1.0052404403686523, -1.2745513916015625,
-       -2.8693130016326904, -0.2649388611316681, -0.8700623512268066,
-       -0.559992790222168, -0.04600697010755539, -4.418613433837891,
-       -0.4960397779941559, -0.03471290320158005, -0.28530794382095337,
-       -1.37711763381958, -0.09592393785715103, -0.015257902443408966,
-       -1.4179904460906982, -0.0015180503251031041, -2.4399164249189198e-4,
-       -0.7839916944503784, -3.9295105934143066, -1.264305830001831,
-       -0.1773315817117691, -1.5910406112670898, -1.316138744354248,
-       -1.7571544647216797, -2.5250649452209473, -0.5046882033348083,
-       -3.402918577194214, -0.47159984707832336, -2.6524651050567627,
-       -3.103660821914673, -1.989617109298706, -0.01729818433523178,
-       -0.7375035881996155, -0.14178435504436493, -3.6171159744262695,
-       -3.4245076179504395, -2.65036678314209, -1.733647346496582,
-       -0.42849284410476685, -1.1295380592346191, -2.542349100112915,
-       -0.5898256897926331, -3.905834436416626, -0.7327507734298706,
-       -1.018278956413269, ...],
+      tokens: [198, 2028, 374, 279, 40377, 23055, 13, 1102, 374, 5131, 304, 459,
+       22772, 1614, 13, 1442, 499, 3663, 904, 4819, 4587, 1934, 1124, 389, 279,
+       4360, 29431, 627, 791, 40377, 23055, 374, 264, 40377, 5507, 430, 8640,
+       7177, 1701, 701, 6484, 6683, 13, 1115, 3445, 430, 499, ...],
+      logprobs: [-1.4361234903335571, -2.479361057281494, -0.25932776927948,
+       -1.2123725414276123, -1.6413748264312744, -0.048216842114925385,
+       -1.0027695894241333, -1.3641018867492676, -1.0831636190414429,
+       -3.6615476608276367, -0.7715314626693726, -2.7191638946533203,
+       -0.4583531618118286, -0.5444151163101196, -1.1914732456207275,
+       -2.614192008972168, -0.012667667120695114, -7.911582946777344,
+       -0.2652122974395752, -0.31163638830184937, -2.521589517593384,
+       -0.7173861861228943, -0.05865137651562691, -1.2138450145721436,
+       -0.5347287654876709, -0.8996114730834961, -0.011777156963944435,
+       -1.3762850761413574, -0.7442678213119507, -0.09972235560417175,
+       -0.00906707439571619, -0.3873786926269531, -0.444593608379364,
+       -2.981180191040039, -0.2853538393974304, -0.30229970812797546,
+       -2.0511136054992676, -1.7793821096420288, -2.8809404373168945,
+       -3.8709161281585693, -2.2498362064361572, -2.1367833614349365,
+       -0.5425164699554443, -2.7366628646850586, -1.1406540870666504,
+       -0.43158265948295593, ...],
       stop_reason: :length
     }
   ],
@@ -2056,18 +2190,18 @@ sampling response: %Tinkex.Types.SampleResponse{
 }
 
 ==> Running examples/cli_run_prompt_file.exs
-Running CLI with prompt file /tmp/tinkex_prompt_5826.txt
+Running CLI with prompt file /tmp/tinkex_prompt_5954.txt
 Starting sampling...
 Sampling complete (1 sequences)
-JSON output written to /tmp/tinkex_output_5890.json
+JSON output written to /tmp/tinkex_output_6018.json
 Preview:
-{"prompt_logprobs":null,"sequences":[{"logprobs":[-2.4103214740753174,-1.481612205505371,-1.6993517875671387,-1.6085186004638672,-5.111445426940918,-1.97594153881073,-1.1717655658721924,-0.4643413722515106,-1.3711751699447632,-0.006968954112380743,-1.1871790885925293,-0.04053192213177681,-2.121251106262207,-0.004537524189800024,-1.3446797132492065,-6.138952255249023,-5.222756385803223,-4.653529167175293,-5.804534912109375,-0.8416662216186523,-9.227217674255371,-1.2605887651443481,-1.5938613414764404,-2.1836817264556885,-5.224343299865723,-1.3763225078582764,-0.11617501080036163,-2.9787542819976807,-0.6054537296295166,-5.050826072692871,-0.5107788443565369,-2.1634936332702637,-2.498811960220337,-3.2069690227508545,-2.2543468475341797,-2.579184055328369,-3.743730306625366,-8.058501243591309,-6.793439865112305,-5.710214138031006,-8.676680564880371,-6.139692783355713,-6.30639123916626,-2.062299966812134,-3.8482143878936768,-4.542710781097412,-0.5203852653503418,-3.8335604667663574,-1.6408588886260986,-1.568137288093567,-0.012080245651304722,-1.2023649215698242,-1.4825797080993652,-1.482069969177246,-1.3127667903900146,-0.17095088958740234,-1.4786778688430786,-1.6125874519348145,-0.006843580398708582,-5.21590518951416,-0.05076216533780098,-0.22017771005630493,-5.9606404304504395,-5.549184322357178,-4.7872209548950195,-4.855972766876221,-0.9366350173950195,-0.12604430317878723,-9.595711708068848,-0.7755651473999023,-2.820842742919922,-3.7621843814849854,-5.157322883605957,-2.6577000617980957,-5.21419095993042,-1.5303518772125244,-0.007139763794839382,-1.9781513214111328,-1.3684971332550049,-2.268671751022339,-1.777215600013733,-7.819088935852051,-11.438087463378906,-2.451627254486084,-8.741952896118164,-6.708137512207031,-5.673834800720215,-3.203212261199951,-8.400153160095215,-6.0843095779418945,-16.10692596435547,-3.2539682388305664,-5.298253059387207,-8.841060638427734,-3.1346662044525146,-7.1228485107421875,-2.2069647312164307,-6.067137241363525,-2.42806077003479,-5.857672691345215,-2.4751973152160645,-6.354546546936035,-4.133467674255371,-11.019477844238281,-2.4210262298583984,-0.893137514591217,-3.2921323776245117,-9.257552146911621,-6.81947135925293,-6.079846382141113,-11.751153945922852,-1.789302110671997,-8.758362770080566,-4.224250793457031,-7.154967784881592,-2.3976199626922607,-11.934314727783203,-2.5352611541748047,-2.5792174339294434,-3.3471624851226807,-8.435900688171387,-3.911782741546631,-4.933475494384766,-6.7821455001831055,-2.338259696960449,-1.733213186264038,-0.16573885083198547,-0.8874191641807556,-3.5605456829071045,-0.1679030954837799,-0.15616737306118011,-0.39686769247055054,-0.07913373410701752,-0.4499230682849884,-6.871246150694788e-4,-0.007271964568644762,-3.6272482872009277,-0.07902028411626816,-0.07613808661699295,-0.0017864234978333116,-0.052572790533304214,-0.00722569040954113,-0.02836875058710575,-0.06212211400270462,-3.5470392322167754e-4,-0.002725697821006179,-7.942138671875,-10.012084007263184,-0.07492903620004654,-0.002745907986536622,-0.06627770513296127,-0.10175099223852158,-0.012989195063710213,-0.013234037905931473,-0.07967877388000488,-0.0505918487906456,-5.078217945992947e-4,-0.009351381100714207,-5.694699287414551,-3.7189815044403076,-0.028416143730282784,-0.07267549633979797,-0.0015376898227259517,-0.017790740355849266,-0.011137695983052254,-0.0010033579310402274,-0.0037643304094672203,-5.360727787017822,-0.5493968725204468,-0.1271948218345642,-2.130580425262451,-8.717945098876953,-0.640282392501831,-0.1252182573080063,-0.020092058926820755,-0.6820160746574402,-0.5253106951713562,-10.228569030761719,-6.81758451461792,-8.117961883544922,-2.3921868801116943,-8.689125061035156,-1.7730913162231445,-4.698187828063965,-0.24678246676921844,-4.603797435760498,-2.967658758163452,-5.875194072723389,-18.165441513061523,-4.863584041595459,-0.2899436056613922,-2.8398327827453613,-5.573713779449463,-3.1849451065063477,-11.773632049560547,-0.30232974886894226,-5.63413143157959,-1.2279820442199707,-14.847956657409668,-10.91910171508789,-11.21194076538086,-2.8944525718688965,-0.43136003613471985,-0.6919549107551575,-0.7771584391593933,-1.5401930809020996,-5.155832290649414,-4.753726959228516,-0.96075439453125,-1.223474144935608,-10.294321060180664,-9.029932975769043,-12.407955169677734,-5.040881156921387,-1.532426357269287,-9.444000244140625,-3.103414297103882,-8.488123893737793,-4.926351547241211,-6.718753337860107,-1.0221798419952393,-7.329015731811523,-0.4833906292915344,-7.192741394042969,-4.679009437561035,-4.814059257507324,-13.409563064575195,-7.051697254180908,-9.483461380004883,-5.190164566040039,-6.417781829833984,-9.602149963378906,-9.241943359375,-3.491941452026367,-4.302358150482178,-1.8735932111740112,-4.267017364501953,-3.7181270122528076,-1.7670300006866455,-1.4795916080474854,-2.524857521057129,-9.832592964172363,-0.18930113315582275,-7.060855865478516,-3.470280647277832,-4.026463031768799,-4.834967613220215,-2.6490068435668945,-3.39202880859375,-1.1640807390213013,-7.865609645843506,-0.6302926540374756,-7.037282943725586,-2.540952205657959,-1.1739842891693115,-0.1342141032218933,-1.9657386541366577,-13.7061185836792,-3.214365243911743,-2.070497989654541,-2.3705854415893555,-2.711764335632324,-13.07050609588623,-10.616802215576172,-4.135945796966553,-4.414124965667725,-4.404797554016113,-0.9277579188346863,-9.539392471313477,-4.300154209136963,-1.4321762323379517,-8.916997909545898,-1.6228301525115967,-3.8632383346557617,-8.053675651550293,-5.6849212646484375,-0.23074105381965637,-7.190181255340576,-8.572669982910156,-4.091102600097656,-0.02828427404165268,-5.719094276428223,-4.888680458068848,-2.3962152004241943,-10.532453536987305,-6.399784088134766,-3.3022067546844482,-6.654189109802246,-9.710124969482422,-2.229261636734009,-5.250110626220703,-0.980569064617157,-0.5991645455360413,-8.894183158874512,-6.204658031463623,-0.6972963213920593,-14.117812156677246,-9.730276107788086,-4.162985801696777,-7.3795485496521,-8.472846984863281,-7.300466537475586,-3.631579637527466,-2.0620036125183105,-12.545825004577637,-7.127178192138672,-1.880378007888794,-7.33294677734375,-4.351083755493164,-0.9646018743515015,-4.605457305908203,-3.1085894107818604,-4.044012546539307,-9.295428276062012,-3.486915111541748,-4.781571865081787,-5.992690086364746,-1.0766656398773193,-7.147191047668457,-2.5994911193847656,-5.492531776428223,-7.9876275062561035,-5.285679817199707,-3.2594082355499268,-2.0916457176208496,-8.100872039794922,-11.840993881225586,-2.974590539932251,-7.839136123657227,-4.262036323547363,-5.481948375701904,-10.553565979003906,-7.0019850730896,-6.973628044128418,-2.470111846923828,-9.823935508728027,-0.1414492279291153,-11.930364608764648,-3.5212631225585938,-6.222449779510498,-9.678894996643066,-7.970310211181641,-8.884906768798828,-8.208680152893066,-6.209246635437012,-2.3077828884124756,-2.941310405731201,-8.231354713439941,-3.543962001800537,-9.320425033569336,-2.950599431991577,-4.594964027404785,-3.985895872116089,-3.410745859146118,-2.042266607284546,-5.721744537353516,-6.170266151428223,-1.3732715845108032,-4.510341644287109,-4.921364784240723,-1.452978253364563,-3.3367912769317627,-3.4576730728149414,-4.878668308258057,-1.75033438205719,-6.508336544036865,-1.5457738637924194,-5.313633441925049,-3.0053248405456543,-5.352481842041016,-0.6981807351112366,-5.106980800628662,-5.385060787200928,-8.490257263183594,-10.190001487731934,-0.247206911444664,-3.7554209232330322,-2.4797203540802,-1.8158812522888184,-2.5369791984558105,-2.602865219116211,-2.7751574516296387,-3.1225266456604004,-5.000789642333984,-1.214324712753296,-4.346864700317383,-2.109657049179077,-5.430792331695557,-6.761059284210205,-6.898703575134277,-4.7746968269348145,-2.015768527984619,-5.372612953186035,-1.9969673156738281,-2.989100456237793,-1.8669538497924805,-6.728403091430664,-7.530834197998047,-0.936662495136261,-3.904484748840332,-1.7678725719451904,-4.4931488037109375,-1.889866590499878,-6.541816234588623,-6.394891738891602,-5.447674751281738,-2.8917791843414307,-5.015178680419922,-4.118044853210449,-7.045520782470703,-0.13903780281543732,-5.570929527282715,-1.4497491121292114,-6.02664041519165,-5.345512866973877,-3.697784423828125,-5.528990745544434,-1.119093418121338,-3.6796624660491943,-5.868624687194824,-3.658134937286377,-0.2156352996826172,-6.301939964294434,-4.858808517456055,-6.971897125244141,-2.8257932662963867,-4.060304641723633,-4.664558410644531,-1.4773588180541992,-3.924105405807495,-2.857407569885254,-1.909933090209961,-3.4156386852264404,-6.915688991546631,-2.9088029861450195,-3.8407182693481445,-1.5526909828186035,-0.0837012305855751,-0.07925884425640106,-0.8097116351127625,-5.971117973327637,-2.222133159637451,-3.4983556270599365,-7.906166076660156,-3.9793972969055176,-1.1109726428985596,-1.9890332221984863,-2.1169726848602295,-5.793446063995361,-5.1206207275390625,-8.680839538574219,-0.031018543988466263,-1.6338731050491333,-7.992051124572754,-3.1342926025390625,-2.637775182723999,-4.140921115875244,-2.619992733001709,-3.3330860137939453,-6.303351879119873,-2.9176695346832275,-4.456803798675537,-1.5668621063232422,-5.857741355895996,-1.6906102895736694,-5.212464809417725,-3.2073841094970703,-12.405179023742676,-11.078841209411621,-3.3388383388519287,-7.54919958114624,-11.077221870422363,-7.113646507263184,-6.839696884155273,-0.5240275859832764,-8.117510795593262,-3.773449659347534,-3.436506509780884,-3.421865940093994,-0.7046695947647095,-2.365330696105957,-0.4494428038597107,-1.8536851406097412,-5.814051628112793,-0.15075509250164032,-7.569639205932617,-9.599751472473145,-3.3304550647735596,-1.9099969863891602,-0.003810290014371276,-4.44084358215332,-0.14838072657585144,-0.015774348750710487,-9.892560005187988,-6.56809663772583,-0.7999904155731201,-8.854347229003906,-1.5444003343582153,-6.854297637939453,-2.026348352432251,-3.3447279930114746,-6.2145795822143555,-7.157571792602539,-4.418673515319824,-7.0218353271484375,-4.038987159729004,-1.8179885149002075,-0.22167687118053436,-1.7934563159942627,-7.91077184677124,-5.223263740539551,-10.383594512939453,-0.4000903367996216,-4.405243396759033,-9.333325386047363,-8.555054664611816,-4.383699417114258,-6.802282333374023,-9.053688049316406,-5.417450904846191,-2.7287087440490723,-4.119086742401123,-2.404736280441284,-0.134462371468544,-7.951897621154785,-7.543621063232422,-5.40523624420166,-10.465496063232422,-6.980744361877441,-3.8108181953430176,-7.191021919250488,-1.1321568489074707,-2.5136146545410156,-5.294621467590332,-4.425957679748535,-1.7979824542999268,-7.669944763183594,-3.084674596786499,-3.0852231979370117,-0.1785353124141693,-6.065652370452881,-12.09787654876709,-4.717751502990723,-1.6871678829193115,-4.653213977813721,-2.914987564086914,-2.222034215927124,-6.606910705566406,-1.9629156589508057,-9.310382843017578,-2.0288844108581543,-2.9871809482574463,-0.8337690234184265,-0.06881903111934662,-0.11161081492900848,-7.116535186767578,-3.6248185634613037,-2.492919445037842,-1.9082257747650146,-3.1884868144989014],"stop_reason":"stop","tokens":[13,358,1097,264,11164,11,323,420,1772,574,56168,555,611,84,14,754,347,370,1037,68,4749,13,358,690,2815,304,220,17,4207,505,1457,382,40,690,387,1203,994,328,45456,66313,40124,334,81663,17160,10245,36868,3507,93350,57318,71361,55759,3651,40330,7354,2006,83069,2794,16511,6979,10009,37636,45613,1389,5782,393,25434,44272,15215,39129,19324,16932,2006,16139,1389,7354,63427,50736,34733,63151,57277,2,35390,5211,271,13617,5829,220,19,14774,19930,69338,22071,311,46113,220,1419,3626,1555,279,4272,11,7999,832,51658,311,1855,832,45082,100441,100699,126450,101305,107915,101179,108797,96298,18939,382,2,29438,16067,1432,334,15147,1035,16,13,510,42144,9725,2,50378,340,17,13,510,61032,40227,9725,2,47928,40227,340,18,13,510,35891,65776,9725,2,62344,2427,19253,14164,340,19,13,510,15777,21829,811,9725,2,25615,12,25742,811,12795,2,35907,271,1255,347,370,1037,71853,374,1981,439,7060,264,3560,43012,4029,439,6866,382,4516,102503,3018,306,13,1442,358,8122,36626,433,311,37002,72537,11299,304,3021,449,433,13,3639,1436,387,810,50765,551,49582,382,2,38943,1038,12834,1455,5865,527,22486,311,3566,477,4641,83430,482,2613,3834,1288,12771,20160,2613,16692,13,2030,1148,422,499,617,15860,315,9624,13422,499,2351,1701,11,323,842,709,14324,264,2763,315,892,20505,304,279,7074,13,11930,15987,382,2181,1253,387,17057,389,264,27946,5569,369,320,97525,8,6222,13650,1778,439,4443,26743,13,30013,10925,617,8066,75581,389,1778,13650,439,6696,7512,11,34266,39230,277,311,612,442,8322,11,34507,3674,3772,430,1436,387,9959,304,3938,13042,323,20207,25907,13,3297,1101,5101,1418,21646,22917,13,34863,32855,13,10323,10397,45933,12309,16736,30098,449,1560,83775,23460,5315,14,63879,61912,83663,5922,13122,389,11,9455,502,11983,323,3674,2065,2671,11,3318,12135,449,502,3674,3772,323,1023,6732,13,1398,69597,358,2846,5128,2771,1070,6866,2317,7191,1109,904,832,1732,1436,11000,1440,477,48248,13,1442,358,1518,1403,3062,18845,11,499,3358,617,264,9257,1317,9860,3938,13,1666,264,3682,3157,320,269,8996,374,4560,311,4667,449,1778,3674,29130,28271,8,374,1455,8173,304,2038,5552,4819,323,3674,7640,11,584,617,311,1781,2225,5627,520,279,1890,892,13,18156,433,1253,4097,810,1109,264,3254,3217,1389,4536,956,433,34707,13,358,4510,279,1455,28289,3245,574,279,5133,449,1884,358,27724,16250,323,8661,84257,358,42777,922,1980,2181,1053,1101,387,6555,311,617,520,3325,510,16497,9725,1277,1129,268,34466,2726,705,1095,7636,4815,2,12027,271,9,13688,18939,551,65,14369,512,9,13688,505,832,2055,2,74977,12,5263,16067,55160,5520,9669,2997,912,1862,369,2653,36106,1389,62019,6924,4669,15161,32705,596,8106,6559,269,5471,279,1217,505,34111,21142,382,2,65814,362,482,5649,22166,5560,271,2,65814,426,482,14969,612,35680,1038,128001]}],"topk_prompt_logprobs":null,"type":"sample"}
+{"prompt_logprobs":null,"sequences":[{"logprobs":[-7.96319580078125,-1.7995569705963135,-0.7040455341339111,-2.246551275253296,-1.2115405797958374,-7.837035655975342,-3.075432300567627,-7.406477928161621,-0.3570220470428467,-1.9917527437210083,-1.3402349948883057,-3.456505298614502,-0.8055366277694702,-2.099583625793457,-1.2591629028320312,-1.3160121440887451,-3.4967143535614014,-2.3119266033172607,-11.79848861694336,-5.338186264038086,-3.4330670833587646,-3.7198901176452637,-3.141948699951172,-0.026161331683397293,-1.6653755903244019,-0.03162405267357826,-3.069810628890991,-15.427691459655762,-2.413317918777466,-0.20740343630313873,-1.781112790107727,-1.21452796459198,-7.008791446685791,-8.362092018127441,-1.8042479753494263,-1.10298752784729,-7.477775573730469,-8.13217544555664,-2.3201980590820312,-4.633662223815918,-4.140694618225098,-5.963955879211426,-1.8250312805175781,-6.641912937164307,-0.9332862496376038,-4.5183281898498535,-5.844482421875,-2.3610100746154785,-2.9685559272766113,-3.1277875900268555,-11.624879837036133,-0.5474034547805786,-3.3870644569396973,-7.177423477172852,-1.9408257007598877,-0.286868155002594,-0.13570213317871094,-3.7800087928771973,-1.2897186279296875,-1.1051725149154663,-2.0236918926239014,-2.9605188369750977,-0.7718082070350647,-1.8585551977157593,-4.9193644523620605,-5.932526588439941,-1.8083453178405762,-5.84836483001709,-2.5370516777038574,-2.9574267864227295,-1.664341688156128,-3.8076682090759277,-2.0845351219177246,-0.40619027614593506,-0.9814534187316895,-0.5575854182243347,-4.759203910827637,-0.7834056615829468,-0.8127211928367615,-2.6250975131988525,-0.06558363884687424,-5.571848392486572,-0.9058957099914551,-3.1220479011535645,-1.1944575309753418,-1.7504912614822388,-1.0463886260986328,-1.1503291130065918,-0.5535348653793335,-2.727084159851074,-0.7947639226913452,-0.47700077295303345,-2.1005234718322754,-0.873145341873169,-3.016602039337158,-0.40251612663269043,-6.309215545654297,-0.7036334276199341,-0.12873491644859314,-1.336778998374939,-2.1923952102661133,-7.959309101104736,-0.2215152531862259,-13.867647171020508,-8.032867431640625,-2.264688491821289,-7.10334587097168,-0.09692396968603134,-0.19945241510868073,-0.036071691662073135,-2.0001604557037354,-0.49638301134109497,-2.4534177780151367,-5.783449172973633,-1.149391531944275,-4.21956729888916,-1.6345064640045166,-8.256973266601562,-0.4473314881324768,-3.060112953186035,-0.22193804383277893,-0.7761222124099731,-0.5606755018234253,-5.176653861999512,-7.524579048156738,-5.220108509063721,-10.23263931274414,-3.272451639175415,-7.525498867034912,-1.2741708755493164,-7.017579078674316,-5.819214820861816,-3.1171875,-3.7716281414031982,-3.7881085872650146,-5.211187839508057,-3.3115522861480713,-0.8564518690109253,-2.0093538761138916,-2.3687798976898193,-1.9857467412948608,-5.409823894500732,-0.1846037358045578,-10.703161239624023,-0.6280514001846313,-4.091708183288574,-3.518494129180908,-3.8031818866729736,-0.049861859530210495,-3.3525919914245605,-3.165851593017578,-10.01706600189209,-1.6839230060577393,-2.856780767440796,-2.3068442344665527,-6.5340142250061035,-1.463804006576538,-2.267378330230713,-3.1892893314361572,-3.693471908569336,-0.9123533964157104,-5.775394916534424,-3.651638984680176,-0.5415016412734985,-6.931995391845703,-1.3317131996154785,-2.4365334510803223,-0.02782283164560795,-8.348535537719727,-3.8247060775756836,-14.772314071655273,-3.8883824348449707,-3.0607118606567383,-2.8543434143066406,-5.278781890869141,-1.6440763473510742,-4.145020484924316,-3.491271495819092,-0.717750072479248,-3.3241634368896484,-5.380073070526123,-0.5063462257385254,-0.9169122576713562,-9.932243347167969,-3.9521431922912598,-9.589642524719238,-2.20503568649292,-0.8210789561271667,-1.9460680484771729,-1.6320478916168213,-0.9131648540496826,-7.640439510345459,-4.187091827392578,-5.831488132476807,-1.9483110904693604,-10.308152198791504,-0.21140693128108978,-2.4051337242126465,-5.371868133544922,-2.106792449951172,-8.068887710571289,-1.638217806816101,-2.2958486080169678,-2.81595778465271,-0.06216345354914665,-2.528615951538086,-0.014521271921694279,-6.897651672363281,-5.91160774230957,-6.982251167297363,-7.2731475830078125,-2.328253746032715,-3.350137710571289,-0.9306899309158325,-12.349739074707031,-0.23503921926021576,-3.6572134494781494,-1.6666399240493774,-3.076411247253418,-1.4847298860549927,-1.9186911582946777,-3.2676472663879395,-3.348572015762329,-1.0731945037841797,-1.0522472858428955,-1.5771652460098267,-1.7578365802764893,-2.228848934173584,-2.857914924621582,-0.5791002511978149,-0.9980031847953796,-2.104733467102051,-2.0121774673461914,-1.0358853340148926,-10.130950927734375,-0.3186267614364624,-1.2722163200378418,-4.596628189086914,-1.4858781099319458,-2.2922208309173584,-1.8526482582092285,-2.2649574279785156,-5.3437700271606445,-1.467323899269104,-2.0228915214538574,-3.3143186569213867,-6.936673164367676,-7.951779842376709,-4.795997619628906,-5.727677345275879,-9.00643539428711,-0.5929967761039734,-3.512505292892456,-8.523195266723633,-9.354928016662598,-4.906890869140625,-0.07769262790679932,-0.9878278374671936,-7.813033103942871,-3.937044382095337,-6.566921234130859,-2.5381174087524414,-0.3762642443180084,-2.2153704166412354,-0.6092191934585571,-2.6672234535217285,-3.004746675491333,-7.5873003005981445,-0.3904000222682953,-0.17792215943336487,-1.6223610639572144,-4.023347854614258,-0.3183903396129608,-7.422045707702637,-2.7044272422790527,-3.607872724533081,-4.031023979187012,-0.07382593303918839,-5.4143218994140625,-2.2059779167175293,-8.314618110656738,-11.849261283874512,-7.540658950805664,-8.836994171142578,-2.6192963123321533,-8.28978443145752,-5.047154903411865,-6.225893974304199,-0.07805974036455154,-1.789749026298523,-1.3587898015975952,-3.2210307121276855,-0.5696852207183838,-1.19810950756073,-5.541046619415283,-0.012510512955486774,-0.7197617888450623,-5.169851303100586,-5.630217552185059,-1.5394384860992432,-0.7640733122825623,-0.5567817687988281,-1.6767812967300415,-3.7258522510528564,-0.6998720169067383,-5.38449764251709,-1.1657755374908447,-10.699580192565918,-3.8187360763549805,-9.389928817749023,-2.0948901176452637,-8.520549774169922,-4.77166223526001,-0.8577556014060974,-0.1555960476398468,-0.025549715384840965,-10.711252212524414,-1.7098736763000488,-4.517306327819824,-3.452899217605591,-0.4462417960166931,-3.3787577152252197,-3.3969740867614746,-3.3208956718444824,-1.3861267566680908],"stop_reason":"stop","tokens":[49307,0,358,3021,701,40134,0,3580,499,304,279,18537,4999,40,3021,701,13633,323,16070,389,433,4999,13359,499,779,1790,13,15265,42775,1826,25945,72006,55638,95373,2294,0,912,27969,2082,4587,30,374,1070,220,16,477,1193,264,1949,4441,2671,5380,12947,1389,912,27969,2082,374,2631,13,1472,1253,3810,369,264,3658,4441,9633,11,323,422,4183,439,264,13946,11,1070,374,912,4441,11307,3060,13,1472,649,1101,3810,369,264,26745,4441,9633,369,400,19,13,18231,420,8779,4999,40,7055,369,49687,58937,0,3580,499,304,279,19853,4999,13359,369,701,40134,0,19045,15369,304,279,18537,4999,66173,28697,33970,258,420,1391,78,3021,1475,990,11,1633,14948,33970,198,40,1093,279,2144,430,6957,279,13633,433,3250,1431,2349,304,77723,11,323,433,16181,439,832,4459,5502,13,2360,1205,311,1797,279,1396,315,7059,433,18916,817,288,0,39405,990,323,1664,2884,389,1948,220,18,468,750,679,20,4999,40,1093,279,7795,19763,7434,323,42199,1486,11,779,1664,13205,704,627,13359,499,1633,1790,445,301,869,25894,13,1472,527,10032,311,3810,279,19853,5380,40,1097,16661,279,18537,13,358,690,3708,499,264,5975,449,279,73684,2723,627,2181,374,1633,6555,13,82644,627,40,4344,10917,452,337,635,9734,72,11,4946,6236,1348,424,323,14103,3675,32,389,856,3821,1160,11,779,16026,311,1518,1124,389,279,4264,627,52938,14103,3675,1389,499,1948,11843,478,4395,13,1148,1587,14103,3675,3152,30,374,433,701,51743,7987,5380,275,5084,311,757,430,279,13633,374,4382,323,34734,0,26063,0,1054,43,5576,40,965,48507,1600,362,435,16849,11453,71641,13,128001]}],"topk_prompt_logprobs":null,"type":"sample"}
 
 
 ==> Running examples/metrics_live.exs
 Sampling 1 sequence(s) from meta-llama/Llama-3.1-8B ...
-Sampled text:
-The Tinkex dashboard shows a quick, at-a-glance view of your projects. The dashboard allows you to easily compare projects to see where your time
+Sampled text: : the 2019 first half
+As usual, many of our customers are interested in evaluating the state of their business before the end of the financial year.
 
 === Metrics Snapshot ===
 Counters:
@@ -2076,51 +2210,51 @@ Counters:
 
 Latency (ms):
   count: 4
-  mean: 502.44
-  p50:  465.24
-  p95:  826.13
-  p99:  826.13
+  mean: 471.83
+  p50:  431.07
+  p95:  859.12
+  p99:  859.12
 
 ==> Running examples/telemetry_live.exs
 Starting service client against https://tinker.thinkingmachines.dev/services/tinker-prod ...
 Creating sampling client for meta-llama/Llama-3.1-8B ...
 
-10:36:07.331 [info] HTTP post /api/v1/create_sampling_session start (pool=session base=https://tinker.thinkingmachines.dev/services/tinker-prod)
+14:50:07.530 [info] HTTP post /api/v1/create_sampling_session start (pool=session base=https://tinker.thinkingmachines.dev/services/tinker-prod)
 
-10:36:07.611 [info] HTTP post /api/v1/create_sampling_session ok in 279ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
+14:50:07.705 [info] HTTP post /api/v1/create_sampling_session ok in 175ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
 Sending sample request ...
 
-10:36:08.688 [info] HTTP post /api/v1/asample start (pool=sampling base=https://tinker.thinkingmachines.dev/services/tinker-prod)
+14:50:08.900 [info] HTTP post /api/v1/asample start (pool=sampling base=https://tinker.thinkingmachines.dev/services/tinker-prod)
 
-10:36:09.166 [info] HTTP post /api/v1/asample ok in 477ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
+14:50:09.311 [info] HTTP post /api/v1/asample ok in 410ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
 
-10:36:09.185 [info] HTTP post /api/v1/retrieve_future start (pool=futures base=https://tinker.thinkingmachines.dev/services/tinker-prod)
+14:50:09.321 [info] HTTP post /api/v1/retrieve_future start (pool=futures base=https://tinker.thinkingmachines.dev/services/tinker-prod)
 
-10:36:09.994 [info] HTTP post /api/v1/retrieve_future ok in 808ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
+14:50:10.005 [info] HTTP post /api/v1/retrieve_future ok in 683ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
 Sampled sequences: [
   %Tinkex.Types.SampledSequence{
-    tokens: [3639, 374, 433, 30, 8595, 656, 584, 1005, 433, 30, 3639, 527, 279,
-     7720, 1980, 6777, 37058, 374, 279, 1920, 315, 26984, 323, 42118, 828, 311,
-     8895, 26793, 1139, 279, 5178, 11],
-    logprobs: [-1.4004876613616943, -0.21809379756450653, -0.5183565616607666,
-     -0.6882222890853882, -1.6689610481262207, -1.3359495401382446,
-     -0.507761538028717, -1.121880054473877, -0.017047420144081116,
-     -0.21992535889148712, -0.6591378450393677, -0.9404007196426392,
-     -0.35884523391723633, -0.8169716000556946, -4.404777526855469,
-     -0.4814941883087158, -2.7092601521871984e-4, -0.023718087002635002,
-     -0.40297552943229675, -1.0642532110214233, -0.005674799904227257,
-     -0.5010918378829956, -0.418936550617218, -0.707565426826477,
-     -0.07639224827289581, -1.5775229930877686, -1.2423986196517944,
-     -0.3514748513698578, -0.48231393098831177, -0.23728083074092865,
-     -0.06967131048440933, -1.6731479167938232],
+    tokens: [30834, 279, 2380, 15696, 320, 12840, 11, 1268, 11, 3249, 8, 315,
+     62137, 13, 2893, 11782, 13, 1398, 25, 330, 6777, 37058, 374, 264, 1749,
+     315, 39529, 46071, 279, 2704, 315, 264],
+    logprobs: [-3.454059362411499, -0.7563347816467285, -4.0695953369140625,
+     -8.167400360107422, -3.2517833709716797, -2.587627410888672,
+     -0.046577077358961105, -1.4801626205444336, -0.0736905038356781,
+     -0.6298926472663879, -0.5281040668487549, -1.5367215871810913,
+     -0.2813340425491333, -1.1758594512939453, -2.5339417457580566,
+     -3.5697615146636963, -1.897667646408081, -9.025256156921387,
+     -0.38415706157684326, -1.788400650024414, -0.10921048372983932,
+     -1.931004080688581e-4, -0.045151710510253906, -1.228928565979004,
+     -2.036566734313965, -0.22626833617687225, -3.766385316848755,
+     -3.619919776916504, -1.6744308471679688, -2.7987072467803955,
+     -0.0685025006532669, -0.220526784658432],
     stop_reason: :length
   }
 ]
 
-10:36:10.026 [info] HTTP post /api/v1/telemetry start (pool=telemetry base=https://tinker.thinkingmachines.dev/services/tinker-prod)
-
-10:36:10.249 [info] HTTP post /api/v1/telemetry ok in 222ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
+14:50:10.034 [info] HTTP post /api/v1/telemetry start (pool=telemetry base=https://tinker.thinkingmachines.dev/services/tinker-prod)
 Flushed telemetry; detach logger and exit.
+
+14:50:10.257 [info] HTTP post /api/v1/telemetry ok in 222ms retries=0 base=https://tinker.thinkingmachines.dev/services/tinker-prod
 
 ==> Running examples/telemetry_reporter_demo.exs
 ==========================================
@@ -2131,7 +2265,7 @@ Model: meta-llama/Llama-3.1-8B
 
 
 1. Starting ServiceClient and reporter...
-   Reporter started: #PID<0.250.0>
+   Reporter started: #PID<0.319.0>
 
 2. Logging generic events...
    Logged: demo.started
@@ -2142,8 +2276,8 @@ Model: meta-llama/Llama-3.1-8B
 
 4. Performing live sampling (generates HTTP telemetry)...
    Sampling complete!
-   Generated:  Can you say anything about the technology, but also about industry and scope?
-T...
+   Generated:  It should be a perfect one-liner. Can you do it?
+By Tim Troncale, Chief Technic...
 
 5. Demonstrating wait_until_drained...
    Queue drained: true
@@ -2185,13 +2319,13 @@ Final result: "succeeded on attempt 3"
 ==> Running examples/model_info_and_unload.exs
 [tinkex] base_url=https://tinker.thinkingmachines.dev/services/tinker-prod
 [tinkex] base_model=meta-llama/Llama-3.1-8B
-[tinkex] created session_id=a9a84697-074e-5a76-a4f2-f6a6f3a24364
-[tinkex] poll #1 create_model request_id=a9a84697-074e-5a76-a4f2-f6a6f3a24364:train:0:0
-[tinkex] created model_id=a9a84697-074e-5a76-a4f2-f6a6f3a24364:train:0
-[tinkex] model_id=a9a84697-074e-5a76-a4f2-f6a6f3a24364:train:0
+[tinkex] created session_id=95ad6e88-a9cc-5996-9a60-0795cbab65ba
+[tinkex] poll #1 create_model request_id=95ad6e88-a9cc-5996-9a60-0795cbab65ba:train:0:0
+[tinkex] created model_id=95ad6e88-a9cc-5996-9a60-0795cbab65ba:train:0
+[tinkex] model_id=95ad6e88-a9cc-5996-9a60-0795cbab65ba:train:0
 - model_name: meta-llama/Llama-3.1-8B
 - arch: unknown
-- tokenizer_id: baseten/Meta-Llama-3-tokenizer
+- tokenizer_id: thinkingmachineslabinc/meta-llama-3-tokenizer
 - is_lora: true
 - lora_rank: 32
 [tinkex] unload_model

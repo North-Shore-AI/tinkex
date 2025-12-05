@@ -13,11 +13,13 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.1.20 Highlights
+## 0.2.0 Highlights
 
-- Default parity mode now matches Python out of the box (`timeout: 60_000`, `max_retries: 10`); set `parity_mode: :beam` or `TINKEX_PARITY=beam` to restore 120s/2-retry defaults.
-- `loss_fn_inputs` lists follow Python’s key-based dtype map and raise on unknown keys (use TensorData/Nx.Tensor for custom inputs); closes the dtype inference gap.
-- Changelog/docs updated for the new defaults and dtype behavior.
+- Opt-in recovery automation layer (Policy + Monitor + Executor) to restart corrupted training runs from checkpoints with telemetry hooks and bounded concurrency (defaults off).
+- Checkpoint timestamps now normalize to `DateTime` when ISO-8601 values are returned (strings are preserved on parse failure).
+- Added NxPenalties-backed regularizer adapters (L1/L2/ElasticNet/Entropy/KL/Consistency/Orthogonality/GradientPenalty) with offline and live structured regularizer examples exercising the full set.
+- Structured regularizer examples include reference/pair data wiring patterns for KL/Consistency and a gradient-penalty demo.
+- Dependency note: uses `{:nx_penalties, "~> 0.1.2"}` for tensor primitives.
 
 ## Features
 
@@ -39,6 +41,7 @@ Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-
 - **Queue observability**: Sampling and training clients expose queue observers that feed `Future.poll/2`, emitting debounced warnings with human-readable rate limit or capacity reasons.
 - **REST metadata & inspection APIs**: New endpoints surface samplers, weights metadata, and training runs while the SDK exposes `GetSamplerResponse`, `WeightsInfoResponse`, `ImageChunk.expected_tokens`, `LoadWeightsRequest.optimizer`, and the `:cispo`/`:dro` `LossFnType` tags for richer load/save tooling.
 - **Checkpoint persistence**: `TrainingClient.save_state/3`, `TrainingClient.load_state/3`, `TrainingClient.load_state_with_optimizer/3`, and `ServiceClient.create_training_client_from_state/3` enable saving checkpoints and resuming training with optimizer state.
+- **Recovery automation (opt-in)**: `Tinkex.Recovery.Policy` + `Monitor` + `Executor` restart corrupted runs from checkpoints with callbacks, telemetry, and bounded concurrency; defaults off.
 - **Multipart uploads**: The `:files` option builds multipart/form-data bodies automatically (path and tuple normalization, bracketed form fields, boundary generation, and tuple metadata) while preserving JSON requests when no files are present; includes a runnable multipart example and path-based helpers.
 - **Proxy-aware HTTP**: Finch pools pick up proxies from `Tinkex.Config` (or `TINKEX_PROXY`/`TINKEX_PROXY_HEADERS`) while masking credentials in logs and inspect output.
 - **ModelInput builders**: `empty/0`, `append/2`, `append_int/2` for incremental prompt construction; `append_int` extends the last text chunk or creates a new one after images.
@@ -52,6 +55,7 @@ Tinkex is an independent, community-maintained Elixir SDK for the Tinker API. It
 - Getting started & configuration: `docs/guides/getting_started.md`, `docs/guides/environment_configuration.md`
 - Custom loss training (per-datum logprobs, backend gradients): `docs/guides/custom_loss_training.md` and `mix run examples/custom_loss_training.exs`
 - Training persistence: `docs/guides/training_persistence.md` (live example: `examples/training_persistence_live.exs`)
+- Recovery automation (opt-in restarts): `docs/guides/recovery.md`
 - Save-and-sample convenience: `mix run examples/save_weights_and_sample.exs` demonstrates `TrainingClient.save_weights_and_get_sampling_client_sync/2` (requires `TINKER_API_KEY`)
 - Multipart uploads: `docs/guides/file_uploads.md` (live helper: `mix run examples/file_upload_multipart.exs`; uploads `examples/uploads/sample_upload.bin` by default, override via `TINKER_UPLOAD_FILE`)
 
@@ -62,7 +66,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.1.20"}
+    {:tinkex, "~> 0.2.0"}
   ]
 end
 ```
@@ -145,6 +149,54 @@ params = %Tinkex.Types.SamplingParams{
 )
 {:ok, response} = Task.await(sample_task)
 ```
+
+## Recovery (opt-in)
+
+Automatic restart is **off by default**. The recovery layer is composed of a
+policy (configuration only), a monitor (polls `Rest.get_training_run/2`), and an
+executor (bounded concurrency restart worker). You must start and wire these
+processes explicitly:
+
+```elixir
+policy =
+  Tinkex.Recovery.Policy.new(
+    enabled: true,
+    poll_interval_ms: 15_000,
+    checkpoint_strategy: :latest,
+    restore_optimizer: true,
+    on_recovery: fn _old_pid, new_pid, cp ->
+      Logger.info("Recovered #{cp.tinker_path} -> #{inspect(new_pid)}")
+      :ok
+    end,
+    on_failure: fn run_id, reason ->
+      Logger.warning("Recovery failed for #{run_id}: #{inspect(reason)}")
+      :ok
+    end
+  )
+
+{:ok, service} = Tinkex.ServiceClient.start_link(config: config)
+
+{:ok, executor} =
+  Tinkex.Recovery.Executor.start_link(
+    max_concurrent: 2
+  )
+
+{:ok, monitor} =
+  Tinkex.Recovery.Monitor.start_link(
+    executor: executor,
+    policy: policy
+  )
+
+:ok = Tinkex.Recovery.Monitor.monitor_run(monitor, "run-123", service)
+```
+
+What to know:
+- Strategies: `:latest` (uses `TrainingRun.last_checkpoint`) and `{:specific, path}` are supported today; `:best` is reserved for future work.
+- Optimizer restore defaults to `true`; set `restore_optimizer: false` for weights-only restarts.
+- Telemetry: `[:tinkex, :recovery, :detected | :started | :checkpoint_selected | :client_created | :completed | :failed | :exhausted]` emits run/attempt metadata. Attach handlers to trace the loop.
+- Concurrency guard: `Executor.start_link/1` accepts `max_concurrent` (default: 1) to prevent runaway restart storms.
+- Config: `Tinkex.Config.new(recovery: %{...})` stores a policy alongside other client settings for reuse in supervisors.
+- Examples: offline `mix run examples/recovery_simulated.exs` and live `mix run examples/recovery_live_injected.exs` (injects a single `corrupted: true` poll; requires `TINKER_API_KEY`).
 
 ## Multipart file uploads
 
@@ -247,6 +299,7 @@ Highlighted live flows:
 - `mix run examples/multimodal_resume_and_cleanup.exs` (multimodal with `expected_tokens`, optimizer resume helper, default checkpoint cache)
 - `mix run examples/checkpoint_multi_delete_live.exs` (create two checkpoints then delete both with a single CLI call)
 - `mix run examples/llama3_tokenizer_override_live.exs` (Llama-3 tokenizer override via live encode/decode)
+- Recovery walkthroughs: `mix run examples/recovery_simulated.exs` (offline) and `mix run examples/recovery_live_injected.exs` (live API with injected corruption flag)
 
 ### Live example
 
@@ -511,6 +564,7 @@ mix docs
 - Environment & advanced config: `docs/guides/environment_configuration.md`, `docs/guides/advanced_configuration.md`
 - API overview & parity checklist: `docs/guides/api_reference.md`
 - Futures/retries: `docs/guides/futures_and_async.md`, `docs/guides/retry_and_error_handling.md`
+- Recovery automation (opt-in restarts): `docs/guides/recovery.md`
 - Tokenization and end-to-end training: `docs/guides/tokenization.md`, `docs/guides/training_loop.md`
 - Custom loss/regularizers: `docs/guides/regularizers.md`, `docs/guides/forward_inference.md`
 - Checkpoints & persistence: `docs/guides/checkpoint_management.md`, `docs/guides/training_persistence.md`
