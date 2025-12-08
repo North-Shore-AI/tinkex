@@ -19,8 +19,17 @@ defmodule Tinkex.Future.PollTest do
 
     @impl true
     def on_queue_state_change(queue_state) do
+      maybe_send(queue_state, %{})
+    end
+
+    @impl true
+    def on_queue_state_change(queue_state, metadata) do
+      maybe_send(queue_state, metadata)
+    end
+
+    defp maybe_send(queue_state, metadata) do
       case :persistent_term.get({__MODULE__, :pid}, nil) do
-        pid when is_pid(pid) -> send(pid, {:observer_called, queue_state})
+        pid when is_pid(pid) -> send(pid, {:observer_called, queue_state, metadata})
         _ -> :ok
       end
     end
@@ -102,7 +111,8 @@ defmodule Tinkex.Future.PollTest do
            "type" => "try_again",
            "request_id" => "req-try",
            "queue_state" => "paused_rate_limit",
-           "retry_after_ms" => nil
+           "retry_after_ms" => nil,
+           "queue_state_reason" => "server throttle"
          }, []},
         {200, %{"status" => "completed", "result" => %{"done" => true}}, []}
       ])
@@ -126,10 +136,15 @@ defmodule Tinkex.Future.PollTest do
       assert {:ok, %{"done" => true}} = Task.await(task, 1_000)
       assert_receive {:slept, 1_000}
 
-      assert_receive {:telemetry, [:tinkex, :queue, :state_change], %{},
-                      %{queue_state: :paused_rate_limit, request_id: "req-try"}}
+      assert_receive {:telemetry, [:tinkex, :queue, :state_change], %{}, metadata}
 
-      assert_receive {:observer_called, :paused_rate_limit}
+      assert metadata.queue_state == :paused_rate_limit
+      assert metadata.request_id == "req-try"
+      assert metadata.queue_state_reason == "server throttle"
+
+      assert_receive {:observer_called, :paused_rate_limit,
+                      %{queue_state_reason: "server throttle"}}
+
       :telemetry.detach(handler_id)
     end
 
@@ -148,6 +163,52 @@ defmodule Tinkex.Future.PollTest do
         )
 
       assert {:error, %Error{type: :api_timeout}} = Task.await(task, 1_000)
+    end
+
+    test "emits telemetry and returns retryable error on 410 expired promise", %{
+      bypass: bypass,
+      config: config
+    } do
+      Bypass.expect_once(bypass, "POST", "/api/v1/retrieve_future", fn conn ->
+        resp(conn, 410, %{"message" => "promise expired", "category" => "server"})
+      end)
+
+      handler_id = attach_telemetry([[:tinkex, :future, :api_error]])
+
+      task = Future.poll("req-expired", config: config)
+
+      assert {:error, %Error{status: 410, category: :server} = error} = Task.await(task, 1_000)
+      assert error.message =~ "expired"
+
+      assert_receive {:telemetry, [:tinkex, :future, :api_error], measurements, metadata}
+      assert metadata.request_id == "req-expired"
+      assert metadata.status == 410
+      assert is_integer(measurements.elapsed_time)
+
+      :telemetry.detach(handler_id)
+    end
+
+    test "emits timeout telemetry when poll exceeds timeout", %{bypass: bypass, config: config} do
+      Bypass.expect(bypass, fn conn ->
+        resp(conn, 200, %{"status" => "pending"})
+      end)
+
+      handler_id = attach_telemetry([[:tinkex, :future, :timeout]])
+
+      task =
+        Future.poll("req-timeout-telemetry",
+          config: config,
+          timeout: 5,
+          sleep_fun: fn _ -> :ok end
+        )
+
+      assert {:error, %Error{type: :api_timeout}} = Task.await(task, 1_000)
+
+      assert_receive {:telemetry, [:tinkex, :future, :timeout], measurements, metadata}
+      assert metadata.request_id == "req-timeout-telemetry"
+      assert measurements.elapsed_time >= 0
+
+      :telemetry.detach(handler_id)
     end
   end
 

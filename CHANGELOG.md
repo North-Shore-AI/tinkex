@@ -4,9 +4,19 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+- No changes yet.
+
 ## [0.2.1] - 2025-12-07
 
 ### Changed
+- `AdamParams` now includes `weight_decay` and `grad_clip_norm` fields with validation and JSON encoding to match Python SDK defaults.
+- Queue backpressure propagates `queue_state_reason` through `TryAgainResponse`/`Future` telemetry and observers, preferring server-supplied reasons in logs with updated human-readable messages.
+- Training chunking uses a shared byte estimator (images/assets/text/tensors) with 1024-item / 5MB caps instead of count-based limits.
+- Sampling dispatch adds byte-aware throttling (layered semaphores, 20× penalties after recent backoff) with size-based 429 backoffs (1s for ≤128KB, 5s otherwise).
+- Future polling now emits telemetry for timeouts and API/connection/request failures, and treats HTTP 410 “promise expired” responses as retryable with clearer messaging.
+- Retry semaphores support caller-provided keys; SamplingClient scopes retry capacity per session instead of sharing by limit value.
+- Sampling queue-state debounce entries can be cleared (`clear_queue_state_debounce/1`) and are cleaned up on client termination to avoid persistent_term growth.
+- New live examples: `adam_and_chunking_live.exs` (AdamParams + byte chunking) and `queue_reasons_and_sampling_throttling.exs` (queue reasons + dispatch throttling) added to `examples/run_all.sh` and README.
 - **Major refactor of god files**: Split 4 large modules into smaller, focused sub-modules for improved maintainability:
   - `Tinkex.CLI` (2,155 → 82 lines): Extracted to `CLI.Commands.{Checkpoint, Run, Sample, Version}`, `CLI.Formatting`, `CLI.Pagination`, `CLI.Parser`
   - `Tinkex.TrainingClient` (1,762 → 1,031 lines): Extracted to `TrainingClient.{Operations, Polling, DataProcessor, Tokenizer, Observer}`

@@ -8,7 +8,7 @@ defmodule Tinkex.RetrySemaphore do
 
   use GenServer
 
-  @type semaphore_name :: {:tinkex_retry, pos_integer()}
+  @type semaphore_name :: {:tinkex_retry, term(), pos_integer()}
 
   @doc """
   Start the semaphore supervisor and underlying semaphore server.
@@ -22,8 +22,17 @@ defmodule Tinkex.RetrySemaphore do
   """
   @spec get_semaphore(pos_integer()) :: semaphore_name()
   def get_semaphore(max_connections) when is_integer(max_connections) and max_connections > 0 do
+    get_semaphore({:default, max_connections}, max_connections)
+  end
+
+  @doc """
+  Return the semaphore name for a given key and max_connections.
+  """
+  @spec get_semaphore(term(), pos_integer()) :: semaphore_name()
+  def get_semaphore(key, max_connections)
+      when is_integer(max_connections) and max_connections > 0 do
     ensure_started()
-    {:tinkex_retry, max_connections}
+    {:tinkex_retry, key, max_connections}
   end
 
   @doc """
@@ -33,6 +42,22 @@ defmodule Tinkex.RetrySemaphore do
   @spec with_semaphore(pos_integer(), (-> term())) :: term()
   def with_semaphore(max_connections, fun) when is_function(fun, 0) do
     name = get_semaphore(max_connections)
+    acquire_blocking(name, max_connections)
+
+    try do
+      fun.()
+    after
+      Semaphore.release(name)
+    end
+  end
+
+  @doc """
+  Execute `fun` while holding a keyed semaphore. Callers can provide a unique
+  key to isolate capacity between clients even when max_connections matches.
+  """
+  @spec with_semaphore(term(), pos_integer(), (-> term())) :: term()
+  def with_semaphore(key, max_connections, fun) when is_function(fun, 0) do
+    name = get_semaphore(key, max_connections)
     acquire_blocking(name, max_connections)
 
     try do

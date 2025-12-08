@@ -99,7 +99,7 @@ defmodule Tinkex.TrainingClientTest do
       )
 
     data =
-      Enum.map(1..130, fn idx ->
+      Enum.map(1..1_025, fn idx ->
         %Datum{model_input: ModelInput.from_ints([idx])}
       end)
 

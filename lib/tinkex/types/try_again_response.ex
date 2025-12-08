@@ -9,13 +9,14 @@ defmodule Tinkex.Types.TryAgainResponse do
   alias Tinkex.Types.QueueState
 
   @enforce_keys [:type, :request_id, :queue_state]
-  defstruct [:type, :request_id, :queue_state, :retry_after_ms]
+  defstruct [:type, :request_id, :queue_state, :retry_after_ms, :queue_state_reason]
 
   @type t :: %__MODULE__{
           type: String.t(),
           request_id: String.t(),
           queue_state: QueueState.t(),
-          retry_after_ms: non_neg_integer() | nil
+          retry_after_ms: non_neg_integer() | nil,
+          queue_state_reason: String.t() | nil
         }
 
   @doc """
@@ -37,13 +38,15 @@ defmodule Tinkex.Types.TryAgainResponse do
 
     request_id = fetch_binary!(map, :request_id)
     queue_state = fetch_binary!(map, :queue_state)
+    queue_state_reason = normalize_optional_string(get_optional(map, :queue_state_reason))
     retry_after_ms = normalize_retry_after(get_optional(map, :retry_after_ms))
 
     %__MODULE__{
       type: type,
       request_id: request_id,
       queue_state: QueueState.parse(queue_state),
-      retry_after_ms: retry_after_ms
+      retry_after_ms: retry_after_ms,
+      queue_state_reason: queue_state_reason
     }
   end
 
@@ -87,5 +90,14 @@ defmodule Tinkex.Types.TryAgainResponse do
   defp normalize_retry_after(value) do
     raise ArgumentError,
           "expected retry_after_ms to be nil or non-negative integer, got: #{inspect(value)}"
+  end
+
+  defp normalize_optional_string(nil), do: nil
+
+  defp normalize_optional_string(value) when is_binary(value), do: value
+
+  defp normalize_optional_string(value) do
+    raise ArgumentError,
+          "expected queue_state_reason to be nil or binary, got: #{inspect(value)}"
   end
 end

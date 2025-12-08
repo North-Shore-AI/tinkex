@@ -17,7 +17,7 @@ defmodule Tinkex.SamplingClient do
   human-readable warnings when queue state changes indicate rate limiting
   or capacity issues:
 
-      [warning] Sampling is paused for session-123. Reason: concurrent LoRA rate limit hit
+      [warning] Sampling is paused for session-123. Reason: concurrent sampler weights limit hit
 
   Logs are debounced to once per 60 seconds per session to avoid spam.
   """
@@ -33,14 +33,15 @@ defmodule Tinkex.SamplingClient do
   alias Tinkex.QueueStateLogger
 
   alias Tinkex.{
+    ByteEstimator,
     Error,
     Future,
     RateLimiter,
-    PoolKey,
     Retry,
     RetryConfig,
     RetryHandler,
     RetrySemaphore,
+    SamplingDispatch,
     SamplingRegistry
   }
 
@@ -56,8 +57,12 @@ defmodule Tinkex.SamplingClient do
     SamplingParams
   }
 
+  alias Tinkex.Types.QueueState
+
   @type t :: pid()
   @default_dispatch_concurrency 400
+  @throttled_dispatch_concurrency 10
+  @default_byte_budget 5 * 1024 * 1024
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts \\ []) do
@@ -149,6 +154,14 @@ defmodule Tinkex.SamplingClient do
       |> Map.new()
       |> Map.put_new(:session_id, session_id)
 
+    limiter = RateLimiter.for_key({config.base_url, config.api_key})
+    request_counter = :atomics.new(1, signed: false)
+
+    dispatch_limit =
+      normalize_dispatch_limit(
+        Keyword.get(opts, :dispatch_concurrency, @default_dispatch_concurrency)
+      )
+
     with :ok <- validate_sampling_inputs(base_model, model_path),
          {:ok, sampling_session_id} <-
            resolve_sampling_session_id(
@@ -160,10 +173,17 @@ defmodule Tinkex.SamplingClient do
              config,
              telemetry_metadata,
              service_api
+           ),
+         {:ok, dispatch} <-
+           SamplingDispatch.start_link(
+             rate_limiter: limiter,
+             base_url: config.base_url,
+             api_key: config.api_key,
+             concurrency: dispatch_limit,
+             throttled_concurrency:
+               Keyword.get(opts, :throttled_dispatch_concurrency, @throttled_dispatch_concurrency),
+             byte_budget: Keyword.get(opts, :byte_budget, @default_byte_budget)
            ) do
-      limiter = RateLimiter.for_key({config.base_url, config.api_key})
-      request_counter = :atomics.new(1, signed: false)
-
       telemetry_metadata =
         opts
         |> Keyword.get(:telemetry_metadata, %{})
@@ -171,14 +191,12 @@ defmodule Tinkex.SamplingClient do
         |> Map.put_new(:session_id, session_id)
         |> Map.put_new(:sampling_session_id, sampling_session_id)
 
-      dispatch_semaphore = build_dispatch_semaphore(config, opts)
-
       entry = %{
         sampling_session_id: sampling_session_id,
         http_pool: config.http_pool,
         request_id_counter: request_counter,
         rate_limiter: limiter,
-        dispatch_semaphore: dispatch_semaphore,
+        dispatch: dispatch,
         config: config,
         retry_config: retry_config,
         sampling_api: sampling_api,
@@ -197,7 +215,7 @@ defmodule Tinkex.SamplingClient do
          sampling_session_id: sampling_session_id,
          request_id_counter: request_counter,
          rate_limiter: limiter,
-         dispatch_semaphore: dispatch_semaphore,
+         dispatch: dispatch,
          config: config,
          retry_config: retry_config,
          sampling_api: sampling_api,
@@ -212,6 +230,7 @@ defmodule Tinkex.SamplingClient do
 
   @impl true
   def terminate(_reason, state) do
+    clear_queue_state_debounce(state[:sampling_session_id])
     Reporter.stop(state[:telemetry])
     :ok
   end
@@ -244,6 +263,7 @@ defmodule Tinkex.SamplingClient do
   @impl Tinkex.QueueStateObserver
   def on_queue_state_change(queue_state, metadata \\ %{}) do
     session_id = metadata[:sampling_session_id] || metadata[:session_id] || "unknown"
+    server_reason = metadata[:queue_state_reason]
 
     # Look up the last logged timestamp from ETS registry
     # Use :persistent_term for debounce tracking keyed by session_id
@@ -255,7 +275,8 @@ defmodule Tinkex.SamplingClient do
         ts -> ts
       end
 
-    new_timestamp = QueueStateLogger.maybe_log(queue_state, :sampling, session_id, last_logged)
+    new_timestamp =
+      QueueStateLogger.maybe_log(queue_state, :sampling, session_id, last_logged, server_reason)
 
     # Update the debounce timestamp if it changed
     if new_timestamp != last_logged do
@@ -265,16 +286,37 @@ defmodule Tinkex.SamplingClient do
     :ok
   end
 
+  @doc """
+  Clear debounce state for a sampling session to avoid unbounded growth.
+  """
+  @spec clear_queue_state_debounce(String.t()) :: :ok
+  def clear_queue_state_debounce(session_id) when is_binary(session_id) do
+    debounce_key = {:sampling_queue_state_debounce, session_id}
+
+    try do
+      :persistent_term.erase(debounce_key)
+    rescue
+      ArgumentError ->
+        :ok
+    end
+
+    :ok
+  end
+
   defp do_sample(client, prompt, sampling_params, opts) do
     case :ets.lookup(:tinkex_sampling_clients, {:config, client}) do
       [{{:config, ^client}, entry}] ->
-        with_dispatch(entry, fn ->
+        estimated_bytes = ByteEstimator.estimate_model_input_bytes(prompt)
+
+        dispatch_fun = fn ->
           if entry.retry_config.enable_retry_logic do
-            do_sample_with_retry(entry, prompt, sampling_params, opts)
+            do_sample_with_retry(entry, prompt, sampling_params, estimated_bytes, opts)
           else
-            do_sample_once(entry, prompt, sampling_params, opts)
+            do_sample_once(entry, prompt, sampling_params, estimated_bytes, opts)
           end
-        end)
+        end
+
+        SamplingDispatch.with_rate_limit(entry.dispatch, estimated_bytes, dispatch_fun)
 
       [] ->
         {:error, Error.new(:validation, "SamplingClient not initialized")}
@@ -361,18 +403,6 @@ defmodule Tinkex.SamplingClient do
     :atomics.add_get(counter, 1, 1) - 1
   end
 
-  defp maybe_set_backoff(limiter, %Error{retry_after_ms: retry_after_ms}) do
-    duration_ms =
-      case retry_after_ms do
-        value when is_integer(value) -> value
-        _ -> 1_000
-      end
-
-    RateLimiter.set_backoff(limiter, duration_ms)
-  end
-
-  defp maybe_set_backoff(_limiter, _error), do: :ok
-
   defp handle_sample_response(%{"request_id" => _} = future, entry, seq_id, opts) do
     poll_sample_future(future, entry, seq_id, opts)
   end
@@ -417,56 +447,8 @@ defmodule Tinkex.SamplingClient do
     |> Map.merge(Map.new(override))
   end
 
-  defp build_dispatch_semaphore(config, opts) do
-    limit =
-      opts
-      |> Keyword.get(:dispatch_concurrency, @default_dispatch_concurrency)
-      |> normalize_dispatch_limit()
-
-    ensure_dispatch_semaphore_started()
-
-    %{
-      name:
-        {:tinkex_sampling_dispatch, PoolKey.normalize_base_url(config.base_url), config.api_key,
-         limit},
-      limit: limit
-    }
-  end
-
   defp normalize_dispatch_limit(limit) when is_integer(limit) and limit > 0, do: limit
   defp normalize_dispatch_limit(_), do: @default_dispatch_concurrency
-
-  defp with_dispatch(%{dispatch_semaphore: semaphore}, fun) do
-    acquire_dispatch(semaphore.name, semaphore.limit)
-
-    try do
-      fun.()
-    after
-      Semaphore.release(semaphore.name)
-    end
-  end
-
-  defp acquire_dispatch(name, limit) do
-    case Semaphore.acquire(name, limit) do
-      true ->
-        :ok
-
-      false ->
-        Process.sleep(2)
-        acquire_dispatch(name, limit)
-    end
-  end
-
-  defp ensure_dispatch_semaphore_started do
-    case Process.whereis(Semaphore) do
-      nil ->
-        {:ok, _pid} = Semaphore.start_link()
-        :ok
-
-      _pid ->
-        :ok
-    end
-  end
 
   defp put_telemetry(nil), do: :ok
   defp put_telemetry(pid), do: :erlang.put({__MODULE__, :telemetry}, pid)
@@ -477,25 +459,25 @@ defmodule Tinkex.SamplingClient do
 
   defp build_retry_config(opts) when is_list(opts), do: RetryConfig.new(opts)
 
-  defp do_sample_with_retry(entry, prompt, sampling_params, opts) do
+  defp do_sample_with_retry(entry, prompt, sampling_params, estimated_bytes, opts) do
     handler = RetryHandler.from_config(entry.retry_config)
 
     execute = fn ->
       Retry.with_retry(
-        fn -> do_sample_once(entry, prompt, sampling_params, opts) end,
+        fn -> do_sample_once(entry, prompt, sampling_params, estimated_bytes, opts) end,
         handler: handler,
         telemetry_metadata: entry.telemetry_metadata
       )
     end
 
     if entry.retry_config.max_connections > 0 do
-      RetrySemaphore.with_semaphore(entry.retry_config.max_connections, execute)
+      RetrySemaphore.with_semaphore(entry.session_id, entry.retry_config.max_connections, execute)
     else
       execute.()
     end
   end
 
-  defp do_sample_once(entry, prompt, sampling_params, opts) do
+  defp do_sample_once(entry, prompt, sampling_params, estimated_bytes, opts) do
     RateLimiter.wait_for_backoff(entry.rate_limiter)
     seq_id = next_seq_id(entry.request_id_counter)
 
@@ -526,11 +508,45 @@ defmodule Tinkex.SamplingClient do
         handle_sample_response(resp, entry, seq_id, opts)
 
       {:error, %Error{status: 429} = error} ->
-        maybe_set_backoff(entry.rate_limiter, error)
+        maybe_log_queue_state_from_error(entry, error)
+        SamplingDispatch.set_backoff(entry.dispatch, backoff_duration(estimated_bytes))
         {:error, error}
 
       {:error, %Error{} = error} ->
         {:error, error}
     end
   end
+
+  defp backoff_duration(estimated_bytes) when estimated_bytes <= 128 * 1024, do: 1_000
+  defp backoff_duration(_estimated_bytes), do: 5_000
+
+  defp maybe_log_queue_state_from_error(entry, %Error{data: data}) when is_map(data) do
+    queue_state =
+      Map.get(data, "queue_state") ||
+        Map.get(data, :queue_state)
+
+    reason =
+      Map.get(data, "queue_state_reason") ||
+        Map.get(data, :queue_state_reason)
+
+    request_id = Map.get(data, "request_id") || Map.get(data, :request_id)
+
+    case QueueState.parse(queue_state) do
+      :unknown ->
+        :ok
+
+      parsed_state ->
+        metadata =
+          %{
+            sampling_session_id: entry.sampling_session_id,
+            session_id: entry.session_id,
+            request_id: request_id,
+            queue_state_reason: reason
+          }
+
+        on_queue_state_change(parsed_state, metadata)
+    end
+  end
+
+  defp maybe_log_queue_state_from_error(_entry, _), do: :ok
 end

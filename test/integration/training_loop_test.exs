@@ -122,7 +122,7 @@ defmodule Tinkex.Integration.TrainingLoopTest do
       ServiceClient.create_lora_training_client(service, "integration-base")
 
     data =
-      Enum.map(1..130, fn idx ->
+      Enum.map(1..1_025, fn idx ->
         %Datum{model_input: ModelInput.from_ints([idx])}
       end)
 

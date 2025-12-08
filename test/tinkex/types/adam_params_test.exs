@@ -13,6 +13,8 @@ defmodule Tinkex.Types.AdamParamsTest do
       assert params.beta2 == 0.95
       # NOT 1e-8!
       assert params.eps == 1.0e-12
+      assert params.weight_decay == 0.0
+      assert params.grad_clip_norm == 0.0
     end
 
     test "accepts custom values" do
@@ -21,13 +23,17 @@ defmodule Tinkex.Types.AdamParamsTest do
           learning_rate: 0.001,
           beta1: 0.8,
           beta2: 0.9,
-          eps: 1.0e-8
+          eps: 1.0e-8,
+          weight_decay: 0.1,
+          grad_clip_norm: 1.5
         )
 
       assert params.learning_rate == 0.001
       assert params.beta1 == 0.8
       assert params.beta2 == 0.9
       assert params.eps == 1.0e-8
+      assert params.weight_decay == 0.1
+      assert params.grad_clip_norm == 1.5
     end
 
     test "rejects non-positive learning rate" do
@@ -54,6 +60,14 @@ defmodule Tinkex.Types.AdamParamsTest do
 
       assert {:error, _} = AdamParams.new(eps: -1.0e-8)
     end
+
+    test "rejects negative weight_decay or grad_clip_norm" do
+      assert {:error, msg} = AdamParams.new(weight_decay: -0.01)
+      assert msg =~ "weight_decay"
+
+      assert {:error, msg} = AdamParams.new(grad_clip_norm: -1.0)
+      assert msg =~ "grad_clip_norm"
+    end
   end
 
   describe "JSON encoding" do
@@ -66,6 +80,8 @@ defmodule Tinkex.Types.AdamParamsTest do
       assert decoded["beta1"] == 0.9
       assert decoded["beta2"] == 0.95
       assert decoded["eps"] == 1.0e-12
+      assert decoded["weight_decay"] == 0.0
+      assert decoded["grad_clip_norm"] == 0.0
 
       # Ensure we use 'eps', NOT 'epsilon'
       assert Map.has_key?(decoded, "eps")

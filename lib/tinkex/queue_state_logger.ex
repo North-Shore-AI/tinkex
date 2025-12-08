@@ -5,26 +5,27 @@ defmodule Tinkex.QueueStateLogger do
   Provides human-readable messages matching Python SDK behavior,
   with debouncing to avoid log spam. Used by `SamplingClient` and
   `TrainingClient` to automatically log when queue state transitions
-  indicate rate limiting or capacity issues.
+  indicate rate limiting or capacity issues. Server-supplied reasons
+  take precedence when available.
 
   ## Debouncing
 
   Logs are rate-limited to once per 60 seconds (by default) per client
-  to prevent spam during sustained rate limiting. The `maybe_log/4`
+  to prevent spam during sustained rate limiting. The `maybe_log/5`
   function handles this automatically.
 
   ## Message Format
 
   Messages follow the Python SDK format:
 
-      [warning] Sampling is paused for sampler abc-123. Reason: concurrent LoRA rate limit hit
-      [warning] Training is paused for model-xyz. Reason: out of capacity
+      [warning] Sampling is paused for sampler abc-123. Reason: concurrent sampler weights limit hit
+      [warning] Training is paused for model-xyz. Reason: Tinker backend is running short on capacity, please wait
 
   ## Client-Specific Reasons
 
-  - **SamplingClient**: "concurrent LoRA rate limit hit" for rate limits
-  - **TrainingClient**: "concurrent models rate limit hit" for rate limits
-  - Both use "out of capacity" for capacity limits
+  - **SamplingClient**: "concurrent sampler weights limit hit" for rate limits
+  - **TrainingClient**: "concurrent training clients rate limit hit" for rate limits
+  - Both use "Tinker backend is running short on capacity, please wait" for capacity limits
   """
 
   require Logger
@@ -38,29 +39,46 @@ defmodule Tinkex.QueueStateLogger do
   Log a queue state change with appropriate human-readable reason.
 
   Does not log for `:active` state. For non-active states, logs a warning
-  with a human-readable message including the identifier and reason.
+  with a human-readable message including the identifier and reason. When
+  provided, `server_reason` takes precedence over client defaults.
 
   ## Parameters
 
   - `queue_state` - One of `:active`, `:paused_rate_limit`, `:paused_capacity`, `:unknown`
   - `client_type` - Either `:sampling` or `:training`
   - `identifier` - Session ID for sampling, model ID for training
+  - `server_reason` - Optional server-supplied reason string
 
   ## Examples
 
       iex> Tinkex.QueueStateLogger.log_state_change(:paused_rate_limit, :sampling, "session-123")
       :ok
-      # Logs: [warning] Sampling is paused for session-123. Reason: concurrent LoRA rate limit hit
+      # Logs: [warning] Sampling is paused for session-123. Reason: concurrent sampler weights limit hit
 
   """
-  @spec log_state_change(queue_state(), client_type(), String.t()) :: :ok
-  def log_state_change(:active, _client_type, _identifier), do: :ok
+  @spec log_state_change(queue_state(), client_type(), String.t(), String.t() | nil) :: :ok
+  def log_state_change(queue_state, client_type, identifier, server_reason \\ nil)
 
-  def log_state_change(queue_state, client_type, identifier) do
-    reason = reason_for_state(queue_state, client_type)
+  def log_state_change(:active, _client_type, _identifier, _server_reason), do: :ok
+
+  def log_state_change(queue_state, client_type, identifier, server_reason) do
+    reason = resolve_reason(queue_state, client_type, server_reason)
     action = client_type_name(client_type)
 
     Logger.warning("#{action} is paused for #{identifier}. Reason: #{reason}")
+  end
+
+  @doc """
+  Resolve reason string, preferring a non-empty server-supplied value.
+  """
+  @spec resolve_reason(queue_state(), client_type(), String.t() | nil) :: String.t()
+  def resolve_reason(_queue_state, _client_type, reason)
+      when is_binary(reason) and byte_size(reason) > 0 do
+    reason
+  end
+
+  def resolve_reason(queue_state, client_type, _reason) do
+    reason_for_state(queue_state, client_type)
   end
 
   @doc """
@@ -105,19 +123,24 @@ defmodule Tinkex.QueueStateLogger do
   ## Examples
 
       iex> Tinkex.QueueStateLogger.reason_for_state(:paused_rate_limit, :sampling)
-      "concurrent LoRA rate limit hit"
+      "concurrent sampler weights limit hit"
 
       iex> Tinkex.QueueStateLogger.reason_for_state(:paused_rate_limit, :training)
-      "concurrent models rate limit hit"
+      "concurrent training clients rate limit hit"
 
       iex> Tinkex.QueueStateLogger.reason_for_state(:paused_capacity, :sampling)
-      "out of capacity"
+      "Tinker backend is running short on capacity, please wait"
 
   """
   @spec reason_for_state(queue_state(), client_type()) :: String.t()
-  def reason_for_state(:paused_rate_limit, :sampling), do: "concurrent LoRA rate limit hit"
-  def reason_for_state(:paused_rate_limit, :training), do: "concurrent models rate limit hit"
-  def reason_for_state(:paused_capacity, _), do: "out of capacity"
+  def reason_for_state(:paused_rate_limit, :sampling), do: "concurrent sampler weights limit hit"
+
+  def reason_for_state(:paused_rate_limit, :training),
+    do: "concurrent training clients rate limit hit"
+
+  def reason_for_state(:paused_capacity, _),
+    do: "Tinker backend is running short on capacity, please wait"
+
   def reason_for_state(_, _), do: "unknown"
 
   @doc """
@@ -135,6 +158,7 @@ defmodule Tinkex.QueueStateLogger do
   - `client_type` - Either `:sampling` or `:training`
   - `identifier` - Session ID or model ID
   - `last_logged_at` - Timestamp of last log, or `nil`
+  - `server_reason` - Optional server-supplied reason to log
 
   ## Returns
 
@@ -157,12 +181,16 @@ defmodule Tinkex.QueueStateLogger do
       # No log output
 
   """
-  @spec maybe_log(queue_state(), client_type(), String.t(), integer() | nil) :: integer() | nil
-  def maybe_log(:active, _client_type, _identifier, last_logged_at), do: last_logged_at
+  @spec maybe_log(queue_state(), client_type(), String.t(), integer() | nil, String.t() | nil) ::
+          integer() | nil
+  def maybe_log(queue_state, client_type, identifier, last_logged_at, server_reason \\ nil)
 
-  def maybe_log(queue_state, client_type, identifier, last_logged_at) do
+  def maybe_log(:active, _client_type, _identifier, last_logged_at, _server_reason),
+    do: last_logged_at
+
+  def maybe_log(queue_state, client_type, identifier, last_logged_at, server_reason) do
     if should_log?(last_logged_at) do
-      log_state_change(queue_state, client_type, identifier)
+      log_state_change(queue_state, client_type, identifier, server_reason)
       System.monotonic_time(:millisecond)
     else
       last_logged_at

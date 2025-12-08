@@ -22,6 +22,7 @@ defmodule Tinkex.TrainingClient.Observer do
   @impl Tinkex.QueueStateObserver
   def on_queue_state_change(queue_state, metadata \\ %{}) do
     model_id = metadata[:model_id] || "unknown"
+    server_reason = metadata[:queue_state_reason]
 
     # Use :persistent_term for debounce tracking keyed by model_id
     debounce_key = {:training_queue_state_debounce, model_id}
@@ -32,7 +33,8 @@ defmodule Tinkex.TrainingClient.Observer do
         ts -> ts
       end
 
-    new_timestamp = QueueStateLogger.maybe_log(queue_state, :training, model_id, last_logged)
+    new_timestamp =
+      QueueStateLogger.maybe_log(queue_state, :training, model_id, last_logged, server_reason)
 
     # Update the debounce timestamp if it changed
     if new_timestamp != last_logged do

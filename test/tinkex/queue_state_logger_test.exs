@@ -14,7 +14,7 @@ defmodule Tinkex.QueueStateLoggerTest do
 
       assert log =~ "Sampling is paused"
       assert log =~ "session-123"
-      assert log =~ "concurrent LoRA rate limit hit"
+      assert log =~ "concurrent sampler weights limit hit"
     end
 
     test "logs warning for paused_rate_limit with training" do
@@ -25,7 +25,7 @@ defmodule Tinkex.QueueStateLoggerTest do
 
       assert log =~ "Training is paused"
       assert log =~ "model-abc"
-      assert log =~ "concurrent models rate limit hit"
+      assert log =~ "concurrent training clients rate limit hit"
     end
 
     test "logs warning for paused_capacity with sampling" do
@@ -36,7 +36,7 @@ defmodule Tinkex.QueueStateLoggerTest do
 
       assert log =~ "Sampling is paused"
       assert log =~ "session-456"
-      assert log =~ "out of capacity"
+      assert log =~ "running short on capacity, please wait"
     end
 
     test "logs warning for paused_capacity with training" do
@@ -47,7 +47,7 @@ defmodule Tinkex.QueueStateLoggerTest do
 
       assert log =~ "Training is paused"
       assert log =~ "model-xyz"
-      assert log =~ "out of capacity"
+      assert log =~ "running short on capacity, please wait"
     end
 
     test "does not log for active state" do
@@ -68,6 +68,21 @@ defmodule Tinkex.QueueStateLoggerTest do
       assert log =~ "Training is paused"
       assert log =~ "model-xyz"
       assert log =~ "unknown"
+    end
+
+    test "prefers server-provided reason" do
+      log =
+        capture_log(fn ->
+          QueueStateLogger.log_state_change(
+            :paused_rate_limit,
+            :sampling,
+            "session-override",
+            "server reason"
+          )
+        end)
+
+      assert log =~ "server reason"
+      refute log =~ "concurrent sampler weights limit hit"
     end
   end
 
@@ -96,27 +111,47 @@ defmodule Tinkex.QueueStateLoggerTest do
   end
 
   describe "reason_for_state/2" do
-    test "returns LoRA message for sampling rate limit" do
+    test "returns sampler message for sampling rate limit" do
       assert QueueStateLogger.reason_for_state(:paused_rate_limit, :sampling) ==
-               "concurrent LoRA rate limit hit"
+               "concurrent sampler weights limit hit"
     end
 
-    test "returns models message for training rate limit" do
+    test "returns training clients message for training rate limit" do
       assert QueueStateLogger.reason_for_state(:paused_rate_limit, :training) ==
-               "concurrent models rate limit hit"
+               "concurrent training clients rate limit hit"
     end
 
     test "returns capacity message for sampling" do
-      assert QueueStateLogger.reason_for_state(:paused_capacity, :sampling) == "out of capacity"
+      assert QueueStateLogger.reason_for_state(:paused_capacity, :sampling) ==
+               "Tinker backend is running short on capacity, please wait"
     end
 
     test "returns capacity message for training" do
-      assert QueueStateLogger.reason_for_state(:paused_capacity, :training) == "out of capacity"
+      assert QueueStateLogger.reason_for_state(:paused_capacity, :training) ==
+               "Tinker backend is running short on capacity, please wait"
     end
 
     test "returns unknown for unknown state" do
       assert QueueStateLogger.reason_for_state(:unknown, :sampling) == "unknown"
       assert QueueStateLogger.reason_for_state(:unknown, :training) == "unknown"
+    end
+  end
+
+  describe "resolve_reason/3" do
+    test "uses server reason when provided" do
+      assert QueueStateLogger.resolve_reason(
+               :paused_rate_limit,
+               :sampling,
+               "server provided"
+             ) == "server provided"
+    end
+
+    test "falls back to defaults when server reason missing" do
+      assert QueueStateLogger.resolve_reason(:paused_rate_limit, :sampling, nil) ==
+               "concurrent sampler weights limit hit"
+
+      assert QueueStateLogger.resolve_reason(:paused_rate_limit, :training, "") ==
+               "concurrent training clients rate limit hit"
     end
   end
 
@@ -181,7 +216,7 @@ defmodule Tinkex.QueueStateLoggerTest do
         end)
 
       assert log =~ "Training is paused"
-      assert log =~ "out of capacity"
+      assert log =~ "running short on capacity, please wait"
     end
   end
 end

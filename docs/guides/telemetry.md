@@ -30,6 +30,7 @@ The telemetry reporter captures several event types:
 - **UNHANDLED_EXCEPTION** - Captured exceptions with stacktraces
 - **HTTP telemetry** - Automatic capture of `[:tinkex, :http, :request, :*]` events
 - **Queue telemetry** - Automatic capture of `[:tinkex, :queue, :state_change]` events
+- **Future telemetry** - Automatic capture of `[:tinkex, :future, :timeout | :api_error | :connection_error | :request_failed | :validation_error]` events with `request_id`, `request_type`, `status`, and elapsed time metadata
 
 ## Setting Up the Reporter
 

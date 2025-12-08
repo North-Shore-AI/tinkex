@@ -13,7 +13,7 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.2.1 Highlights
+## 0.2.0 Highlights
 
 - Opt-in recovery automation layer (Policy + Monitor + Executor) to restart corrupted training runs from checkpoints with telemetry hooks and bounded concurrency (defaults off).
 - Checkpoint timestamps now normalize to `DateTime` when ISO-8601 values are returned (strings are preserved on parse failure).
@@ -38,7 +38,7 @@ Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-
 - **Telemetry**: Comprehensive observability through Elixir's telemetry ecosystem
 - **Metrics Aggregation**: Built-in `Tinkex.Metrics` for counters, gauges, and latency percentiles with snapshot/export helpers
 - **Session lifecycle resilience**: `SessionManager.stop_session/2` waits for heartbeat cleanup, heartbeats use the canonical `/api/v1/session_heartbeat` path, and sustained heartbeat failures now surface as warnings (after ~2 minutes by default) instead of silently dropping sessions.
-- **Queue observability**: Sampling and training clients expose queue observers that feed `Future.poll/2`, emitting debounced warnings with human-readable rate limit or capacity reasons.
+- **Queue observability**: Sampling and training clients expose queue observers that feed `Future.poll/2`, emitting debounced warnings with human-readable rate limit or capacity reasons and telemetry for queue state changes and future errors/timeouts (including HTTP 410 “expired promise” handling).
 - **REST metadata & inspection APIs**: New endpoints surface samplers, weights metadata, and training runs while the SDK exposes `GetSamplerResponse`, `WeightsInfoResponse`, `ImageChunk.expected_tokens`, `LoadWeightsRequest.optimizer`, and the `:cispo`/`:dro` `LossFnType` tags for richer load/save tooling.
 - **Checkpoint persistence**: `TrainingClient.save_state/3`, `TrainingClient.load_state/3`, `TrainingClient.load_state_with_optimizer/3`, and `ServiceClient.create_training_client_from_state/3` enable saving checkpoints and resuming training with optimizer state.
 - **Recovery automation (opt-in)**: `Tinkex.Recovery.Policy` + `Monitor` + `Executor` restart corrupted runs from checkpoints with callbacks, telemetry, and bounded concurrency; defaults off.

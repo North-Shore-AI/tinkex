@@ -43,8 +43,7 @@ defmodule Tinkex.TrainingClientObserverTest do
 
       assert log =~ "Training is paused"
       assert log =~ model_id
-      # Training uses "concurrent models rate limit hit" instead of "concurrent LoRA"
-      assert log =~ "concurrent models rate limit hit"
+      assert log =~ "concurrent training clients rate limit hit"
     end
 
     test "logs warning for paused_capacity with model ID", %{model_id: model_id} do
@@ -55,7 +54,7 @@ defmodule Tinkex.TrainingClientObserverTest do
 
       assert log =~ "Training is paused"
       assert log =~ model_id
-      assert log =~ "out of capacity"
+      assert log =~ "running short on capacity, please wait"
     end
 
     test "does not log for active state", %{model_id: model_id} do
@@ -115,6 +114,19 @@ defmodule Tinkex.TrainingClientObserverTest do
       assert log =~ "Training is paused"
       assert log =~ model_id
       assert log =~ "unknown"
+    end
+
+    test "prefers server provided reason when present", %{model_id: model_id} do
+      log =
+        capture_log(fn ->
+          TrainingClient.on_queue_state_change(:paused_rate_limit, %{
+            model_id: model_id,
+            queue_state_reason: "server override"
+          })
+        end)
+
+      assert log =~ "server override"
+      refute log =~ "concurrent training clients rate limit hit"
     end
   end
 end

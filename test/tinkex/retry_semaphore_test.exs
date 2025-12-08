@@ -80,4 +80,30 @@ defmodule Tinkex.RetrySemaphoreTest do
     # Verify max concurrent was never more than 1
     assert :atomics.get(max_seen, 1) <= 1
   end
+
+  test "separates capacity by semaphore key" do
+    parent = self()
+
+    fun = fn key ->
+      RetrySemaphore.with_semaphore(key, 1, fn ->
+        send(parent, {:entered, key, self()})
+
+        receive do
+          :proceed -> :ok
+        end
+      end)
+    end
+
+    t1 = Task.async(fn -> fun.({:client, 1}) end)
+    t2 = Task.async(fn -> fun.({:client, 2}) end)
+
+    assert_receive {:entered, {:client, 1}, pid1}, 500
+    assert_receive {:entered, {:client, 2}, pid2}, 500
+
+    send(pid1, :proceed)
+    send(pid2, :proceed)
+
+    Task.await(t1, 1_000)
+    Task.await(t2, 1_000)
+  end
 end

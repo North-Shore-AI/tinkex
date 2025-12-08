@@ -44,6 +44,11 @@ defmodule Tinkex.Future do
   }
 
   @queue_state_event [:tinkex, :queue, :state_change]
+  @telemetry_timeout [:tinkex, :future, :timeout]
+  @telemetry_api_error [:tinkex, :future, :api_error]
+  @telemetry_connection_error [:tinkex, :future, :connection_error]
+  @telemetry_request_failed [:tinkex, :future, :request_failed]
+  @telemetry_validation_error [:tinkex, :future, :validation_error]
   @initial_backoff 1_000
   @max_backoff 30_000
 
@@ -57,6 +62,7 @@ defmodule Tinkex.Future do
     defstruct request_id: nil,
               request_payload: nil,
               prev_queue_state: nil,
+              prev_queue_state_reason: nil,
               config: nil,
               metadata: %{},
               request_type: nil,
@@ -73,6 +79,7 @@ defmodule Tinkex.Future do
             request_id: String.t(),
             request_payload: map(),
             prev_queue_state: QueueState.t() | nil,
+            prev_queue_state_reason: String.t() | nil,
             config: Config.t(),
             metadata: map(),
             request_type: String.t() | nil,
@@ -162,6 +169,12 @@ defmodule Tinkex.Future do
   defp poll_loop(state, iteration) do
     case ensure_within_timeout(state) do
       {:error, error} ->
+        emit_telemetry(@telemetry_timeout, %{elapsed_time: elapsed_since_start(state)}, %{
+          request_id: state.request_id,
+          request_type: state.request_type,
+          iteration: iteration
+        })
+
         {:error, error}
 
       :ok ->
@@ -178,7 +191,21 @@ defmodule Tinkex.Future do
             |> FutureRetrieveResponse.from_json()
             |> handle_response(state, iteration)
 
+          {:error, %Error{status: 410} = error} ->
+            expired_error =
+              Error.new(
+                :api_status,
+                "Promise expired for request #{state.request_id}; submit a new request.",
+                status: 410,
+                category: error.category || :server,
+                data: %{request_id: state.request_id, original_error: error}
+              )
+
+            emit_error_telemetry(@telemetry_api_error, expired_error, iteration, state)
+            {:error, expired_error}
+
           {:error, %Error{} = error} ->
+            emit_error_telemetry(telemetry_event_for_error(error), error, iteration, state)
             {:error, error}
         end
     end
@@ -202,16 +229,24 @@ defmodule Tinkex.Future do
 
     case category do
       :user ->
+        emit_error_telemetry(@telemetry_request_failed, error, iteration, state)
         {:error, error}
 
       _ ->
+        emit_error_telemetry(@telemetry_request_failed, error, iteration, state)
         state = %{state | last_failed_error: error}
         sleep_and_continue(state, calc_backoff(iteration), iteration)
     end
   end
 
   defp handle_response(%TryAgainResponse{} = response, state, iteration) do
-    state = maybe_emit_queue_state_change(state, response.queue_state)
+    state =
+      maybe_emit_queue_state_change(
+        state,
+        response.queue_state,
+        response.queue_state_reason
+      )
+
     sleep_ms = try_again_sleep_ms(response, iteration)
     sleep_and_continue(state, sleep_ms, iteration)
   end
@@ -275,19 +310,29 @@ defmodule Tinkex.Future do
     )
   end
 
-  defp maybe_emit_queue_state_change(state, queue_state) do
+  defp maybe_emit_queue_state_change(state, queue_state, queue_state_reason) do
     cond do
       not valid_queue_state?(queue_state) ->
         state
 
-      state.prev_queue_state == queue_state ->
+      state.prev_queue_state == queue_state and
+          state.prev_queue_state_reason == queue_state_reason ->
         state
 
       true ->
-        metadata = Map.put(state.metadata, :queue_state, queue_state)
+        metadata =
+          state.metadata
+          |> Map.put(:queue_state, queue_state)
+          |> Map.put(:queue_state_reason, queue_state_reason)
+
         :telemetry.execute(@queue_state_event, %{}, metadata)
         notify_observer(state.observer, queue_state, metadata)
-        %{state | prev_queue_state: queue_state}
+
+        %{
+          state
+          | prev_queue_state: queue_state,
+            prev_queue_state_reason: queue_state_reason
+        }
     end
   end
 
@@ -329,6 +374,30 @@ defmodule Tinkex.Future do
     metadata
     |> Map.new()
     |> Map.put_new(:request_id, request_id)
+  end
+
+  defp telemetry_event_for_error(%Error{type: :api_connection}), do: @telemetry_connection_error
+  defp telemetry_event_for_error(%Error{type: :validation}), do: @telemetry_validation_error
+  defp telemetry_event_for_error(%Error{type: :request_failed}), do: @telemetry_request_failed
+  defp telemetry_event_for_error(%Error{}), do: @telemetry_api_error
+
+  defp emit_error_telemetry(event, %Error{} = error, iteration, state) do
+    emit_telemetry(event, %{elapsed_time: elapsed_since_start(state)}, %{
+      request_id: state.request_id,
+      request_type: state.request_type,
+      iteration: iteration,
+      status: error.status,
+      category: error.category,
+      error_type: error.type
+    })
+  end
+
+  defp emit_telemetry(event, measurements, metadata) do
+    :telemetry.execute(event, measurements, metadata)
+  end
+
+  defp elapsed_since_start(%State{start_time_ms: start_time_ms}) do
+    System.monotonic_time(:millisecond) - start_time_ms
   end
 
   defp error_category(error_map) do

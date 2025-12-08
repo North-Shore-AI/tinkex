@@ -23,9 +23,18 @@ defmodule Tinkex.QueueStateObserver do
   `:queue_state_observer` option and will receive callbacks on every state
   transition alongside the telemetry events under
   `[:tinkex, :queue, :state_change]`.
+
+  ## Callback Signatures
+
+  Implement either of the callbacks below. The 2-arity version receives a
+  metadata map (request_id, queue_state_reason, etc.) for richer context while
+  the 1-arity version is kept for backwards compatibility.
   """
 
   alias Tinkex.Types.QueueState
 
   @callback on_queue_state_change(QueueState.t()) :: any()
+  @callback on_queue_state_change(QueueState.t(), map()) :: any()
+
+  @optional_callbacks on_queue_state_change: 1, on_queue_state_change: 2
 end

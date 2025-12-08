@@ -8,7 +8,7 @@ Tinkex follows an async-by-default design where long-running operations (samplin
 
 - Returns `Task.t()` so you can integrate with your concurrency model
 - Implements exponential backoff with configurable timeouts
-- Emits telemetry events for queue state transitions
+- Emits telemetry events for queue state transitions **and** future errors/timeouts
 - Supports custom observers via the `QueueStateObserver` behaviour
 
 This approach decouples request initiation from result retrieval, enabling concurrent operations without blocking your application.
@@ -26,6 +26,7 @@ When you call a Tinkex API that creates a long-running request (e.g., `SamplingC
    - `%FuturePendingResponse{}` → sleep with exponential backoff, retry
    - `%FutureFailedResponse{}` → categorize error, retry or fail
    - `%TryAgainResponse{}` → emit queue state telemetry, sleep, retry
+   - HTTP 410 (expired promise) → treated as retryable; recreate the request
 4. Client awaits the task to get the final result
 
 **Backoff strategy:**

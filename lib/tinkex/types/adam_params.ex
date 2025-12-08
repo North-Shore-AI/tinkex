@@ -9,19 +9,26 @@ defmodule Tinkex.Types.AdamParams do
   - beta1: 0.9
   - beta2: 0.95 (NOT 0.999!)
   - eps: 1.0e-12 (NOT 1e-8!)
+  - weight_decay: 0.0 (decoupled weight decay)
+  - grad_clip_norm: 0.0 (0 = no clipping)
   """
 
-  @derive {Jason.Encoder, only: [:learning_rate, :beta1, :beta2, :eps]}
+  @derive {Jason.Encoder,
+           only: [:learning_rate, :beta1, :beta2, :eps, :weight_decay, :grad_clip_norm]}
   defstruct learning_rate: 0.0001,
             beta1: 0.9,
             beta2: 0.95,
-            eps: 1.0e-12
+            eps: 1.0e-12,
+            weight_decay: 0.0,
+            grad_clip_norm: 0.0
 
   @type t :: %__MODULE__{
           learning_rate: float(),
           beta1: float(),
           beta2: float(),
-          eps: float()
+          eps: float(),
+          weight_decay: float(),
+          grad_clip_norm: float()
         }
 
   @doc """
@@ -32,13 +39,19 @@ defmodule Tinkex.Types.AdamParams do
     with {:ok, lr} <- validate_learning_rate(Keyword.get(opts, :learning_rate, 0.0001)),
          {:ok, b1} <- validate_beta(Keyword.get(opts, :beta1, 0.9), "beta1"),
          {:ok, b2} <- validate_beta(Keyword.get(opts, :beta2, 0.95), "beta2"),
-         {:ok, eps} <- validate_epsilon(Keyword.get(opts, :eps, 1.0e-12)) do
+         {:ok, eps} <- validate_epsilon(Keyword.get(opts, :eps, 1.0e-12)),
+         {:ok, weight_decay} <-
+           validate_non_negative(Keyword.get(opts, :weight_decay, 0.0), "weight_decay"),
+         {:ok, grad_clip_norm} <-
+           validate_non_negative(Keyword.get(opts, :grad_clip_norm, 0.0), "grad_clip_norm") do
       {:ok,
        %__MODULE__{
          learning_rate: lr,
          beta1: b1,
          beta2: b2,
-         eps: eps
+         eps: eps,
+         weight_decay: weight_decay,
+         grad_clip_norm: grad_clip_norm
        }}
     end
   end
@@ -51,4 +64,9 @@ defmodule Tinkex.Types.AdamParams do
 
   defp validate_epsilon(eps) when is_number(eps) and eps > 0, do: {:ok, eps / 1}
   defp validate_epsilon(_), do: {:error, "eps must be positive number"}
+
+  defp validate_non_negative(value, _name) when is_number(value) and value >= 0,
+    do: {:ok, value / 1}
+
+  defp validate_non_negative(_, name), do: {:error, "#{name} must be non-negative number"}
 end

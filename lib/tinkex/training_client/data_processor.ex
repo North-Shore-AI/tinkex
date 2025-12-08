@@ -4,41 +4,42 @@ defmodule Tinkex.TrainingClient.DataProcessor do
 
   This module handles:
   - Chunking training data based on size limits
-  - Estimating number counts for chunks
+  - Estimating chunk sizes using byte heuristics
   - Building placeholder gradients for custom loss
   - Extracting target tokens from loss function inputs
   """
 
+  alias Tinkex.ByteEstimator
   alias Tinkex.Error
   alias Tinkex.Types.{Datum, TensorData}
 
-  @max_chunk_len 128
-  @max_chunk_number_count 500_000
+  @max_chunk_len 1024
+  @max_chunk_bytes_count 5_000_000
 
   @doc """
-  Chunk data into manageable pieces based on size and number count limits.
+  Chunk data into manageable pieces based on size and byte limits.
 
   Ensures no chunk exceeds:
   - #{@max_chunk_len} items
-  - #{@max_chunk_number_count} total numbers (tokens, pixels, etc.)
+  - #{@max_chunk_bytes_count} total estimated bytes
   """
   @spec chunk_data(list()) :: [list()]
   def chunk_data(data) do
     data
     |> Enum.chunk_while(
       {[], 0},
-      fn datum, {chunk, count} ->
-        estimated = estimate_number_count(datum)
+      fn datum, {chunk, byte_count} ->
+        estimated = ByteEstimator.estimate_datum_bytes(datum)
 
         cond do
           length(chunk) >= @max_chunk_len ->
             {:cont, chunk, {[datum], estimated}}
 
-          count + estimated > @max_chunk_number_count ->
+          byte_count + estimated > @max_chunk_bytes_count ->
             {:cont, chunk, {[datum], estimated}}
 
           true ->
-            {:cont, {chunk ++ [datum], count + estimated}}
+            {:cont, {chunk ++ [datum], byte_count + estimated}}
         end
       end,
       fn
@@ -46,35 +47,6 @@ defmodule Tinkex.TrainingClient.DataProcessor do
         {chunk, _count} -> {:cont, chunk, {[], 0}}
       end
     )
-  end
-
-  @doc """
-  Estimate the total number count (tokens, pixels, etc.) in a datum.
-
-  Used for chunking to ensure requests don't exceed size limits.
-  """
-  @spec estimate_number_count(map()) :: non_neg_integer()
-  def estimate_number_count(%{model_input: model_input, loss_fn_inputs: loss_inputs}) do
-    model_input_count =
-      case model_input do
-        %Tinkex.Types.ModelInput{chunks: chunks} when is_list(chunks) ->
-          Enum.reduce(chunks, 0, fn chunk, acc ->
-            acc + estimate_number_count_in_chunk(chunk)
-          end)
-
-        _ ->
-          0
-      end
-
-    loss_count =
-      loss_inputs
-      |> Map.values()
-      |> Enum.reduce(0, fn
-        %{data: data}, acc when is_list(data) -> acc + length(data)
-        _other, acc -> acc
-      end)
-
-    model_input_count + loss_count
   end
 
   @doc """
@@ -149,28 +121,4 @@ defmodule Tinkex.TrainingClient.DataProcessor do
          )}
     end
   end
-
-  # Private helper to estimate number count in a single chunk
-  defp estimate_number_count_in_chunk(%Tinkex.Types.ImageChunk{data: data})
-       when is_binary(data),
-       do: byte_size(data)
-
-  defp estimate_number_count_in_chunk(%Tinkex.Types.ImageAssetPointerChunk{
-         location: location
-       })
-       when is_binary(location),
-       do: byte_size(location)
-
-  defp estimate_number_count_in_chunk(%Tinkex.Types.EncodedTextChunk{} = chunk),
-    do: Tinkex.Types.EncodedTextChunk.length(chunk)
-
-  defp estimate_number_count_in_chunk(%{__struct__: mod} = chunk) do
-    if function_exported?(mod, :length, 1) do
-      mod.length(chunk)
-    else
-      0
-    end
-  end
-
-  defp estimate_number_count_in_chunk(_chunk), do: 0
 end

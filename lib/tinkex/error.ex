@@ -73,7 +73,7 @@ defmodule Tinkex.Error do
   def user_error?(%__MODULE__{category: :user}), do: true
 
   def user_error?(%__MODULE__{status: status})
-      when is_integer(status) and status >= 400 and status < 500 and status not in [408, 429] do
+      when is_integer(status) and status >= 400 and status < 500 and status not in [408, 410, 429] do
     true
   end
 

@@ -1,6 +1,8 @@
 defmodule Tinkex.SamplingClientTest do
   use Tinkex.HTTPCase, async: false
 
+  import ExUnit.CaptureLog
+
   alias Tinkex.RateLimiter
   alias Tinkex.SamplingClient
   alias Tinkex.Types.{ModelInput, SampleResponse, SamplingParams}
@@ -69,6 +71,7 @@ defmodule Tinkex.SamplingClientTest do
     assert entry.sampling_session_id == "sample-1"
     assert is_reference(entry.rate_limiter)
     assert is_reference(entry.request_id_counter)
+    assert is_pid(entry.dispatch)
     assert entry.http_pool == config.http_pool
   end
 
@@ -118,7 +121,7 @@ defmodule Tinkex.SamplingClientTest do
     assert {:error, %Tinkex.Error{type: :validation}} = Task.await(task, 1_000)
   end
 
-  test "sets rate limiter backoff on 429", %{bypass: bypass, config: config} do
+  test "sets size-based backoff on 429", %{bypass: bypass, config: config} do
     Bypass.expect(bypass, fn conn ->
       {:ok, _body, conn} = Plug.Conn.read_body(conn)
 
@@ -146,6 +149,7 @@ defmodule Tinkex.SamplingClientTest do
       )
 
     [{_, entry}] = :ets.lookup(:tinkex_sampling_clients, {:config, client})
+    start_ms = System.monotonic_time(:millisecond)
 
     prompt = ModelInput.from_ints([1])
     params = %SamplingParams{max_tokens: 1, temperature: 0.5}
@@ -153,9 +157,12 @@ defmodule Tinkex.SamplingClientTest do
     {:ok, task} = SamplingClient.sample(client, prompt, params)
     assert {:error, %Tinkex.Error{status: 429}} = Task.await(task, 5_000)
     assert RateLimiter.should_backoff?(entry.rate_limiter)
+
+    backoff_until = :atomics.get(entry.rate_limiter, 1)
+    assert_in_delta(backoff_until - start_ms, 1_000, 300)
   end
 
-  test "applies default backoff when retry-after is missing", %{bypass: bypass, config: config} do
+  test "applies extended backoff for large payloads", %{bypass: bypass, config: config} do
     Bypass.expect(bypass, fn conn ->
       {:ok, _body, conn} = Plug.Conn.read_body(conn)
 
@@ -184,7 +191,7 @@ defmodule Tinkex.SamplingClientTest do
     [{_, entry}] = :ets.lookup(:tinkex_sampling_clients, {:config, client})
     start_ms = System.monotonic_time(:millisecond)
 
-    prompt = ModelInput.from_ints([1])
+    prompt = ModelInput.from_ints(Enum.to_list(1..15_000))
     params = %SamplingParams{max_tokens: 1, temperature: 0.5}
 
     {:ok, task} = SamplingClient.sample(client, prompt, params)
@@ -192,7 +199,49 @@ defmodule Tinkex.SamplingClientTest do
 
     backoff_until = :atomics.get(entry.rate_limiter, 1)
     assert backoff_until > start_ms
-    assert_in_delta(backoff_until - start_ms, 1_000, 250)
+    assert_in_delta(backoff_until - start_ms, 5_000, 750)
+  end
+
+  test "logs queue state reason on 429 responses", %{bypass: bypass, config: config} do
+    Bypass.expect(bypass, fn conn ->
+      {:ok, _body, conn} = Plug.Conn.read_body(conn)
+
+      case conn.request_path do
+        "/api/v1/create_sampling_session" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"sampling_session_id":"sample-queue-state"}))
+
+        "/api/v1/asample" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(
+            429,
+            ~s({"error":"rate","queue_state":"paused_capacity","queue_state_reason":"server says wait","request_id":"req-429"})
+          )
+      end
+    end)
+
+    {:ok, client} =
+      SamplingClient.start_link(
+        session_id: "sess-queue-state",
+        sampling_client_id: 0,
+        base_model: "base",
+        config: config,
+        retry_config: [enable_retry_logic: false]
+      )
+
+    prompt = ModelInput.from_ints([1])
+    params = %SamplingParams{max_tokens: 1, temperature: 0.5}
+
+    log =
+      capture_log(fn ->
+        {:ok, task} = SamplingClient.sample(client, prompt, params)
+        assert {:error, %Tinkex.Error{status: 429}} = Task.await(task, 5_000)
+      end)
+
+    assert log =~ "Sampling is paused"
+    assert log =~ "server says wait"
   end
 
   test "clients with same config share rate limiter", %{bypass: bypass, config: config} do

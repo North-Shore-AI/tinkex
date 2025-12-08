@@ -22,10 +22,11 @@ EXAMPLES=(
   "telemetry_live.exs"
   "telemetry_reporter_demo.exs"
   "retry_and_capture.exs"
-  "model_info_and_unload.exs"
   "live_capabilities_and_logprobs.exs"
   "file_upload_multipart.exs"
+  "adam_and_chunking_live.exs"
   "llama3_tokenizer_override_live.exs"
+  "queue_reasons_and_sampling_throttling.exs"
   "multimodal_resume_and_cleanup.exs"
   "training_persistence_live.exs"
   "checkpoint_multi_delete_live.exs"
@@ -33,6 +34,7 @@ EXAMPLES=(
   "queue_state_observer_demo.exs"
   "recovery_simulated.exs"
   "recovery_live_injected.exs"
+  "model_info_and_unload.exs"
 )
 
 if [[ -z "${TINKER_API_KEY:-}" ]]; then

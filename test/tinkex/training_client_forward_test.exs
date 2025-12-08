@@ -137,9 +137,9 @@ defmodule Tinkex.TrainingClientForwardTest do
           config: config
         )
 
-      # Create 130 data items to force chunking (max_chunk_len is 128)
+      # Create 1025 data items to force chunking (max_chunk_len is 1024)
       data =
-        Enum.map(1..130, fn idx ->
+        Enum.map(1..1_025, fn idx ->
           %Datum{model_input: ModelInput.from_ints([idx])}
         end)
 
@@ -201,10 +201,10 @@ defmodule Tinkex.TrainingClientForwardTest do
           config: config
         )
 
-      large_image = ImageChunk.new(String.duplicate("a", 260_000), :png)
+      large_image = ImageChunk.new(String.duplicate("a", 3_000_000), :png)
 
       pointer_chunk = %ImageAssetPointerChunk{
-        location: String.duplicate("b", 300_000),
+        location: String.duplicate("b", 3_500_000),
         format: :png
       }
 

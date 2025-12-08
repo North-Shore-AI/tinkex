@@ -16,7 +16,7 @@ defmodule Tinkex.TrainingClient do
   human-readable warnings when queue state changes indicate rate limiting
   or capacity issues:
 
-      [warning] Training is paused for model-xyz. Reason: concurrent models rate limit hit
+      [warning] Training is paused for model-xyz. Reason: concurrent training clients rate limit hit
 
   Logs are debounced to once per 60 seconds per model to avoid spam.
   """

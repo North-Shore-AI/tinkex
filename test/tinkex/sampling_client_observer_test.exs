@@ -45,7 +45,7 @@ defmodule Tinkex.SamplingClientObserverTest do
 
       assert log =~ "Sampling is paused"
       assert log =~ session_id
-      assert log =~ "concurrent LoRA rate limit hit"
+      assert log =~ "concurrent sampler weights limit hit"
     end
 
     test "logs warning for paused_capacity with session ID", %{session_id: session_id} do
@@ -58,7 +58,7 @@ defmodule Tinkex.SamplingClientObserverTest do
 
       assert log =~ "Sampling is paused"
       assert log =~ session_id
-      assert log =~ "out of capacity"
+      assert log =~ "running short on capacity, please wait"
     end
 
     test "does not log for active state", %{session_id: session_id} do
@@ -128,6 +128,38 @@ defmodule Tinkex.SamplingClientObserverTest do
 
       assert log =~ "unknown"
       assert log =~ "Sampling is paused"
+    end
+
+    test "prefers server supplied reason when present", %{session_id: session_id} do
+      log =
+        capture_log(fn ->
+          SamplingClient.on_queue_state_change(:paused_rate_limit, %{
+            sampling_session_id: session_id,
+            queue_state_reason: "server override"
+          })
+        end)
+
+      assert log =~ "server override"
+      refute log =~ "concurrent sampler weights limit hit"
+    end
+
+    test "clears debounce entry when requested", %{
+      session_id: session_id,
+      debounce_key: debounce_key
+    } do
+      log =
+        capture_log(fn ->
+          SamplingClient.on_queue_state_change(:paused_rate_limit, %{
+            sampling_session_id: session_id
+          })
+        end)
+
+      assert log =~ "Sampling is paused"
+
+      assert :persistent_term.get(debounce_key, nil)
+
+      assert :ok == SamplingClient.clear_queue_state_debounce(session_id)
+      refute :persistent_term.get(debounce_key, nil)
     end
   end
 end
