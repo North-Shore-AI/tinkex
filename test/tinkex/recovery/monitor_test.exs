@@ -26,7 +26,7 @@ defmodule Tinkex.Recovery.MonitorTest do
       :persistent_term.erase({RestStub, :all})
       :persistent_term.erase({RestStub, "run-1"})
       :persistent_term.erase({RestStub, "run-healthy"})
-      ServiceStub.clear()
+      ServiceStub.clear(service_pid)
     end)
 
     send_after = fn msg, _delay ->

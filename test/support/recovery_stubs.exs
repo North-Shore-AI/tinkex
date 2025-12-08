@@ -1,11 +1,15 @@
 defmodule Tinkex.TestSupport.Recovery.ServiceStub do
+  @default_state %{test_pid: nil, failures: 0}
+
   def set_test_pid(pid, service_pid \\ :default),
     do: update_state(service_pid, &Map.put(&1, :test_pid, pid))
 
   def set_failures(count, service_pid \\ :default),
     do: update_state(service_pid, &Map.put(&1, :failures, count))
 
-  def clear do
+  def clear(service_pid \\ :default) do
+    :persistent_term.erase({__MODULE__, service_pid})
+    # Clear legacy storage if still present so we do not leak across test runs.
     :persistent_term.erase({__MODULE__, :state})
   end
 
@@ -28,15 +32,13 @@ defmodule Tinkex.TestSupport.Recovery.ServiceStub do
   end
 
   defp get_state(service_pid) do
-    state = :persistent_term.get({__MODULE__, :state}, %{})
-    Map.get(state, service_pid, %{test_pid: nil, failures: 0})
+    :persistent_term.get({__MODULE__, service_pid}, @default_state)
   end
 
   defp update_state(service_pid, fun) do
-    state = :persistent_term.get({__MODULE__, :state}, %{})
-    current = Map.get(state, service_pid, %{test_pid: nil, failures: 0})
-    new_state = Map.put(state, service_pid, fun.(current))
-    :persistent_term.put({__MODULE__, :state}, new_state)
+    new_state = fun.(get_state(service_pid))
+    :persistent_term.put({__MODULE__, service_pid}, new_state)
+    new_state
   end
 
   defp notify(service_pid, message) do

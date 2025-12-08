@@ -6,6 +6,11 @@ All notable changes to this project will be documented in this file.
 
 - No changes yet.
 
+## [0.2.2] - 2025-12-08
+
+### Fixed
+- Recovery ServiceStub now isolates state per `service_pid` instead of a shared `persistent_term` map, so concurrent tests cannot erase each other's failure counts or recipients; executor/monitor recovery tests no longer flaky.
+
 ## [0.2.1] - 2025-12-07
 
 ### Changed

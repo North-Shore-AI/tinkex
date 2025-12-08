@@ -15,7 +15,7 @@ defmodule Tinkex.Recovery.ExecutorTest do
     end
 
     on_exit(fn ->
-      ServiceStub.clear()
+      ServiceStub.clear(service_pid)
     end)
 
     %{send_after: send_after, service_pid: service_pid}
