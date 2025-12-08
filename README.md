@@ -13,7 +13,7 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.2.0 Highlights
+## 0.2.1 Highlights
 
 - Opt-in recovery automation layer (Policy + Monitor + Executor) to restart corrupted training runs from checkpoints with telemetry hooks and bounded concurrency (defaults off).
 - Checkpoint timestamps now normalize to `DateTime` when ISO-8601 values are returned (strings are preserved on parse failure).
@@ -66,7 +66,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.2.0"}
+    {:tinkex, "~> 0.2.1"}
   ]
 end
 ```

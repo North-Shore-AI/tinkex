@@ -31,38 +31,20 @@ defmodule Tinkex.TrainingClient do
   alias Tinkex.API.{Models, Service, Training, Weights}
   alias Tinkex.Error
   alias Tinkex.Future.Combiner
-  alias Tinkex.QueueStateLogger
   alias Tinkex.Telemetry.Reporter
   alias Tinkex.Telemetry.Capture, as: TelemetryCapture
   require TelemetryCapture
   alias Tinkex.Training.CustomLoss
 
+  alias Tinkex.TrainingClient.{DataProcessor, Observer, Operations, Polling, Tokenizer}
+
   alias Tinkex.Types.{
-    Datum,
-    CreateModelRequest,
-    CreateModelResponse,
-    ForwardBackwardInput,
-    ForwardBackwardOutput,
-    ForwardBackwardRequest,
-    ForwardRequest,
     GetInfoRequest,
     GetInfoResponse,
-    LoraConfig,
-    LoadWeightsRequest,
-    LoadWeightsResponse,
-    OptimStepRequest,
     OptimStepResponse,
-    TensorData,
-    SaveWeightsForSamplerRequest,
-    SaveWeightsForSamplerResponse,
-    SaveWeightsRequest,
-    SaveWeightsResponse,
     UnloadModelRequest,
     UnloadModelResponse
   }
-
-  @max_chunk_len 128
-  @max_chunk_number_count 500_000
 
   @type t :: pid()
 
@@ -116,13 +98,7 @@ defmodule Tinkex.TrainingClient do
   @spec get_tokenizer(t(), keyword()) ::
           {:ok, Tokenizers.Tokenizer.t()} | {:error, Error.t()}
   def get_tokenizer(client, opts \\ []) do
-    info_fun = Keyword.get(opts, :info_fun, &get_info/1)
-
-    with {:ok, info} <- info_fun.(client) do
-      model_name = get_model_name_from_info(info)
-      tokenizer_id = Tinkex.Tokenizer.get_tokenizer_id(model_name, client, opts)
-      Tinkex.Tokenizer.get_or_load_tokenizer(tokenizer_id, opts)
-    end
+    Tokenizer.get_tokenizer(client, opts)
   end
 
   @doc """
@@ -143,12 +119,7 @@ defmodule Tinkex.TrainingClient do
   @spec encode(t(), String.t(), keyword()) ::
           {:ok, [integer()]} | {:error, Error.t()}
   def encode(client, text, opts \\ []) when is_binary(text) do
-    info_fun = Keyword.get(opts, :info_fun, &get_info/1)
-
-    with {:ok, info} <- info_fun.(client) do
-      model_name = get_model_name_from_info(info)
-      Tinkex.Tokenizer.encode(text, model_name, Keyword.put(opts, :training_client, client))
-    end
+    Tokenizer.encode(client, text, opts)
   end
 
   @doc """
@@ -169,32 +140,8 @@ defmodule Tinkex.TrainingClient do
   @spec decode(t(), [integer()], keyword()) ::
           {:ok, String.t()} | {:error, Error.t()}
   def decode(client, ids, opts \\ []) when is_list(ids) do
-    info_fun = Keyword.get(opts, :info_fun, &get_info/1)
-
-    with {:ok, info} <- info_fun.(client) do
-      model_name = get_model_name_from_info(info)
-      Tinkex.Tokenizer.decode(ids, model_name, Keyword.put(opts, :training_client, client))
-    end
+    Tokenizer.decode(client, ids, opts)
   end
-
-  # Extract model name from GetInfoResponse for tokenizer resolution
-  defp get_model_name_from_info(%GetInfoResponse{model_data: %{base_model: base}})
-       when is_binary(base),
-       do: base
-
-  defp get_model_name_from_info(%GetInfoResponse{model_data: %{model_name: name}})
-       when is_binary(name),
-       do: name
-
-  defp get_model_name_from_info(%{model_data: %{base_model: base}})
-       when is_binary(base),
-       do: base
-
-  defp get_model_name_from_info(%{model_data: %{model_name: name}})
-       when is_binary(name),
-       do: name
-
-  defp get_model_name_from_info(_), do: "unknown"
 
   @doc """
   Unload the active model and end the session.
@@ -435,7 +382,14 @@ defmodule Tinkex.TrainingClient do
       |> Map.new()
       |> Map.put_new(:session_id, session_id)
 
-    case ensure_model(opts, session_id, model_seq_id, config, service_api, telemetry_metadata) do
+    case Operations.ensure_model(
+           opts,
+           session_id,
+           model_seq_id,
+           config,
+           service_api,
+           telemetry_metadata
+         ) do
       {:ok, model_id} ->
         state = %{
           model_id: model_id,
@@ -480,12 +434,14 @@ defmodule Tinkex.TrainingClient do
   @impl true
   def handle_call({:forward_backward, data, loss_fn, opts}, from, state) do
     capture_telemetry(state, fn ->
-      chunks = chunk_data(data)
-      {seq_ids, new_counter} = allocate_request_ids(length(chunks), state.request_id_counter)
+      chunks = DataProcessor.chunk_data(data)
+
+      {seq_ids, new_counter} =
+        DataProcessor.allocate_request_ids(length(chunks), state.request_id_counter)
 
       send_result =
         Enum.reduce_while(Enum.zip(seq_ids, chunks), {:ok, []}, fn {seq_id, chunk}, {:ok, acc} ->
-          case send_forward_backward_request(chunk, loss_fn, seq_id, opts, state) do
+          case Operations.send_forward_backward_request(chunk, loss_fn, seq_id, opts, state) do
             {:ok, future} -> {:cont, {:ok, [future | acc]}}
             {:error, reason} -> {:halt, {:error, reason}}
           end
@@ -507,14 +463,14 @@ defmodule Tinkex.TrainingClient do
                       task =
                         state.future_module.poll(
                           future,
-                          poll_opts_with_type(state, opts, "ForwardBackward")
+                          Polling.poll_opts_with_type(state, opts, "ForwardBackward")
                         )
 
-                      unlink_task(task)
+                      Polling.unlink_task(task)
                       task
                     end)
 
-                  case await_forward_backward_results(polling_tasks, state.future_module) do
+                  case Polling.await_forward_backward_results(polling_tasks, state.future_module) do
                     {:ok, outputs} ->
                       {:ok, Combiner.combine_forward_backward_results(outputs)}
 
@@ -545,12 +501,14 @@ defmodule Tinkex.TrainingClient do
   @impl true
   def handle_call({:forward, data, loss_fn, opts}, from, state) do
     capture_telemetry(state, fn ->
-      chunks = chunk_data(data)
-      {seq_ids, new_counter} = allocate_request_ids(length(chunks), state.request_id_counter)
+      chunks = DataProcessor.chunk_data(data)
+
+      {seq_ids, new_counter} =
+        DataProcessor.allocate_request_ids(length(chunks), state.request_id_counter)
 
       send_result =
         Enum.reduce_while(Enum.zip(seq_ids, chunks), {:ok, []}, fn {seq_id, chunk}, {:ok, acc} ->
-          case send_forward_request(chunk, loss_fn, seq_id, opts, state) do
+          case Operations.send_forward_request(chunk, loss_fn, seq_id, opts, state) do
             {:ok, future} -> {:cont, {:ok, [future | acc]}}
             {:error, reason} -> {:halt, {:error, reason}}
           end
@@ -572,14 +530,14 @@ defmodule Tinkex.TrainingClient do
                       task =
                         state.future_module.poll(
                           future,
-                          poll_opts_with_type(state, opts, "Forward")
+                          Polling.poll_opts_with_type(state, opts, "Forward")
                         )
 
-                      unlink_task(task)
+                      Polling.unlink_task(task)
                       task
                     end)
 
-                  case await_forward_results(polling_tasks, state.future_module) do
+                  case Polling.await_forward_results(polling_tasks, state.future_module) do
                     {:ok, outputs} ->
                       {:ok, Combiner.combine_forward_backward_results(outputs)}
 
@@ -613,7 +571,7 @@ defmodule Tinkex.TrainingClient do
       seq_id = state.request_id_counter
       new_counter = seq_id + 1
 
-      case send_optim_step_request(adam_params, seq_id, opts, state) do
+      case Operations.send_optim_step_request(adam_params, seq_id, opts, state) do
         {:error, reason} ->
           {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
 
@@ -625,12 +583,12 @@ defmodule Tinkex.TrainingClient do
                   task =
                     state.future_module.poll(
                       future,
-                      poll_opts_with_type(state, opts, "OptimStep")
+                      Polling.poll_opts_with_type(state, opts, "OptimStep")
                     )
 
-                  unlink_task(task)
+                  Polling.unlink_task(task)
 
-                  case safe_await(state.future_module, task, await_timeout(opts)) do
+                  case Polling.safe_await(state.future_module, task, await_timeout(opts)) do
                     {:ok, result} ->
                       {:ok, OptimStepResponse.from_json(result)}
 
@@ -684,11 +642,11 @@ defmodule Tinkex.TrainingClient do
              telemetry_metadata: base_telemetry_metadata(state, %{model_id: state.model_id})
            ) do
         {:ok, %{"request_id" => _} = future} ->
-          reply = await_unload_future(future, state)
+          reply = Polling.poll_and_await_unload(future, state, [])
           {:reply, reply, state}
 
         {:ok, %{request_id: _} = future} ->
-          reply = await_unload_future(future, state)
+          reply = Polling.poll_and_await_unload(future, state, [])
           {:reply, reply, state}
 
         {:ok, %UnloadModelResponse{} = response} ->
@@ -709,7 +667,7 @@ defmodule Tinkex.TrainingClient do
       seq_id = state.request_id_counter
       new_counter = seq_id + 1
 
-      case send_save_state_request(name, seq_id, opts, state) do
+      case Operations.send_save_state_request(name, seq_id, opts, state) do
         {:error, reason} ->
           {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
 
@@ -718,7 +676,7 @@ defmodule Tinkex.TrainingClient do
             fn ->
               reply =
                 try do
-                  handle_save_state_response(response, state, opts)
+                  Operations.handle_save_state_response(response, state, opts)
                 rescue
                   e ->
                     {:error,
@@ -746,7 +704,7 @@ defmodule Tinkex.TrainingClient do
       seq_id = state.request_id_counter
       new_counter = seq_id + 1
 
-      case send_load_state_request(path, optimizer, seq_id, opts, state) do
+      case Operations.send_load_state_request(path, optimizer, seq_id, opts, state) do
         {:error, reason} ->
           {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
 
@@ -755,7 +713,7 @@ defmodule Tinkex.TrainingClient do
             fn ->
               reply =
                 try do
-                  handle_load_state_response(response, state, opts)
+                  Operations.handle_load_state_response(response, state, opts)
                 rescue
                   e ->
                     {:error,
@@ -787,9 +745,9 @@ defmodule Tinkex.TrainingClient do
       opts_with_path = Keyword.put(opts, :path, name)
 
       {normalized_opts, next_sampling_counter} =
-        normalize_save_weights_opts(opts_with_path, state)
+        Operations.normalize_save_weights_opts(opts_with_path, state)
 
-      case send_save_weights_for_sampler_request(seq_id, normalized_opts, state) do
+      case Operations.send_save_weights_for_sampler_request(seq_id, normalized_opts, state) do
         {:error, reason} ->
           {:reply, {:error, reason},
            %{
@@ -803,7 +761,7 @@ defmodule Tinkex.TrainingClient do
             fn ->
               reply =
                 try do
-                  handle_save_weights_response(response, state, normalized_opts)
+                  Operations.handle_save_weights_response(response, state, normalized_opts)
                 rescue
                   e ->
                     {:error,
@@ -836,9 +794,10 @@ defmodule Tinkex.TrainingClient do
       seq_id = state.request_id_counter
       new_counter = seq_id + 1
 
-      {normalized_opts, next_sampling_counter} = normalize_save_weights_opts(opts, state)
+      {normalized_opts, next_sampling_counter} =
+        Operations.normalize_save_weights_opts(opts, state)
 
-      case send_save_weights_for_sampler_request(seq_id, normalized_opts, state) do
+      case Operations.send_save_weights_for_sampler_request(seq_id, normalized_opts, state) do
         {:error, reason} ->
           {:reply, {:error, reason},
            %{
@@ -852,9 +811,14 @@ defmodule Tinkex.TrainingClient do
             fn ->
               reply =
                 with {:ok, save_response} <-
-                       handle_save_weights_response(response, state, normalized_opts),
+                       Operations.handle_save_weights_response(response, state, normalized_opts),
                      {:ok, sampling_client} <-
-                       start_sampling_client_from_save(save_response, seq_id, opts, state) do
+                       Operations.start_sampling_client_from_save(
+                         save_response,
+                         seq_id,
+                         opts,
+                         state
+                       ) do
                   {:ok, sampling_client}
                 else
                   {:error, %Error{} = error} -> {:error, error}
@@ -903,23 +867,26 @@ defmodule Tinkex.TrainingClient do
   @impl true
   def handle_call({:forward_backward_custom, data, loss_fn, opts}, from, state) do
     capture_telemetry(state, fn ->
-      with {:ok, placeholder_gradients} <- build_placeholder_gradients(data) do
+      with {:ok, placeholder_gradients} <- DataProcessor.build_placeholder_gradients(data) do
         placeholder_linear_data = CustomLoss.build_linear_loss_data(data, placeholder_gradients)
-        linear_chunks = chunk_data(placeholder_linear_data)
-        chunks = chunk_data(data)
+        linear_chunks = DataProcessor.chunk_data(placeholder_linear_data)
+        chunks = DataProcessor.chunk_data(data)
 
         forward_count = length(chunks)
         backward_count = length(linear_chunks)
 
         {seq_ids, new_counter} =
-          allocate_request_ids(forward_count + backward_count, state.request_id_counter)
+          DataProcessor.allocate_request_ids(
+            forward_count + backward_count,
+            state.request_id_counter
+          )
 
         {forward_seq_ids, backward_seq_ids} = Enum.split(seq_ids, forward_count)
 
         send_result =
           Enum.reduce_while(Enum.zip(forward_seq_ids, chunks), {:ok, []}, fn {seq_id, chunk},
                                                                              {:ok, acc} ->
-            case send_forward_request(chunk, :cross_entropy, seq_id, opts, state) do
+            case Operations.send_forward_request(chunk, :cross_entropy, seq_id, opts, state) do
               {:ok, future} -> {:cont, {:ok, [future | acc]}}
               {:error, reason} -> {:halt, {:error, reason}}
             end
@@ -937,21 +904,22 @@ defmodule Tinkex.TrainingClient do
                 reply =
                   try do
                     with {:ok, forward_outputs} <-
-                           poll_forward_custom_loss(forward_futures, opts, state),
+                           Operations.poll_forward_custom_loss(forward_futures, opts, state),
                          {:ok, logprobs} <-
                            CustomLoss.extract_per_datum_logprobs(forward_outputs),
                          {:ok, {gradients, metrics}} <-
                            CustomLoss.compute_gradients(data, logprobs, loss_fn),
-                         {:ok, linear_data} <- build_linear_loss_data_safe(data, gradients),
+                         {:ok, linear_data} <-
+                           Operations.build_linear_loss_data_safe(data, gradients),
                          {:ok, backward_outputs} <-
-                           send_backward_for_custom_loss(
+                           Operations.send_backward_for_custom_loss(
                              linear_data,
                              backward_seq_ids,
                              opts,
                              state
                            ) do
                       combined = Combiner.combine_forward_backward_results(backward_outputs)
-                      {:ok, merge_custom_metrics(combined, metrics)}
+                      {:ok, Operations.merge_custom_metrics(combined, metrics)}
                     else
                       {:error, %Error{} = error} ->
                         {:error, error}
@@ -999,369 +967,13 @@ defmodule Tinkex.TrainingClient do
   end
 
   # QueueStateObserver implementation
-  # This callback is invoked by Future.poll when queue state changes (e.g., rate limit hit).
-  # We use metadata to identify the model and :persistent_term to track debouncing per model.
+  # Delegates to the Observer module
   @impl Tinkex.QueueStateObserver
   def on_queue_state_change(queue_state, metadata \\ %{}) do
-    model_id = metadata[:model_id] || "unknown"
-
-    # Use :persistent_term for debounce tracking keyed by model_id
-    debounce_key = {:training_queue_state_debounce, model_id}
-
-    last_logged =
-      case :persistent_term.get(debounce_key, nil) do
-        nil -> nil
-        ts -> ts
-      end
-
-    new_timestamp = QueueStateLogger.maybe_log(queue_state, :training, model_id, last_logged)
-
-    # Update the debounce timestamp if it changed
-    if new_timestamp != last_logged do
-      :persistent_term.put(debounce_key, new_timestamp)
-    end
-
-    :ok
+    Observer.on_queue_state_change(queue_state, metadata)
   end
 
-  defp ensure_model(opts, session_id, model_seq_id, config, service_api, telemetry_metadata) do
-    case opts[:model_id] do
-      model_id when is_binary(model_id) ->
-        {:ok, model_id}
-
-      _ ->
-        with {:ok, base_model} <- fetch_base_model(opts),
-             {:ok, response} <-
-               service_api.create_model(
-                 %CreateModelRequest{
-                   session_id: session_id,
-                   model_seq_id: model_seq_id,
-                   base_model: base_model,
-                   user_metadata: Keyword.get(opts, :user_metadata, config.user_metadata),
-                   lora_config: Keyword.get(opts, :lora_config, %LoraConfig{})
-                 },
-                 config: config,
-                 telemetry_metadata: Map.merge(telemetry_metadata, %{model_seq_id: model_seq_id})
-               ) do
-          {:ok, parse_model_id(response)}
-        end
-    end
-  end
-
-  defp fetch_base_model(opts) do
-    case opts[:base_model] do
-      nil -> {:error, Error.new(:validation, "base_model is required to create a model")}
-      base when is_binary(base) -> {:ok, base}
-      other -> {:error, Error.new(:validation, "invalid base_model: #{inspect(other)}")}
-    end
-  end
-
-  defp parse_model_id(%CreateModelResponse{model_id: model_id}), do: model_id
-  defp parse_model_id(%{"model_id" => model_id}), do: model_id
-  defp parse_model_id(%{model_id: model_id}), do: model_id
-
-  defp parse_model_id(other),
-    do: raise(ArgumentError, "Invalid create_model response: #{inspect(other)}")
-
-  defp send_forward_backward_request(chunk, loss_fn, seq_id, opts, state) do
-    request = %ForwardBackwardRequest{
-      forward_backward_input: %ForwardBackwardInput{
-        data: chunk,
-        loss_fn: loss_fn,
-        loss_fn_config: Keyword.get(opts, :loss_fn_config)
-      },
-      model_id: state.model_id,
-      seq_id: seq_id
-    }
-
-    case state.training_api.forward_backward_future(request,
-           config: state.config,
-           telemetry_metadata:
-             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
-         ) do
-      {:ok, %{"request_id" => request_id}} ->
-        {:ok, %{request_id: request_id}}
-
-      {:ok, %{request_id: _} = future} ->
-        {:ok, future}
-
-      {:error, %Error{} = error} ->
-        {:error, error}
-
-      other ->
-        {:error, Error.new(:validation, "Invalid forward_backward response: #{inspect(other)}")}
-    end
-  end
-
-  defp send_forward_request(chunk, loss_fn, seq_id, opts, state) do
-    request = %ForwardRequest{
-      forward_input: %ForwardBackwardInput{
-        data: chunk,
-        loss_fn: loss_fn,
-        loss_fn_config: Keyword.get(opts, :loss_fn_config)
-      },
-      model_id: state.model_id,
-      seq_id: seq_id
-    }
-
-    case state.training_api.forward_future(request,
-           config: state.config,
-           telemetry_metadata:
-             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
-         ) do
-      {:ok, %{"request_id" => request_id}} ->
-        {:ok, %{request_id: request_id}}
-
-      {:ok, %{request_id: _} = future} ->
-        {:ok, future}
-
-      {:error, %Error{} = error} ->
-        {:error, error}
-
-      other ->
-        {:error, Error.new(:validation, "Invalid forward response: #{inspect(other)}")}
-    end
-  end
-
-  defp send_optim_step_request(adam_params, seq_id, _opts, state) do
-    request = %OptimStepRequest{
-      adam_params: adam_params,
-      model_id: state.model_id,
-      seq_id: seq_id
-    }
-
-    case state.training_api.optim_step_future(request,
-           config: state.config,
-           telemetry_metadata:
-             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
-         ) do
-      {:ok, %{"request_id" => request_id}} -> {:ok, %{request_id: request_id}}
-      {:ok, %{request_id: _} = future} -> {:ok, future}
-      {:error, %Error{} = error} -> {:error, error}
-      other -> {:error, Error.new(:validation, "Invalid optim_step response: #{inspect(other)}")}
-    end
-  end
-
-  defp send_save_state_request(name, seq_id, _opts, state) do
-    request = %SaveWeightsRequest{
-      model_id: state.model_id,
-      path: name,
-      seq_id: seq_id
-    }
-
-    case state.weights_api.save_weights(
-           request,
-           config: state.config,
-           telemetry_metadata:
-             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
-         ) do
-      {:ok, %{"request_id" => _} = future} ->
-        {:ok, future}
-
-      {:ok, %{request_id: _} = future} ->
-        {:ok, future}
-
-      {:ok, result} ->
-        {:ok, result}
-
-      {:error, %Error{} = error} ->
-        {:error, error}
-
-      other ->
-        {:error, Error.new(:validation, "Invalid save_weights response: #{inspect(other)}")}
-    end
-  end
-
-  defp send_load_state_request(path, optimizer, seq_id, _opts, state) do
-    request = %LoadWeightsRequest{
-      model_id: state.model_id,
-      path: path,
-      seq_id: seq_id,
-      optimizer: optimizer
-    }
-
-    case state.weights_api.load_weights(
-           request,
-           config: state.config,
-           telemetry_metadata:
-             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
-         ) do
-      {:ok, %{"request_id" => _} = future} ->
-        {:ok, future}
-
-      {:ok, %{request_id: _} = future} ->
-        {:ok, future}
-
-      {:ok, result} ->
-        {:ok, result}
-
-      {:error, %Error{} = error} ->
-        {:error, error}
-
-      other ->
-        {:error, Error.new(:validation, "Invalid load_weights response: #{inspect(other)}")}
-    end
-  end
-
-  defp send_save_weights_for_sampler_request(seq_id, opts, state) do
-    request = %SaveWeightsForSamplerRequest{
-      model_id: state.model_id,
-      path: Keyword.get(opts, :path),
-      sampling_session_seq_id: Keyword.get(opts, :sampling_session_seq_id),
-      seq_id: seq_id
-    }
-
-    case state.weights_api.save_weights_for_sampler(request,
-           config: state.config,
-           telemetry_metadata:
-             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
-         ) do
-      {:ok, %{"request_id" => _} = future} ->
-        {:ok, future}
-
-      {:ok, %{request_id: _} = future} ->
-        {:ok, future}
-
-      {:ok, result} ->
-        {:ok, result}
-
-      {:error, %Error{} = error} ->
-        {:error, error}
-
-      other ->
-        {:error,
-         Error.new(:validation, "Invalid save_weights_for_sampler response: #{inspect(other)}")}
-    end
-  end
-
-  defp await_forward_backward_results([], _future_module), do: {:ok, []}
-
-  defp await_forward_backward_results([task | rest], future_module) do
-    case safe_await(future_module, task, :infinity) do
-      {:ok, result} ->
-        with {:ok, remaining} <- await_forward_backward_results(rest, future_module) do
-          {:ok, [ForwardBackwardOutput.from_json(result) | remaining]}
-        end
-
-      {:error, %Error{} = error} ->
-        Enum.each(rest, &Task.shutdown(&1, :brutal_kill))
-        {:error, error}
-    end
-  end
-
-  defp await_forward_results([], _future_module), do: {:ok, []}
-
-  defp await_forward_results([task | rest], future_module) do
-    case safe_await(future_module, task, :infinity) do
-      {:ok, result} ->
-        with {:ok, remaining} <- await_forward_results(rest, future_module) do
-          {:ok, [ForwardBackwardOutput.from_json(result) | remaining]}
-        end
-
-      {:error, %Error{} = error} ->
-        Enum.each(rest, &Task.shutdown(&1, :brutal_kill))
-        {:error, error}
-    end
-  end
-
-  defp chunk_data(data) do
-    data
-    |> Enum.chunk_while(
-      {[], 0},
-      fn datum, {chunk, count} ->
-        estimated = estimate_number_count(datum)
-
-        cond do
-          length(chunk) >= @max_chunk_len ->
-            {:cont, chunk, {[datum], estimated}}
-
-          count + estimated > @max_chunk_number_count ->
-            {:cont, chunk, {[datum], estimated}}
-
-          true ->
-            {:cont, {chunk ++ [datum], count + estimated}}
-        end
-      end,
-      fn
-        {[], 0} -> {:cont, []}
-        {chunk, _count} -> {:cont, chunk, {[], 0}}
-      end
-    )
-  end
-
-  defp estimate_number_count(%{model_input: model_input, loss_fn_inputs: loss_inputs}) do
-    model_input_count =
-      case model_input do
-        %Tinkex.Types.ModelInput{chunks: chunks} when is_list(chunks) ->
-          Enum.reduce(chunks, 0, fn chunk, acc ->
-            acc + _estimate_number_count_in_chunk(chunk)
-          end)
-
-        _ ->
-          0
-      end
-
-    loss_count =
-      loss_inputs
-      |> Map.values()
-      |> Enum.reduce(0, fn
-        %{data: data}, acc when is_list(data) -> acc + length(data)
-        _other, acc -> acc
-      end)
-
-    model_input_count + loss_count
-  end
-
-  defp _estimate_number_count_in_chunk(%Tinkex.Types.ImageChunk{data: data}) when is_binary(data),
-    do: byte_size(data)
-
-  defp _estimate_number_count_in_chunk(%Tinkex.Types.ImageAssetPointerChunk{
-         location: location
-       })
-       when is_binary(location),
-       do: byte_size(location)
-
-  defp _estimate_number_count_in_chunk(%Tinkex.Types.EncodedTextChunk{} = chunk),
-    do: Tinkex.Types.EncodedTextChunk.length(chunk)
-
-  defp _estimate_number_count_in_chunk(%{__struct__: mod} = chunk) do
-    if function_exported?(mod, :length, 1) do
-      mod.length(chunk)
-    else
-      0
-    end
-  end
-
-  defp _estimate_number_count_in_chunk(_chunk), do: 0
-
-  defp allocate_request_ids(count, counter) when count <= 0, do: {[], counter}
-
-  defp allocate_request_ids(count, counter) do
-    ids = Enum.to_list(counter..(counter + count - 1))
-    {ids, counter + count}
-  end
-
-  defp unlink_task(%Task{pid: pid}) when is_pid(pid) do
-    Process.unlink(pid)
-    :ok
-  end
-
-  defp unlink_task(_), do: :ok
-
-  defp await_unload_future(future, state) do
-    task =
-      state.future_module.poll(
-        future,
-        poll_opts_with_type(state, [], "UnloadModel")
-      )
-
-    unlink_task(task)
-
-    case safe_await(state.future_module, task, await_timeout([])) do
-      {:ok, result} -> {:ok, UnloadModelResponse.from_json(result)}
-      {:error, %Error{} = error} -> {:error, error}
-    end
-  end
+  # Private helpers
 
   defp safe_reply(from, reply) do
     try do
@@ -1421,176 +1033,6 @@ defmodule Tinkex.TrainingClient do
     end
   end
 
-  defp handle_save_state_response(%{"request_id" => _} = future, state, opts) do
-    poll_save_state_future(future, state, opts)
-  end
-
-  defp handle_save_state_response(%{request_id: _} = future, state, opts) do
-    poll_save_state_future(future, state, opts)
-  end
-
-  defp handle_save_state_response(%SaveWeightsResponse{} = resp, _state, _opts), do: {:ok, resp}
-
-  defp handle_save_state_response(%{"path" => _} = result, _state, _opts) do
-    {:ok, SaveWeightsResponse.from_json(result)}
-  end
-
-  defp handle_save_state_response(result, _state, _opts), do: {:ok, result}
-
-  defp poll_save_state_future(future, state, opts) do
-    task =
-      state.future_module.poll(
-        future,
-        poll_opts_with_type(state, opts, "SaveWeights")
-      )
-
-    unlink_task(task)
-
-    case safe_await(state.future_module, task, await_timeout(opts)) do
-      {:ok, result} -> {:ok, SaveWeightsResponse.from_json(result)}
-      {:error, %Error{} = error} -> {:error, error}
-    end
-  end
-
-  defp handle_load_state_response(%{"request_id" => _} = future, state, opts) do
-    poll_load_state_future(future, state, opts)
-  end
-
-  defp handle_load_state_response(%{request_id: _} = future, state, opts) do
-    poll_load_state_future(future, state, opts)
-  end
-
-  defp handle_load_state_response(%LoadWeightsResponse{} = resp, _state, _opts), do: {:ok, resp}
-
-  defp handle_load_state_response(%{"path" => _} = result, _state, _opts) do
-    {:ok, LoadWeightsResponse.from_json(result)}
-  end
-
-  defp handle_load_state_response(result, _state, _opts), do: {:ok, result}
-
-  defp poll_load_state_future(future, state, opts) do
-    task =
-      state.future_module.poll(
-        future,
-        poll_opts_with_type(state, opts, "LoadWeights")
-      )
-
-    unlink_task(task)
-
-    case safe_await(state.future_module, task, await_timeout(opts)) do
-      {:ok, result} -> {:ok, LoadWeightsResponse.from_json(result)}
-      {:error, %Error{} = error} -> {:error, error}
-    end
-  end
-
-  defp handle_save_weights_response(%{"request_id" => _} = future, state, opts) do
-    poll_save_weights_future(future, state, opts)
-  end
-
-  defp handle_save_weights_response(%{request_id: _} = future, state, opts) do
-    poll_save_weights_future(future, state, opts)
-  end
-
-  defp handle_save_weights_response(%SaveWeightsForSamplerResponse{} = resp, _state, _opts),
-    do: {:ok, resp}
-
-  defp handle_save_weights_response(%{"path" => _} = result, _state, _opts),
-    do: {:ok, SaveWeightsForSamplerResponse.from_json(result)}
-
-  defp handle_save_weights_response(%{"sampling_session_id" => _} = result, _state, _opts),
-    do: {:ok, SaveWeightsForSamplerResponse.from_json(result)}
-
-  defp handle_save_weights_response(result, _state, _opts) when is_map(result),
-    do: {:ok, SaveWeightsForSamplerResponse.from_json(result)}
-
-  defp handle_save_weights_response(result, _state, _opts), do: {:ok, result}
-
-  defp poll_save_weights_future(future, state, opts) do
-    task =
-      state.future_module.poll(
-        future,
-        poll_opts_with_type(state, opts, "SaveWeightsForSampler")
-      )
-
-    unlink_task(task)
-    safe_await(state.future_module, task, await_timeout(opts))
-  end
-
-  defp start_sampling_client_from_save(save_response, sampling_client_id, opts, state) do
-    path = Map.get(save_response, :path) || Map.get(save_response, "path")
-
-    sampling_session_id =
-      Map.get(save_response, :sampling_session_id) ||
-        Map.get(save_response, "sampling_session_id")
-
-    if is_nil(path) and is_nil(sampling_session_id) do
-      {:error,
-       Error.new(:validation, "save_weights_for_sampler returned neither path nor session")}
-    else
-      child_opts =
-        opts
-        |> Keyword.put(:session_id, state.session_id)
-        |> Keyword.put(:config, state.config)
-        |> Keyword.put(:sampling_client_id, sampling_client_id)
-        |> Keyword.put(:telemetry, state.telemetry)
-        |> Keyword.put(:telemetry_metadata, state.telemetry_metadata)
-        |> maybe_put(:model_path, path)
-        |> maybe_put(:sampling_session_id, sampling_session_id)
-
-      case DynamicSupervisor.start_child(
-             state.client_supervisor,
-             {state.sampling_client_module, child_opts}
-           ) do
-        {:ok, pid} -> {:ok, pid}
-        {:error, _} = error -> error
-      end
-    end
-  end
-
-  defp maybe_put(opts, _key, nil), do: opts
-  defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
-
-  defp normalize_save_weights_opts(opts, state) do
-    cond do
-      Keyword.get(opts, :path) ->
-        {opts, state.sampling_session_counter}
-
-      Keyword.has_key?(opts, :sampling_session_seq_id) ->
-        {opts, state.sampling_session_counter}
-
-      true ->
-        counter = state.sampling_session_counter
-        {Keyword.put(opts, :sampling_session_seq_id, counter), counter + 1}
-    end
-  end
-
-  defp poll_opts(state, opts) do
-    telemetry_metadata =
-      state.telemetry_metadata
-      |> Map.merge(Map.new(Keyword.get(opts, :telemetry_metadata, %{})))
-      |> Map.put(:model_id, state.model_id)
-
-    # Use __MODULE__ as observer by default for automatic queue state logging
-    # Users can override with their own observer via opts[:queue_state_observer]
-    observer = Keyword.get(opts, :queue_state_observer, __MODULE__)
-
-    opts
-    |> Keyword.take([
-      :timeout,
-      :http_timeout,
-      :telemetry_metadata,
-      :sleep_fun
-    ])
-    |> Keyword.put(:config, state.config)
-    |> Keyword.put(:telemetry_metadata, telemetry_metadata)
-    |> Keyword.put(:queue_state_observer, observer)
-  end
-
-  defp poll_opts_with_type(state, opts, request_type) do
-    poll_opts(state, opts)
-    |> Keyword.put(:tinker_request_type, request_type)
-  end
-
   defp base_telemetry_metadata(state, extra) when is_map(extra) do
     Map.merge(state.telemetry_metadata, extra)
   end
@@ -1598,165 +1040,5 @@ defmodule Tinkex.TrainingClient do
   defp put_telemetry(nil), do: :ok
   defp put_telemetry(pid), do: :erlang.put({__MODULE__, :telemetry}, pid)
 
-  defp safe_await(future_module, task, timeout) do
-    try do
-      future_module.await(task, timeout)
-    rescue
-      e ->
-        {:error,
-         Error.new(:request_failed, "Polling task failed: #{Exception.message(e)}",
-           data: %{exception: e, stacktrace: __STACKTRACE__}
-         )}
-    catch
-      :exit, reason ->
-        {:error,
-         Error.new(:request_failed, "Polling task exited: #{inspect(reason)}",
-           data: %{exit_reason: reason}
-         )}
-    end
-  end
-
   defp await_timeout(opts), do: Keyword.get(opts, :await_timeout, :infinity)
-
-  defp build_placeholder_gradients(data) do
-    data
-    |> Enum.reduce_while({:ok, []}, fn datum, {:ok, acc} ->
-      case fetch_target_tokens_tensor(datum) do
-        {:ok, target_tensor} ->
-          zero =
-            Nx.broadcast(
-              Nx.tensor(0.0, type: {:f, 32}),
-              Nx.shape(target_tensor)
-            )
-
-          {:cont, {:ok, [zero | acc]}}
-
-        {:error, reason} ->
-          {:halt, {:error, reason}}
-      end
-    end)
-    |> case do
-      {:ok, grads_rev} -> {:ok, Enum.reverse(grads_rev)}
-      {:error, _} = error -> error
-    end
-  end
-
-  defp fetch_target_tokens_tensor(%Datum{loss_fn_inputs: inputs}) do
-    case inputs["target_tokens"] || inputs[:target_tokens] do
-      %TensorData{} = td ->
-        {:ok, TensorData.to_nx(td)}
-
-      %Nx.Tensor{} = tensor ->
-        {:ok, tensor}
-
-      nil ->
-        {:error, Error.new(:validation, "target_tokens missing from loss_fn_inputs")}
-
-      other ->
-        {:error,
-         Error.new(
-           :validation,
-           "Invalid target_tokens in loss_fn_inputs: #{inspect(other)}"
-         )}
-    end
-  end
-
-  defp poll_forward_custom_loss(futures, opts, state) do
-    polling_tasks =
-      Enum.map(futures, fn future ->
-        task =
-          state.future_module.poll(
-            future,
-            poll_opts_with_type(state, opts, "ForwardCustomLoss")
-          )
-
-        unlink_task(task)
-        task
-      end)
-
-    await_forward_results_for_custom_loss(polling_tasks, state.future_module)
-  end
-
-  defp build_linear_loss_data_safe(data, gradients) do
-    if length(data) != length(gradients) do
-      {:error, Error.new(:validation, "Gradient count does not match data count")}
-    else
-      {:ok, CustomLoss.build_linear_loss_data(data, gradients)}
-    end
-  rescue
-    e ->
-      {:error,
-       Error.new(:request_failed, "Failed to build linear loss data: #{Exception.message(e)}",
-         data: %{exception: e, stacktrace: __STACKTRACE__}
-       )}
-  end
-
-  defp send_backward_for_custom_loss(linear_data, seq_ids, opts, state) do
-    chunks = chunk_data(linear_data)
-
-    if length(chunks) != length(seq_ids) do
-      {:error,
-       Error.new(
-         :validation,
-         "Chunk count mismatch for custom loss backward: expected #{length(seq_ids)}, got #{length(chunks)}"
-       )}
-    else
-      send_result =
-        Enum.reduce_while(Enum.zip(seq_ids, chunks), {:ok, []}, fn {seq_id, chunk}, {:ok, acc} ->
-          case send_forward_backward_request(chunk, :cross_entropy, seq_id, opts, state) do
-            {:ok, future} -> {:cont, {:ok, [future | acc]}}
-            {:error, reason} -> {:halt, {:error, reason}}
-          end
-        end)
-
-      case send_result do
-        {:error, _} = error ->
-          error
-
-        {:ok, futures_rev} ->
-          futures = Enum.reverse(futures_rev)
-
-          polling_tasks =
-            Enum.map(futures, fn future ->
-              task =
-                state.future_module.poll(
-                  future,
-                  poll_opts_with_type(state, opts, "ForwardBackwardCustomLoss")
-                )
-
-              unlink_task(task)
-              task
-            end)
-
-          await_forward_backward_results(polling_tasks, state.future_module)
-      end
-    end
-  end
-
-  defp merge_custom_metrics(%ForwardBackwardOutput{} = output, metrics) when is_map(metrics) do
-    normalized =
-      metrics
-      |> Enum.map(fn {k, v} -> {to_string(k), normalize_metric_value(v)} end)
-      |> Map.new()
-
-    %ForwardBackwardOutput{output | metrics: Map.merge(output.metrics, normalized)}
-  end
-
-  defp normalize_metric_value(%Nx.Tensor{} = tensor), do: Nx.to_number(tensor)
-  defp normalize_metric_value(other), do: other
-
-  defp await_forward_results_for_custom_loss([], _future_module), do: {:ok, []}
-
-  defp await_forward_results_for_custom_loss([task | rest], future_module) do
-    case safe_await(future_module, task, :infinity) do
-      {:ok, result} ->
-        with {:ok, remaining} <- await_forward_results_for_custom_loss(rest, future_module) do
-          {:ok, [ForwardBackwardOutput.from_json(result) | remaining]}
-        end
-
-      {:error, %Error{} = error} ->
-        Enum.each(rest, &Task.shutdown(&1, :brutal_kill))
-        {:error, error}
-    end
-  end
 end

@@ -4,6 +4,16 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.2.1] - 2025-12-07
+
+### Changed
+- **Major refactor of god files**: Split 4 large modules into smaller, focused sub-modules for improved maintainability:
+  - `Tinkex.CLI` (2,155 → 82 lines): Extracted to `CLI.Commands.{Checkpoint, Run, Sample, Version}`, `CLI.Formatting`, `CLI.Pagination`, `CLI.Parser`
+  - `Tinkex.TrainingClient` (1,762 → 1,031 lines): Extracted to `TrainingClient.{Operations, Polling, DataProcessor, Tokenizer, Observer}`
+  - `Tinkex.API` (1,115 → 317 lines): Extracted to `API.{Request, ResponseHandler, Retry, Headers, URL, Compression}`
+  - `Tinkex.Telemetry.Reporter` (784 → 380 lines): Extracted to `Reporter.{Queue, Events, ExceptionHandler, Serializer, Backoff}`
+- All public APIs remain unchanged (transparent refactor)
+
 ## [0.2.0] - 2025-12-04
 
 ### Added
