@@ -6,6 +6,11 @@ Reference this guide when CLI or SDK calls fail or diverge from expectations. Mo
 
 - **Missing API key/base URL**: `Tinkex.Config.new/1` raises or returns validation errors when `api_key`/`base_url` are absent. Set `TINKER_API_KEY` (and optionally `TINKER_BASE_URL`) or pass explicit options.
 - **Non-default pool selection**: If you override `:base_url` without starting a matching Finch pool, requests fall back to Finch defaults. Use the same base URL configured in `Tinkex.Application` for production workloads, or provide a custom pool via `config :tinkex, :http_pool, MyPool`.
+- **Session SDK version too old**: Some endpoints may reject requests (notably vision/image input) if the reported SDK version is too old. Tinkex reports the official Python Tinker SDK version configured in `mix.exs`; update to the latest Tinkex if you hit this.
+
+## Vision and multimodal inputs
+
+- **Asset is not a valid image**: The backend rejected the image bytes. Verify you are sending a real PNG/JPEG (and that `format` matches the file), try a different image, and avoid setting `expected_tokens` unless you know the correct value. The bundled example supports `TINKER_IMAGE_PATH` / `TINKER_IMAGE_EXPECTED_TOKENS`.
 
 ## Timeouts, queuing, or 429 responses
 

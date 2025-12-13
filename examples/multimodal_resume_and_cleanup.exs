@@ -3,6 +3,11 @@ alias Tinkex.Types.{ImageChunk, ModelInput, SamplingParams}
 
 config = Config.new()
 
+preferred_vision_models = [
+  "Qwen/Qwen3-VL-30B-A3B-Instruct",
+  "Qwen/Qwen3-VL-235B-A22B-Instruct"
+]
+
 # Choose a vision-capable model dynamically; override via TINKER_BASE_MODEL if desired.
 {:ok, service} = ServiceClient.start_link(config: config)
 
@@ -20,39 +25,75 @@ caps =
       nil
   end
 
-vision_model =
-  caps
-  |> case do
-    nil ->
-      nil
-
+advertised_models =
+  case caps do
     %{supported_models: models} when is_list(models) ->
       models
       |> Enum.map(&((&1 && &1.model_name) || &1))
       |> Enum.filter(&is_binary/1)
-      |> Enum.find(fn name ->
-        down = String.downcase(name)
 
-        String.contains?(down, "vision") or String.contains?(down, "vl") or
-          String.contains?(down, "image") or
-          String.contains?(down, "omni")
-      end)
+    _ ->
+      []
   end
+
+vision_model =
+  Enum.find(preferred_vision_models, &(&1 in advertised_models)) ||
+    Enum.find(advertised_models, fn name ->
+      down = String.downcase(name)
+
+      String.contains?(down, "vision") or String.contains?(down, "vl") or
+        String.contains?(down, "image") or
+        String.contains?(down, "omni")
+    end)
 
 base_model = System.get_env("TINKER_BASE_MODEL") || vision_model
 
-expected_tokens = 64
+image_path = System.get_env("TINKER_IMAGE_PATH") || "examples/assets/vision_sample.png"
+
+image_format =
+  case String.downcase(Path.extname(image_path)) do
+    ".png" -> :png
+    ".jpg" -> :jpeg
+    ".jpeg" -> :jpeg
+    other -> raise "Unsupported image extension #{inspect(other)} for #{image_path}"
+  end
+
+expected_tokens =
+  case System.get_env("TINKER_IMAGE_EXPECTED_TOKENS") do
+    nil ->
+      nil
+
+    raw ->
+      case Integer.parse(String.trim(raw)) do
+        {n, ""} when n >= 0 ->
+          n
+
+        _ ->
+          raise "Invalid TINKER_IMAGE_EXPECTED_TOKENS=#{inspect(raw)} (expected a non-negative integer)"
+      end
+  end
+
+image_chunk_opts =
+  case expected_tokens do
+    nil -> []
+    n -> [expected_tokens: n]
+  end
+
 checkpoint_cache_path = Path.join(["tmp", "checkpoints", "default.path"])
 File.mkdir_p!(Path.dirname(checkpoint_cache_path))
 
-IO.puts("== Multimodal sampling with expected_tokens")
+IO.puts("== Multimodal sampling (image + text)")
 
 cond do
   base_model ->
     IO.puts("Using vision-capable model: #{base_model}")
 
-    image_bytes = File.read!("examples/assets/tiny.png")
-    image_chunk = ImageChunk.new(image_bytes, :png, expected_tokens: expected_tokens)
+    IO.puts(
+      "Using image: #{image_path} (format=#{image_format} expected_tokens=#{inspect(expected_tokens)})"
+    )
+
+    image_bytes = File.read!(image_path)
+    image_chunk = ImageChunk.new(image_bytes, image_format, image_chunk_opts)
 
     {:ok, text_input} =
       case ModelInput.from_text("A one-pixel image:", model_name: base_model) do
@@ -78,9 +119,16 @@ cond do
           {:error, %Error{status: 400, data: %{"detail" => detail}}} ->
             IO.puts(:stderr, "Sampling failed: #{detail}")
 
+            if is_binary(detail) and String.contains?(detail, "SDK version") do
+              IO.puts(
+                :stderr,
+                "Tip: update Tinkex. This build reports Tinker SDK version #{Tinkex.Version.tinker_sdk()} to the backend."
+              )
+            end
+
             IO.puts(
               :stderr,
-              "Server did not accept image input. If a vision-capable model is available, set TINKER_BASE_MODEL accordingly and rerun."
+              "Server rejected the image input. Try a different PNG/JPEG via TINKER_IMAGE_PATH and (if set) unset TINKER_IMAGE_EXPECTED_TOKENS."
             )
 
           {:error, error} ->

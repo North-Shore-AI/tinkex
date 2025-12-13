@@ -1,7 +1,9 @@
 defmodule Tinkex.MixProject do
   use Mix.Project
 
-  @version "0.3.0"
+  @version "0.3.1"
+  # Tinker backend expects the Python SDK version for feature gating/parity.
+  @tinker_sdk_version "0.7.0"
   @source_url "https://github.com/North-Shore-AI/tinkex"
   @docs_url "https://hexdocs.pm/tinkex"
 
@@ -11,6 +13,7 @@ defmodule Tinkex.MixProject do
     [
       app: :tinkex,
       version: @version,
+      tinker_sdk_version: @tinker_sdk_version,
       elixir: "~> 1.18",
       start_permanent: Mix.env() == :prod,
       escript: [main_module: Tinkex.CLI],

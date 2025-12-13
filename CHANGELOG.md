@@ -4,7 +4,12 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
-- No changes yet.
+## [0.3.1] - 2025-12-13
+
+- Examples: multimodal sampling example now prefers Qwen3-VL models when available (`Qwen/Qwen3-VL-30B-A3B-Instruct`, `Qwen/Qwen3-VL-235B-A22B-Instruct`).
+- Examples: multimodal sampling example uses `examples/assets/vision_sample.png` by default and supports `TINKER_IMAGE_PATH` / `TINKER_IMAGE_EXPECTED_TOKENS`.
+- Version reporting: session `sdk_version`, telemetry `sdk_version`, and `x-stainless-package-version` are pinned to the official Python Tinker SDK version configured in `mix.exs` (removed `TINKEX_SDK_VERSION`/`sdk_version` overrides).
+- Fix: HuggingFace tokenizer downloads no longer emit `:httpc` notices about `autoredirect`.
 
 ## [0.3.0] - 2025-12-12
 

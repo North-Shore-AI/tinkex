@@ -171,7 +171,7 @@ defmodule Tinkex.SessionManager do
     request = %{
       tags: config.tags || ["tinkex-elixir"],
       user_metadata: config.user_metadata,
-      sdk_version: sdk_version(),
+      sdk_version: Tinkex.Version.tinker_sdk(),
       type: "create_session"
     }
 
@@ -229,10 +229,6 @@ defmodule Tinkex.SessionManager do
        Error.new(:request_failed, "Heartbeat exited: #{inspect(reason)}",
          data: %{exit_reason: reason}
        )}
-  end
-
-  defp sdk_version do
-    Tinkex.Version.current()
   end
 
   defp maybe_warn(session_id, last_success_ms, now_ms, last_error, state) do

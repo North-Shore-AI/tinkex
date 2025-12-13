@@ -32,6 +32,7 @@ defmodule Tinkex.Tokenizer.HTTPClient do
       http_options = [
         timeout: timeout_ms,
         connect_timeout: timeout_ms,
+        autoredirect: true,
         ssl: [
           verify: :verify_peer,
           cacerts: :public_key.cacerts_get(),
@@ -42,7 +43,7 @@ defmodule Tinkex.Tokenizer.HTTPClient do
         ]
       ]
 
-      options = [body_format: :binary, autoredirect: true]
+      options = [body_format: :binary]
 
       case :httpc.request(method, {url, headers}, http_options, options) do
         {:ok, {{_, status, _}, resp_headers, body}} ->

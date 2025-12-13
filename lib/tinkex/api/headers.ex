@@ -180,17 +180,6 @@ defmodule Tinkex.API.Headers do
     end
   end
 
-  defp stainless_headers(timeout_ms) do
-    [
-      {"x-stainless-package-version", sdk_version()},
-      {"x-stainless-os", stainless_os()},
-      {"x-stainless-arch", stainless_arch()},
-      {"x-stainless-runtime", stainless_runtime()},
-      {"x-stainless-runtime-version", stainless_runtime_version()},
-      {"x-stainless-read-timeout", stainless_read_timeout(timeout_ms)}
-    ]
-  end
-
   defp stainless_read_timeout(timeout_ms) when is_integer(timeout_ms) do
     timeout_ms
     |> Kernel./(1000)
@@ -231,8 +220,19 @@ defmodule Tinkex.API.Headers do
     "#{System.version()} (OTP #{otp})"
   end
 
+  defp stainless_headers(timeout_ms) do
+    [
+      {"x-stainless-package-version", sdk_version()},
+      {"x-stainless-os", stainless_os()},
+      {"x-stainless-arch", stainless_arch()},
+      {"x-stainless-runtime", stainless_runtime()},
+      {"x-stainless-runtime-version", stainless_runtime_version()},
+      {"x-stainless-read-timeout", stainless_read_timeout(timeout_ms)}
+    ]
+  end
+
   defp sdk_version do
-    Tinkex.Version.current()
+    Tinkex.Version.tinker_sdk()
   end
 
   defp user_agent do

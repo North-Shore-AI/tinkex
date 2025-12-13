@@ -43,7 +43,7 @@ defmodule Tinkex.Telemetry.Reporter.Serializer do
     %{
       session_id: state.session_id,
       platform: platform(),
-      sdk_version: Tinkex.Version.current(),
+      sdk_version: Tinkex.Version.tinker_sdk(),
       events: event_maps
     }
   end

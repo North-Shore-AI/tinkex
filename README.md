@@ -13,10 +13,12 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.3.0 Highlights
+## 0.3.1 Highlights
 
 - Kimi K2 tokenization support via `tiktoken_ex` (TikToken-style `tiktoken.model` tokenizers, not HuggingFace `tokenizer.json`).
-- HuggingFace tokenizer/artifact downloads are escript-safe (OTP CA certs; no `CAStore.file_path/0` dependency).
+- Vision sampling example prefers Qwen3-VL models and uses a bundled PNG sample (`examples/multimodal_resume_and_cleanup.exs`).
+- Reported `sdk_version` / `x-stainless-package-version` are pinned to the official Python Tinker SDK version configured in `mix.exs`.
+- HuggingFace tokenizer/artifact downloads are escript-safe (OTP CA certs; no `CAStore.file_path/0` dependency) and avoid noisy `:httpc` notices.
 - EXLA is optional and is not started automatically; enable it explicitly when needed for Nx operations.
 - New Kimi K2 guide + live sampling example.
 
@@ -45,6 +47,7 @@ Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-
 - **Multipart uploads**: The `:files` option builds multipart/form-data bodies automatically (path and tuple normalization, bracketed form fields, boundary generation, and tuple metadata) while preserving JSON requests when no files are present; includes a runnable multipart example and path-based helpers.
 - **Proxy-aware HTTP**: Finch pools pick up proxies from `Tinkex.Config` (or `TINKEX_PROXY`/`TINKEX_PROXY_HEADERS`) while masking credentials in logs and inspect output.
 - **ModelInput builders**: `empty/0`, `append/2`, `append_int/2` for incremental prompt construction; `append_int` extends the last text chunk or creates a new one after images.
+- **Vision input models**: Multimodal prompts (text + image chunks) are supported for vision-capable models like `Qwen/Qwen3-VL-30B-A3B-Instruct` and `Qwen/Qwen3-VL-235B-A22B-Instruct` (see `examples/multimodal_resume_and_cleanup.exs`).
 
 ## Disclaimer
 
@@ -67,7 +70,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.3.0"}
+    {:tinkex, "~> 0.3.1"}
   ]
 end
 ```

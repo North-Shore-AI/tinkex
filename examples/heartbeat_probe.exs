@@ -17,7 +17,7 @@ config = Tinkex.Config.new(api_key: api_key, base_url: base_url)
 session_request = %{
   tags: ["tinkex-elixir", "heartbeat-probe"],
   user_metadata: %{},
-  sdk_version: Tinkex.Version.current(),
+  sdk_version: Tinkex.Version.tinker_sdk(),
   type: "create_session"
 }
 
