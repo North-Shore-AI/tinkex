@@ -86,8 +86,8 @@ defmodule Tinkex.TrainingClient do
 
   ## Examples
 
-      {:ok, tokenizer} = TrainingClient.get_tokenizer(client)
-      {:ok, encoding} = Tokenizers.Tokenizer.encode(tokenizer, "Hello world")
+      {:ok, _tokenizer} = TrainingClient.get_tokenizer(client)
+      {:ok, ids} = TrainingClient.encode(client, "Hello world")
 
   ## Errors
 
@@ -96,7 +96,7 @@ defmodule Tinkex.TrainingClient do
     * Tokenizer cannot be loaded
   """
   @spec get_tokenizer(t(), keyword()) ::
-          {:ok, Tokenizers.Tokenizer.t()} | {:error, Error.t()}
+          {:ok, Tinkex.Tokenizer.handle()} | {:error, Error.t()}
   def get_tokenizer(client, opts \\ []) do
     Tokenizer.get_tokenizer(client, opts)
   end

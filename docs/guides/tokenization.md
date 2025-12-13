@@ -4,6 +4,27 @@ Tinkex ships a thin wrapper around HuggingFace `tokenizers` for converting plain
 text to token IDs. The helpers return tuples (`{:ok, ...} | {:error, ...}`) to
 keep error handling explicit; use the bang variants if you prefer exceptions.
 
+## Kimi K2 tokenizers
+
+MoonshotAI Kimi K2 tokenizers ship a `tiktoken.model` file (not a
+`tokenizer.json`). For Kimi models, Tinkex uses `tiktoken_ex` under the hood
+and will download/cache the HuggingFace `tiktoken.model` and
+`tokenizer_config.json` files automatically.
+
+See `docs/guides/kimi_k2_tokenization.md` for full details and a live example.
+
+To run fully offline (or to control caching), pass explicit file paths:
+
+```elixir
+{:ok, ids} =
+  Tinkex.Tokenizer.encode(
+    "Say hi",
+    "moonshotai/Kimi-K2-Thinking",
+    tiktoken_model_path: "/path/to/tiktoken.model",
+    tokenizer_config_path: "/path/to/tokenizer_config.json"
+  )
+```
+
 ## Encoding text
 
 ```elixir

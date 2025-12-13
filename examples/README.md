@@ -9,6 +9,7 @@ The examples are organized by functionality and complexity, ranging from simple 
 ## Example Index
 
 - `sampling_basic.exs` – basic sampling client creation and prompt decoding
+- `kimi_k2_sampling_live.exs` – live sampling with MoonshotAI Kimi K2 using `tiktoken_ex` tokenization (skips if unavailable)
 - `training_loop.exs` – forward/backward pass, optim step, save weights, and optional sampling
 - `custom_loss_training.exs` – live custom loss training that sends gradients to the backend via `forward_backward_custom/4`
 - `forward_inference.exs` – forward-only pass returning logprobs for custom loss computation/evaluation with Nx/EXLA
@@ -135,6 +136,24 @@ This example demonstrates the fundamental sampling workflow using the Tinkex SDK
 - `TINKER_TEMPERATURE` (optional, defaults to 0.7)
 - `TINKER_NUM_SAMPLES` (optional, defaults to 1)
 - `TINKER_SAMPLE_TIMEOUT` (optional, defaults to 30000ms)
+
+### kimi_k2_sampling_live.exs
+
+This example demonstrates end-to-end sampling with MoonshotAI’s **Kimi K2**
+models using `tiktoken_ex` tokenization. It checks live server capabilities for
+`moonshotai/Kimi-K2-Thinking` (skips if the model is not advertised), prints a
+tokenization round-trip for the prompt, then runs a live sampling request and
+decodes the returned tokens.
+
+**Configuration Variables:**
+- `TINKER_API_KEY` (required)
+- `TINKER_BASE_URL` (optional)
+- `TINKER_BASE_MODEL` (optional, defaults to `moonshotai/Kimi-K2-Thinking`)
+- `TINKER_PROMPT` (optional, defaults to "Say hi")
+- `TINKER_MAX_TOKENS` (optional, defaults to 32)
+- `TINKER_TEMPERATURE` (optional, defaults to 0.7)
+- `TINKER_NUM_SAMPLES` (optional, defaults to 1)
+- `TINKER_SAMPLE_TIMEOUT` (optional, defaults to 60000ms)
 
 ### training_loop.exs
 
@@ -2626,6 +2645,19 @@ Recovery callback: old=#PID<0.323.0> new=#PID<0.345.0> cp=tinker://7894c2a1-ae93
 Saved checkpoint tinker://7894c2a1-ae93-5ac9-bb77-5eff19b82b14:train:1/weights/recovery-live-2
 Recovered from tinker://7894c2a1-ae93-5ac9-bb77-5eff19b82b14:train:0/weights/recovery-live-1
 Second checkpoint saved: tinker://7894c2a1-ae93-5ac9-bb77-5eff19b82b14:train:1/weights/recovery-live-2
+
+==> Running examples/kimi_k2_sampling_live.exs
+== Kimi K2 tokenization (tiktoken_ex)
+Model: moonshotai/Kimi-K2-Thinking
+Prompt: "Say hi"
+Token IDs (first 32): [71079, 20910] (2 total)
+Round-trip decode: "Say hi"
+
+== Live sampling
+Sampling 1 sequence(s) from moonshotai/Kimi-K2-Thinking ...
+Received 1 sequence(s):
+Sample 1:  to your folks for me." He turned his attention back to the road, and the car lurched forward.
+I stood on the curb, watching them go.
 
 ==> Running examples/model_info_and_unload.exs
 [tinkex] base_url=https://tinker.thinkingmachines.dev/services/tinker-prod

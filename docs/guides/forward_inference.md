@@ -699,10 +699,14 @@ Adjust timeouts based on data size:
 
 ### 5. EXLA Backend
 
-Nx operations on logprobs can leverage EXLA for GPU acceleration:
+Nx operations on logprobs can leverage EXLA for GPU acceleration.
+
+Note: EXLA is optional and is not started automatically. Start it before
+switching backends.
 
 ```elixir
-# Set EXLA as default backend
+# Ensure EXLA is started, then set it as the default backend
+{:ok, _} = Application.ensure_all_started(:exla)
 Nx.default_backend(EXLA.Backend)
 
 # Now all Nx operations use GPU if available

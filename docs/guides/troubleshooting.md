@@ -18,12 +18,14 @@ Reference this guide when CLI or SDK calls fail or diverge from expectations. Mo
 - **Compilation/ABI errors**: Ensure Rust toolchains and C toolchains are available; re-run `mix deps.compile tokenizers`.
 - **Runtime crashes**: The ETS cache stores NIF handles; verify the same OS/CPU architecture used to build dependencies. If you suspect a bad cache entry, restart the BEAM and clear `_build`/`deps`.
 - **Unexpected token IDs**: Confirm you are passing fully formatted text (chat templates are not inserted) and the correct model name. For Llama-3 variants, the SDK automatically swaps to `"thinkingmachineslabinc/meta-llama-3-tokenizer"`.
+- **Kimi K2 tokenizers**: Kimi uses `tiktoken.model` + `tokenizer_config.json` (via `tiktoken_ex`), not a HuggingFace `tokenizer.json`. Ensure those files can be downloaded from HuggingFace or pass `tiktoken_model_path`/`tokenizer_config_path`.
 
 ## CLI failures
 
 - **`--output` missing**: `tinkex checkpoint` requires `--output` to write metadata. Provide a path with write permissions.
 - **Missing base model**: Both `run` and `checkpoint` expect `--base-model` (or `--model-path` for `run`). Validate the option spelling and casing.
 - **Prompt file errors**: `--prompt-file` accepts plain text or a JSON array of token IDs. Confirm the file is readable and valid UTF-8/JSON.
+- **EXLA errors**: EXLA is optional and is not started automatically. If you need EXLA-backed Nx operations, run via `mix run` / an OTP release and start `:exla` before calling `Nx.default_backend/1`.
 - **Stuck or slow runs**: Pass `--http-timeout` / `--timeout` and monitor telemetry logs. Use `--json` to inspect raw server payloads when diagnosing errors.
 
 ## Comparing with the Python SDK

@@ -1,7 +1,7 @@
 defmodule Tinkex.MixProject do
   use Mix.Project
 
-  @version "0.2.2"
+  @version "0.3.0"
   @source_url "https://github.com/North-Shore-AI/tinkex"
   @docs_url "https://hexdocs.pm/tinkex"
 
@@ -47,11 +47,16 @@ defmodule Tinkex.MixProject do
       # Numerical computing (tensor operations)
       {:nx, "~> 0.9"},
 
-      # GPU/CPU-accelerated backend for Nx
-      {:exla, "~> 0.9"},
+      # GPU/CPU-accelerated backend for Nx (optional).
+      # EXLA ships a native library and does not work reliably inside an escript archive;
+      # keep it compile-time available, but do not start it automatically.
+      {:exla, "~> 0.9", runtime: false},
 
       # Tokenization (HuggingFace models)
       {:tokenizers, "~> 0.5"},
+
+      # Tokenization (TikToken-style byte BPE, Kimi K2 compatible)
+      {:tiktoken_ex, "~> 0.1.0"},
 
       # Telemetry
       {:telemetry, "~> 1.2"},
@@ -94,6 +99,7 @@ defmodule Tinkex.MixProject do
         # Getting Started
         "docs/guides/getting_started.md",
         "docs/guides/tokenization.md",
+        "docs/guides/kimi_k2_tokenization.md",
         "docs/guides/advanced_configuration.md",
         "docs/guides/environment_configuration.md",
         "docs/guides/file_uploads.md",
@@ -122,6 +128,7 @@ defmodule Tinkex.MixProject do
         "Getting Started": [
           "docs/guides/getting_started.md",
           "docs/guides/tokenization.md",
+          "docs/guides/kimi_k2_tokenization.md",
           "docs/guides/advanced_configuration.md",
           "docs/guides/environment_configuration.md",
           "docs/guides/file_uploads.md",

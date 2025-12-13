@@ -10,6 +10,9 @@ defmodule Tinkex.Tokenizer do
   """
 
   alias Tokenizers.{Encoding, Tokenizer}
+  alias TiktokenEx.Encoding, as: TikEncoding
+  alias TiktokenEx.Kimi, as: TikKimi
+  alias Tinkex.HuggingFace
   alias Tinkex.{Error, TrainingClient}
 
   @tokenizer_table :tinkex_tokenizers
@@ -19,6 +22,9 @@ defmodule Tinkex.Tokenizer do
 
   @typedoc "Identifier for a tokenizer (e.g., HuggingFace repo name)."
   @type tokenizer_id :: String.t()
+
+  @typedoc "Loaded tokenizer handle."
+  @type handle :: Tokenizer.t() | TikEncoding.t()
 
   @doc """
   Resolve the tokenizer ID for the given model.
@@ -51,7 +57,7 @@ defmodule Tinkex.Tokenizer do
   application has not already started it.
   """
   @spec get_or_load_tokenizer(tokenizer_id(), keyword()) ::
-          {:ok, Tokenizer.t()} | {:error, Error.t()}
+          {:ok, handle()} | {:error, Error.t()}
   def get_or_load_tokenizer(tokenizer_id, opts \\ [])
 
   def get_or_load_tokenizer(tokenizer_id, _opts) when not is_binary(tokenizer_id) do
@@ -66,10 +72,9 @@ defmodule Tinkex.Tokenizer do
         {:ok, tokenizer}
 
       [] ->
-        load_fun = Keyword.get(opts, :load_fun, &default_load_fun/2)
-        load_opts = tokenizer_load_opts(tokenizer_id)
+        load_fun = Keyword.get(opts, :load_fun)
 
-        with {:ok, tokenizer} <- load_tokenizer(load_fun, tokenizer_id, load_opts),
+        with {:ok, tokenizer} <- load_tokenizer_handle(tokenizer_id, load_fun, opts),
              {:ok, cached} <- cache_tokenizer(tokenizer_id, tokenizer) do
           {:ok, cached}
         else
@@ -84,8 +89,82 @@ defmodule Tinkex.Tokenizer do
 
   defp default_load_fun(id, opts), do: Tokenizer.from_pretrained(id, opts)
 
-  defp tokenizer_load_opts(@kimi_tokenizer), do: [revision: @kimi_revision]
-  defp tokenizer_load_opts(_), do: []
+  defp load_tokenizer_handle(tokenizer_id, nil, opts) do
+    if kimi_tokenizer?(tokenizer_id) do
+      load_kimi_encoding(tokenizer_id, opts)
+    else
+      load_fun = &default_load_fun/2
+      load_opts = tokenizer_load_opts(tokenizer_id)
+      load_tokenizer(load_fun, tokenizer_id, load_opts)
+    end
+  end
+
+  defp load_tokenizer_handle(tokenizer_id, load_fun, _opts) when is_function(load_fun, 2) do
+    load_opts = tokenizer_load_opts(tokenizer_id)
+    load_tokenizer(load_fun, tokenizer_id, load_opts)
+  end
+
+  defp load_tokenizer_handle(_tokenizer_id, load_fun, _opts) do
+    {:error, Error.new(:validation, "invalid load_fun: #{inspect(load_fun)}")}
+  end
+
+  defp tokenizer_load_opts(@kimi_tokenizer),
+    do: [revision: @kimi_revision, http_client: {Tinkex.Tokenizer.HTTPClient, []}]
+
+  defp tokenizer_load_opts(_), do: [http_client: {Tinkex.Tokenizer.HTTPClient, []}]
+
+  defp kimi_tokenizer?(tokenizer_id) when tokenizer_id == @kimi_tokenizer, do: true
+  defp kimi_tokenizer?(_tokenizer_id), do: false
+
+  defp load_kimi_encoding(tokenizer_id, opts) do
+    revision = Keyword.get(opts, :revision, @kimi_revision)
+
+    with {:ok, model_path} <- resolve_kimi_file(tokenizer_id, revision, "tiktoken.model", opts),
+         {:ok, config_path} <-
+           resolve_kimi_file(tokenizer_id, revision, "tokenizer_config.json", opts),
+         {:ok, encoding} <- build_kimi_encoding(model_path, config_path, opts) do
+      {:ok, encoding}
+    else
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      {:error, reason} ->
+        {:error,
+         Error.new(:validation, "Failed to load Kimi tokenizer: #{format_reason(reason)}")}
+    end
+  end
+
+  defp resolve_kimi_file(repo_id, revision, "tiktoken.model", opts) do
+    case Keyword.get(opts, :tiktoken_model_path) do
+      path when is_binary(path) -> {:ok, path}
+      _ -> HuggingFace.resolve_file(repo_id, revision, "tiktoken.model", opts)
+    end
+  end
+
+  defp resolve_kimi_file(repo_id, revision, "tokenizer_config.json", opts) do
+    case Keyword.get(opts, :tokenizer_config_path) do
+      path when is_binary(path) ->
+        {:ok, path}
+
+      _ ->
+        HuggingFace.resolve_file(repo_id, revision, "tokenizer_config.json", opts)
+    end
+  end
+
+  defp build_kimi_encoding(model_path, config_path, opts) do
+    kimi_opts =
+      [
+        tiktoken_model_path: model_path,
+        tokenizer_config_path: config_path
+      ]
+      |> maybe_put_opt(:pat_str, Keyword.get(opts, :pat_str))
+      |> maybe_put_opt(:special_token_matching, Keyword.get(opts, :special_token_matching))
+
+    TikKimi.from_hf_files(kimi_opts)
+  end
+
+  defp maybe_put_opt(keyword, _key, nil), do: keyword
+  defp maybe_put_opt(keyword, key, value), do: Keyword.put(keyword, key, value)
 
   @doc """
   Encode text into token IDs using a cached tokenizer.
@@ -116,8 +195,8 @@ defmodule Tinkex.Tokenizer do
     tokenizer_id = get_tokenizer_id(model_name, Keyword.get(opts, :training_client), opts)
 
     with {:ok, tokenizer} <- get_or_load_tokenizer(tokenizer_id, opts),
-         {:ok, encoding} <- Tokenizer.encode(tokenizer, text) do
-      {:ok, Encoding.get_ids(encoding)}
+         {:ok, ids} <- encode_with_tokenizer(tokenizer, text, opts) do
+      {:ok, ids}
     else
       {:error, %Error{} = error} ->
         {:error, error}
@@ -164,7 +243,7 @@ defmodule Tinkex.Tokenizer do
         tokenizer_id = get_tokenizer_id(model_name, Keyword.get(opts, :training_client), opts)
 
         with {:ok, tokenizer} <- get_or_load_tokenizer(tokenizer_id, opts),
-             {:ok, text} <- Tokenizer.decode(tokenizer, ids) do
+             {:ok, text} <- decode_with_tokenizer(tokenizer, ids) do
           {:ok, text}
         else
           {:error, %Error{} = error} ->
@@ -174,6 +253,25 @@ defmodule Tinkex.Tokenizer do
             {:error, Error.new(:validation, "Failed to decode ids: #{format_reason(reason)}")}
         end
     end
+  end
+
+  defp encode_with_tokenizer(%TikEncoding{} = encoding, text, opts) do
+    allow_special_tokens = Keyword.get(opts, :allow_special_tokens, true)
+    TikEncoding.encode(encoding, text, allow_special_tokens: allow_special_tokens)
+  end
+
+  defp encode_with_tokenizer(tokenizer, text, _opts) do
+    with {:ok, encoding} <- Tokenizer.encode(tokenizer, text) do
+      {:ok, Encoding.get_ids(encoding)}
+    end
+  end
+
+  defp decode_with_tokenizer(%TikEncoding{} = encoding, ids) do
+    TikEncoding.decode(encoding, ids)
+  end
+
+  defp decode_with_tokenizer(tokenizer, ids) do
+    Tokenizer.decode(tokenizer, ids)
   end
 
   defp fetch_tokenizer_id_from_client(nil, _opts), do: :no_client

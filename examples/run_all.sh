@@ -34,6 +34,7 @@ EXAMPLES=(
   "queue_state_observer_demo.exs"
   "recovery_simulated.exs"
   "recovery_live_injected.exs"
+  "kimi_k2_sampling_live.exs"
   "model_info_and_unload.exs"
 )
 

@@ -13,20 +13,20 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.2.0 Highlights
+## 0.3.0 Highlights
 
-- Opt-in recovery automation layer (Policy + Monitor + Executor) to restart corrupted training runs from checkpoints with telemetry hooks and bounded concurrency (defaults off).
-- Checkpoint timestamps now normalize to `DateTime` when ISO-8601 values are returned (strings are preserved on parse failure).
-- Added NxPenalties-backed regularizer adapters (L1/L2/ElasticNet/Entropy/KL/Consistency/Orthogonality/GradientPenalty) with offline and live structured regularizer examples exercising the full set.
-- Structured regularizer examples include reference/pair data wiring patterns for KL/Consistency and a gradient-penalty demo.
-- Dependency note: uses `{:nx_penalties, "~> 0.1.2"}` for tensor primitives.
+- Kimi K2 tokenization support via `tiktoken_ex` (TikToken-style `tiktoken.model` tokenizers, not HuggingFace `tokenizer.json`).
+- HuggingFace tokenizer/artifact downloads are escript-safe (OTP CA certs; no `CAStore.file_path/0` dependency).
+- EXLA is optional and is not started automatically; enable it explicitly when needed for Nx operations.
+- New Kimi K2 guide + live sampling example.
 
 ## Features
 
 - **TrainingClient**: Fine-tune models with forward/backward passes and gradient-based optimization
 - **Custom Loss Training**: `TrainingClient.forward_backward_custom/4` computes gradients from per-datum logprobs, sends them to the backend, and returns `ForwardBackwardOutput` (regularizer terms can be folded into your loss_fn)
 - **Forward-Only Inference**: `TrainingClient.forward/4` returns logprobs without backward pass for evaluation or for custom loss functions you run locally
-- **EXLA Backend**: Nx tensors use EXLA for GPU/CPU-accelerated operations out of the box
+- **EXLA Backend (optional)**: Use EXLA for GPU/CPU-accelerated Nx operations by starting `:exla` and setting `Nx.default_backend/1`
+- **Kimi K2 tokenizers**: Tokenize `moonshotai/Kimi-K2-*` models via `tiktoken_ex` (`tiktoken.model` + Kimi `pat_str`) with HuggingFace artifact caching
 - **SamplingClient**: Generate text completions with customizable sampling parameters
 - **ServiceClient**: Manage models, sessions, and service operations
 - **RestClient**: List sessions, enumerate user checkpoints, fetch archive URLs, and delete checkpoints
@@ -53,6 +53,7 @@ Tinkex is an independent, community-maintained Elixir SDK for the Tinker API. It
 ## Guides
 
 - Getting started & configuration: `docs/guides/getting_started.md`, `docs/guides/environment_configuration.md`
+- Kimi K2 tokenization: `docs/guides/kimi_k2_tokenization.md` (live example: `examples/kimi_k2_sampling_live.exs`)
 - Custom loss training (per-datum logprobs, backend gradients): `docs/guides/custom_loss_training.md` and `mix run examples/custom_loss_training.exs`
 - Training persistence: `docs/guides/training_persistence.md` (live example: `examples/training_persistence_live.exs`)
 - Recovery automation (opt-in restarts): `docs/guides/recovery.md`
@@ -66,7 +67,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.2.2"}
+    {:tinkex, "~> 0.3.0"}
   ]
 end
 ```
@@ -299,6 +300,7 @@ Highlighted live flows:
 - `mix run examples/multimodal_resume_and_cleanup.exs` (multimodal with `expected_tokens`, optimizer resume helper, default checkpoint cache)
 - `mix run examples/checkpoint_multi_delete_live.exs` (create two checkpoints then delete both with a single CLI call)
 - `mix run examples/llama3_tokenizer_override_live.exs` (Llama-3 tokenizer override via live encode/decode)
+- `mix run examples/kimi_k2_sampling_live.exs` (Kimi K2 sampling + tokenization via `tiktoken_ex`, skips if the model is unavailable)
 - Recovery walkthroughs: `mix run examples/recovery_simulated.exs` (offline) and `mix run examples/recovery_live_injected.exs` (live API with injected corruption flag)
 
 ### Live example
@@ -627,10 +629,11 @@ Run any of the sample scripts with `mix run examples/<name>.exs` (requires `TINK
 
 - `training_loop.exs` – minimal forward/backward + optim + save flow
 - `custom_loss_training.exs` – live custom loss training that sends gradients via `forward_backward_custom/4`
-- `forward_inference.exs` – forward-only pass with Nx/EXLA tensor conversion for custom loss or evaluation
+- `forward_inference.exs` – forward-only pass with Nx (optionally EXLA) tensor conversion for custom loss or evaluation
 - `structured_regularizers.exs` – composable regularizer pipeline demo with mock data (runs offline)
 - `structured_regularizers_live.exs` – custom loss with inline regularizer terms via live Tinker API
 - `sampling_basic.exs` – create a sampling client and decode completions
+- `kimi_k2_sampling_live.exs` – Kimi K2 sampling + tokenization via `tiktoken_ex` (skips if the model is unavailable)
 - `sessions_management.exs` – explore REST-based session listing and lookup
 - `checkpoints_management.exs` – list user checkpoints and inspect metadata
 - `checkpoint_download.exs` – download, stream, and extract checkpoint archives

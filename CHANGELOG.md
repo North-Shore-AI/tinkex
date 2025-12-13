@@ -6,6 +6,19 @@ All notable changes to this project will be documented in this file.
 
 - No changes yet.
 
+## [0.3.0] - 2025-12-12
+
+### Added
+- Kimi K2 tokenization support via `tiktoken_ex` (loads `tiktoken.model` + `tokenizer_config.json` from HuggingFace and caches the encoding).
+- New live example: `examples/kimi_k2_sampling_live.exs` (end-to-end sampling with Kimi K2 when available).
+- New guide: `docs/guides/kimi_k2_tokenization.md`.
+
+### Changed
+- EXLA is optional and is not started automatically; docs now show starting `:exla` before setting `Nx.default_backend/1`.
+
+### Fixed
+- Tokenizer downloads are escript-safe by using OTP-provided CA certs for HuggingFace requests.
+
 ## [0.2.2] - 2025-12-08
 
 ### Fixed
