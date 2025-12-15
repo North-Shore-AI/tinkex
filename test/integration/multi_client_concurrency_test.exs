@@ -30,7 +30,7 @@ defmodule Tinkex.Integration.MultiClientConcurrencyTest do
 
     config_b =
       Tinkex.Config.new(
-        api_key: "other-key",
+        api_key: "tml-other-key",
         base_url: endpoint_url(bypass_b),
         http_pool: finch_b
       )

@@ -262,6 +262,10 @@ defmodule Tinkex.Config do
             "api_key is required. Pass :api_key option or set TINKER_API_KEY env var"
     end
 
+    unless String.starts_with?(config.api_key, "tml-") do
+      raise ArgumentError, "api_key must start with the 'tml-' prefix"
+    end
+
     unless config.base_url do
       raise ArgumentError, "base_url is required in config"
     end

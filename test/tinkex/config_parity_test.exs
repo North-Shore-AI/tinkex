@@ -5,7 +5,7 @@ defmodule Tinkex.ConfigParityTest do
 
   describe "default values (no parity mode)" do
     test "uses Python defaults" do
-      config = Config.new(api_key: "test-key")
+      config = Config.new(api_key: "tml-test-key")
 
       assert config.timeout == Config.python_timeout()
       assert config.max_retries == Config.python_max_retries()
@@ -16,7 +16,7 @@ defmodule Tinkex.ConfigParityTest do
 
   describe "parity_mode: :beam via opts" do
     test "uses BEAM-conservative defaults for timeout and max_retries" do
-      config = Config.new(api_key: "test-key", parity_mode: :beam)
+      config = Config.new(api_key: "tml-test-key", parity_mode: :beam)
 
       assert config.timeout == Config.default_timeout()
       assert config.max_retries == Config.default_max_retries()
@@ -27,7 +27,7 @@ defmodule Tinkex.ConfigParityTest do
     test "explicit timeout overrides parity defaults" do
       config =
         Config.new(
-          api_key: "test-key",
+          api_key: "tml-test-key",
           parity_mode: :beam,
           timeout: 30_000
         )
@@ -39,7 +39,7 @@ defmodule Tinkex.ConfigParityTest do
     test "explicit max_retries overrides parity defaults" do
       config =
         Config.new(
-          api_key: "test-key",
+          api_key: "tml-test-key",
           parity_mode: :beam,
           max_retries: 5
         )
@@ -51,7 +51,7 @@ defmodule Tinkex.ConfigParityTest do
     test "both explicit values override parity defaults" do
       config =
         Config.new(
-          api_key: "test-key",
+          api_key: "tml-test-key",
           parity_mode: :beam,
           timeout: 45_000,
           max_retries: 3
@@ -73,7 +73,7 @@ defmodule Tinkex.ConfigParityTest do
     test "reads parity_mode from application config" do
       Application.put_env(:tinkex, :parity_mode, :beam)
 
-      config = Config.new(api_key: "test-key")
+      config = Config.new(api_key: "tml-test-key")
 
       assert config.timeout == 120_000
       assert config.max_retries == 2
@@ -83,16 +83,16 @@ defmodule Tinkex.ConfigParityTest do
       Application.put_env(:tinkex, :parity_mode, :beam)
 
       # No parity mode in opts should still use app config
-      config1 = Config.new(api_key: "test-key")
+      config1 = Config.new(api_key: "tml-test-key")
       assert config1.timeout == 120_000
 
       # Opts can force python parity
-      config_parity = Config.new(api_key: "test-key", parity_mode: :python)
+      config_parity = Config.new(api_key: "tml-test-key", parity_mode: :python)
       assert config_parity.timeout == 60_000
       assert config_parity.max_retries == 10
 
       # Explicit timeout in opts overrides
-      config2 = Config.new(api_key: "test-key", timeout: 90_000)
+      config2 = Config.new(api_key: "tml-test-key", timeout: 90_000)
       assert config2.timeout == 90_000
     end
   end
@@ -117,14 +117,14 @@ defmodule Tinkex.ConfigParityTest do
 
   describe "unknown parity modes" do
     test "unknown parity mode falls back to python defaults" do
-      config = Config.new(api_key: "test-key", parity_mode: :unknown)
+      config = Config.new(api_key: "tml-test-key", parity_mode: :unknown)
 
       assert config.timeout == 60_000
       assert config.max_retries == 10
     end
 
     test "nil parity mode uses python defaults" do
-      config = Config.new(api_key: "test-key", parity_mode: nil)
+      config = Config.new(api_key: "tml-test-key", parity_mode: nil)
 
       assert config.timeout == 60_000
       assert config.max_retries == 10

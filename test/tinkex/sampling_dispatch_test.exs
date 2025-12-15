@@ -10,7 +10,7 @@ defmodule Tinkex.SamplingDispatchTest do
       SamplingDispatch.start_link(
         rate_limiter: limiter,
         base_url: "http://example.com",
-        api_key: "k",
+        api_key: "tml-k",
         byte_budget: 1_000,
         concurrency: 2,
         throttled_concurrency: 2
@@ -54,7 +54,7 @@ defmodule Tinkex.SamplingDispatchTest do
       SamplingDispatch.start_link(
         rate_limiter: limiter,
         base_url: "http://example.com",
-        api_key: "k2",
+        api_key: "tml-k2",
         byte_budget: 1_000_000,
         concurrency: 2,
         throttled_concurrency: 2

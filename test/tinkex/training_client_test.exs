@@ -112,6 +112,215 @@ defmodule Tinkex.TrainingClientTest do
     assert_in_delta output.metrics["loss"], 2.0, 0.001
   end
 
+  test "forward_backward validates loss_fn client-side", %{bypass: bypass, config: config} do
+    Bypass.expect(bypass, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+      case conn.request_path do
+        "/api/v1/create_model" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"model_id":"model-validate-loss-fn"}))
+
+        "/api/v1/forward_backward" ->
+          payload = Jason.decode!(body)
+          flunk("Unexpected /api/v1/forward_backward call: #{inspect(payload)}")
+
+        other ->
+          flunk("Unexpected request path: #{inspect(other)}")
+      end
+    end)
+
+    {:ok, client} =
+      TrainingClient.start_link(
+        session_id: "sess-validate-loss-fn",
+        model_seq_id: 0,
+        base_model: "base",
+        config: config
+      )
+
+    data = [%Datum{model_input: ModelInput.from_ints([1])}]
+
+    {:ok, task} = TrainingClient.forward_backward(client, data, "mse")
+    assert {:error, %Tinkex.Error{type: :validation} = error} = Task.await(task, 5_000)
+    assert error.category == :user
+    assert error.message =~ "Invalid loss_fn"
+    assert "cross_entropy" in error.data.allowed
+  end
+
+  test "forward validates loss_fn client-side", %{bypass: bypass, config: config} do
+    Bypass.expect(bypass, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+      case conn.request_path do
+        "/api/v1/create_model" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"model_id":"model-validate-loss-fn-forward"}))
+
+        "/api/v1/forward" ->
+          payload = Jason.decode!(body)
+          flunk("Unexpected /api/v1/forward call: #{inspect(payload)}")
+
+        other ->
+          flunk("Unexpected request path: #{inspect(other)}")
+      end
+    end)
+
+    {:ok, client} =
+      TrainingClient.start_link(
+        session_id: "sess-validate-loss-fn-forward",
+        model_seq_id: 0,
+        base_model: "base",
+        config: config
+      )
+
+    data = [%Datum{model_input: ModelInput.from_ints([1])}]
+
+    {:ok, task} = TrainingClient.forward(client, data, :mse)
+    assert {:error, %Tinkex.Error{type: :validation} = error} = Task.await(task, 5_000)
+    assert error.category == :user
+    assert error.message =~ "Invalid loss_fn"
+    assert "cross_entropy" in error.data.allowed
+  end
+
+  test "forward_backward validates loss_fn_config client-side", %{bypass: bypass, config: config} do
+    Bypass.expect(bypass, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+      case conn.request_path do
+        "/api/v1/create_model" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"model_id":"model-validate-loss-fn-config"}))
+
+        "/api/v1/forward_backward" ->
+          payload = Jason.decode!(body)
+          flunk("Unexpected /api/v1/forward_backward call: #{inspect(payload)}")
+
+        other ->
+          flunk("Unexpected request path: #{inspect(other)}")
+      end
+    end)
+
+    {:ok, client} =
+      TrainingClient.start_link(
+        session_id: "sess-validate-loss-fn-config",
+        model_seq_id: 0,
+        base_model: "base",
+        config: config
+      )
+
+    data = [%Datum{model_input: ModelInput.from_ints([1])}]
+
+    {:ok, task} =
+      TrainingClient.forward_backward(client, data, :cross_entropy,
+        loss_fn_config: %{beta: "nope"}
+      )
+
+    assert {:error, %Tinkex.Error{type: :validation} = error} = Task.await(task, 5_000)
+    assert error.category == :user
+    assert error.message =~ "loss_fn_config"
+  end
+
+  test "forward validates loss_fn_config client-side", %{bypass: bypass, config: config} do
+    Bypass.expect(bypass, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+      case conn.request_path do
+        "/api/v1/create_model" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"model_id":"model-validate-loss-fn-config-forward"}))
+
+        "/api/v1/forward" ->
+          payload = Jason.decode!(body)
+          flunk("Unexpected /api/v1/forward call: #{inspect(payload)}")
+
+        other ->
+          flunk("Unexpected request path: #{inspect(other)}")
+      end
+    end)
+
+    {:ok, client} =
+      TrainingClient.start_link(
+        session_id: "sess-validate-loss-fn-config-forward",
+        model_seq_id: 0,
+        base_model: "base",
+        config: config
+      )
+
+    data = [%Datum{model_input: ModelInput.from_ints([1])}]
+
+    {:ok, task} =
+      TrainingClient.forward(client, data, :cross_entropy, loss_fn_config: [:not_a_map])
+
+    assert {:error, %Tinkex.Error{type: :validation} = error} = Task.await(task, 5_000)
+    assert error.category == :user
+    assert error.message =~ "loss_fn_config"
+  end
+
+  test "forward_backward normalizes loss_fn_config keys and values", %{
+    bypass: bypass,
+    config: config
+  } do
+    Bypass.expect(bypass, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+      case conn.request_path do
+        "/api/v1/create_model" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"model_id":"model-normalize-loss-fn-config"}))
+
+        "/api/v1/forward_backward" ->
+          payload = Jason.decode!(body)
+
+          assert payload["forward_backward_input"]["loss_fn_config"] == %{
+                   "beta" => 1.0,
+                   "clip" => 0.2
+                 }
+
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"request_id":"req-#{payload["seq_id"]}"}))
+
+        "/api/v1/retrieve_future" ->
+          payload = Jason.decode!(body)
+
+          chunk_result = %{
+            "loss_fn_output_type" => "mean",
+            "loss_fn_outputs" => [%{"chunk" => payload["request_id"]}],
+            "metrics" => %{"loss" => 1.0}
+          }
+
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, Jason.encode!(%{status: "completed", result: chunk_result}))
+
+        other ->
+          flunk("Unexpected request path: #{inspect(other)}")
+      end
+    end)
+
+    {:ok, client} =
+      TrainingClient.start_link(
+        session_id: "sess-normalize-loss-fn-config",
+        model_seq_id: 0,
+        base_model: "base",
+        config: config
+      )
+
+    data = [%Datum{model_input: ModelInput.from_ints([1])}]
+
+    {:ok, task} =
+      TrainingClient.forward_backward(client, data, :cross_entropy,
+        loss_fn_config: %{"clip" => "0.2", beta: 1}
+      )
+
+    assert {:ok, %ForwardBackwardOutput{}} = Task.await(task, 5_000)
+  end
+
   test "forward_backward replies even when polling crashes", %{bypass: bypass, config: config} do
     Bypass.expect(bypass, fn conn ->
       {:ok, _body, conn} = Plug.Conn.read_body(conn)
@@ -375,7 +584,7 @@ defmodule Tinkex.TrainingClientTest do
 
     {:ok, client_supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
 
-    config = Config.new(api_key: "k", base_url: "http://example.com", http_pool: :stub_pool)
+    config = Config.new(api_key: "tml-k", base_url: "http://example.com", http_pool: :stub_pool)
 
     {:ok, client} =
       TrainingClient.start_link(
@@ -412,7 +621,7 @@ defmodule Tinkex.TrainingClientTest do
 
     {:ok, client_supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
 
-    config = Config.new(api_key: "k", base_url: "http://example.com", http_pool: :stub_pool)
+    config = Config.new(api_key: "tml-k", base_url: "http://example.com", http_pool: :stub_pool)
 
     {:ok, client} =
       TrainingClient.start_link(
@@ -446,7 +655,7 @@ defmodule Tinkex.TrainingClientTest do
 
     {:ok, client_supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
 
-    config = Config.new(api_key: "k", base_url: "http://example.com", http_pool: :stub_pool)
+    config = Config.new(api_key: "tml-k", base_url: "http://example.com", http_pool: :stub_pool)
 
     {:ok, client} =
       TrainingClient.start_link(
@@ -478,7 +687,7 @@ defmodule Tinkex.TrainingClientTest do
 
     {:ok, client_supervisor} = DynamicSupervisor.start_link(strategy: :one_for_one)
 
-    config = Config.new(api_key: "k", base_url: "http://example.com", http_pool: :stub_pool)
+    config = Config.new(api_key: "tml-k", base_url: "http://example.com", http_pool: :stub_pool)
 
     {:ok, client} =
       TrainingClient.start_link(

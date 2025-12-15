@@ -26,6 +26,7 @@ tinkex-*.tar
 priv/plts/
 
 /tinker/
+/tiktoken_ex/
 
 *:train:*/
 *.safetensors

@@ -64,7 +64,7 @@ defmodule Tinkex.Telemetry.ClientCaptureTest do
       {:ok, reporter} = MockReporter.start_link(owner: self())
       {:ok, session_manager} = start_supervised(StubSessionManager)
 
-      config = Config.new(api_key: "key", telemetry_enabled?: false)
+      config = Config.new(api_key: "tml-key", telemetry_enabled?: false)
 
       {:ok, pid} =
         ServiceClient.start_link(

@@ -65,7 +65,7 @@ defmodule Tinkex.Telemetry.ProviderTest do
 
       config =
         Tinkex.Config.new(
-          api_key: "test-key",
+          api_key: "tml-test-key",
           base_url: "http://localhost:#{bypass.port}",
           http_pool: finch_name
         )

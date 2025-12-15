@@ -11,7 +11,7 @@ defmodule Tinkex.API.HelpersTest do
 
   describe "with_raw_response/1" do
     test "adds response: :wrapped to keyword opts" do
-      opts = [config: %Config{api_key: "test", base_url: "http://test"}]
+      opts = [config: %Config{api_key: "tml-test", base_url: "http://test"}]
       result = Helpers.with_raw_response(opts)
 
       assert Keyword.get(result, :response) == :wrapped
@@ -20,7 +20,7 @@ defmodule Tinkex.API.HelpersTest do
 
     test "preserves existing options" do
       opts = [
-        config: %Config{api_key: "test", base_url: "http://test"},
+        config: %Config{api_key: "tml-test", base_url: "http://test"},
         timeout: 5000,
         max_retries: 3
       ]
@@ -34,7 +34,7 @@ defmodule Tinkex.API.HelpersTest do
 
     test "accepts Config struct directly" do
       config = %Config{
-        api_key: "test",
+        api_key: "tml-test",
         base_url: "http://test",
         http_pool: Tinkex.HTTP.Pool,
         timeout: 60_000,
@@ -52,7 +52,7 @@ defmodule Tinkex.API.HelpersTest do
     end
 
     test "overwrites existing response option" do
-      opts = [config: %Config{api_key: "test", base_url: "http://test"}, response: :stream]
+      opts = [config: %Config{api_key: "tml-test", base_url: "http://test"}, response: :stream]
       result = Helpers.with_raw_response(opts)
 
       assert result[:response] == :wrapped
@@ -61,7 +61,7 @@ defmodule Tinkex.API.HelpersTest do
 
   describe "with_streaming_response/1" do
     test "adds response: :stream to keyword opts" do
-      opts = [config: %Config{api_key: "test", base_url: "http://test"}]
+      opts = [config: %Config{api_key: "tml-test", base_url: "http://test"}]
       result = Helpers.with_streaming_response(opts)
 
       assert Keyword.get(result, :response) == :stream
@@ -70,7 +70,7 @@ defmodule Tinkex.API.HelpersTest do
 
     test "preserves existing options" do
       opts = [
-        config: %Config{api_key: "test", base_url: "http://test"},
+        config: %Config{api_key: "tml-test", base_url: "http://test"},
         timeout: 30_000,
         event_parser: :raw
       ]
@@ -84,7 +84,7 @@ defmodule Tinkex.API.HelpersTest do
 
     test "accepts Config struct directly" do
       config = %Config{
-        api_key: "test",
+        api_key: "tml-test",
         base_url: "http://test",
         http_pool: Tinkex.HTTP.Pool,
         timeout: 60_000,
@@ -102,7 +102,7 @@ defmodule Tinkex.API.HelpersTest do
     end
 
     test "overwrites existing response option" do
-      opts = [config: %Config{api_key: "test", base_url: "http://test"}, response: :wrapped]
+      opts = [config: %Config{api_key: "tml-test", base_url: "http://test"}, response: :wrapped]
       result = Helpers.with_streaming_response(opts)
 
       assert result[:response] == :stream

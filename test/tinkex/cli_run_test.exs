@@ -80,7 +80,7 @@ defmodule Tinkex.CLIRunTest do
       "--num-samples",
       "2",
       "--api-key",
-      "test-key"
+      "tml-test-key"
     ]
 
     output =
@@ -132,7 +132,7 @@ defmodule Tinkex.CLIRunTest do
       "--output",
       output_path,
       "--api-key",
-      "test-key"
+      "tml-test-key"
     ]
 
     output =

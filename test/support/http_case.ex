@@ -29,7 +29,7 @@ defmodule Tinkex.HTTPCase do
 
     config =
       Tinkex.Config.new(
-        api_key: "test-key",
+        api_key: "tml-test-key",
         base_url: endpoint_url(bypass),
         http_pool: finch_name,
         timeout: 1_000,

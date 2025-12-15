@@ -79,14 +79,14 @@ All examples use environment variables for configuration. The following variable
 Each example can be executed directly using the Mix run command:
 
 ```bash
-export TINKER_API_KEY="your-api-key-here"
+export TINKER_API_KEY="tml-your-api-key-here"
 mix run examples/example_name.exs
 ```
 
 For examples requiring additional configuration, set the relevant environment variables before execution:
 
 ```bash
-export TINKER_API_KEY="your-api-key-here"
+export TINKER_API_KEY="tml-your-api-key-here"
 export TINKER_BASE_MODEL="meta-llama/Llama-3.1-8B"
 export TINKER_PROMPT="Your custom prompt here"
 mix run examples/sampling_basic.exs
@@ -97,7 +97,7 @@ mix run examples/sampling_basic.exs
 To run the curated set of runnable scripts sequentially, use the helper script:
 
 ```bash
-export TINKER_API_KEY="your-api-key-here"
+export TINKER_API_KEY="tml-your-api-key-here"
 examples/run_all.sh
 ```
 
@@ -108,7 +108,7 @@ The script simply iterates through the example list and executes `mix run exampl
 To verify the live heartbeat path, run:
 
 ```bash
-export TINKER_API_KEY="your-api-key-here"
+export TINKER_API_KEY="tml-your-api-key-here"
 # optional:
 # export TINKER_BASE_URL="https://tinker.thinkingmachines.dev/services/tinker-prod"
 mix run examples/heartbeat_probe.exs
@@ -292,7 +292,7 @@ GetServerCapabilitiesResponse.model_names(resp)
 **Quickstart:**
 
 ```bash
-export TINKER_API_KEY="your-api-key-here"
+export TINKER_API_KEY="tml-your-api-key-here"
 # Optional:
 # export TINKER_BASE_URL="https://custom-endpoint"
 # export TINKER_BASE_MODEL="meta-llama/Llama-3.1-8B"
@@ -321,7 +321,7 @@ Fetch active model metadata via the TrainingClient (`get_info`) and explicitly u
 **Quickstart:**
 
 ```bash
-export TINKER_API_KEY="your-api-key-here"
+export TINKER_API_KEY="tml-your-api-key-here"
 mix run examples/model_info_and_unload.exs
 ```
 

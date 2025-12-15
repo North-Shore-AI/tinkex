@@ -26,7 +26,7 @@ defmodule Tinkex.SessionManagerTest do
     finch_name = start_test_finch(base_url)
     manager_name = start_session_manager(heartbeat_interval_ms: 1_000_000)
 
-    config = Config.new(api_key: "test-key", base_url: base_url, http_pool: finch_name)
+    config = Config.new(api_key: "tml-test-key", base_url: base_url, http_pool: finch_name)
 
     {:ok, _} = Application.ensure_all_started(:tinkex)
 

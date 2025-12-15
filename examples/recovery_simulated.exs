@@ -167,7 +167,7 @@ defmodule Examples.RecoverySimulated do
 
     config =
       Tinkex.Config.new(
-        api_key: "demo-api-key",
+        api_key: "tml-demo-api-key",
         base_url: "https://tinker.thinkingmachines.dev/services/tinker-prod",
         recovery: policy,
         user_metadata: %{state: state}

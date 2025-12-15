@@ -164,7 +164,7 @@ defmodule Tinkex.CLI.Parser do
       tinkex checkpoint <subcommand> ...   # management commands
 
     Options:
-      --base-model <id>       Base model identifier (e.g., Qwen/Qwen2.5-7B)
+      --base-model <id>       Base model identifier (e.g., Qwen/Qwen3-8B)
       --model-path <path>     Local model path
       --output <path>         Path to write checkpoint metadata
       --rank <int>            LoRA rank

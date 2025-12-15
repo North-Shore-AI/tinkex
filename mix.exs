@@ -1,7 +1,7 @@
 defmodule Tinkex.MixProject do
   use Mix.Project
 
-  @version "0.3.1"
+  @version "0.3.2"
   # Tinker backend expects the Python SDK version for feature gating/parity.
   @tinker_sdk_version "0.7.0"
   @source_url "https://github.com/North-Shore-AI/tinkex"

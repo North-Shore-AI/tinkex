@@ -73,7 +73,7 @@ defmodule Tinkex.EnvTest do
 
   test "redacts secrets in snapshots" do
     snapshot = %{
-      api_key: "abc",
+      api_key: "tml-abc",
       cf_access_client_secret: "secret",
       default_headers: %{"Authorization" => "Bearer token", "x-extra" => "1"},
       tags: ["a"]

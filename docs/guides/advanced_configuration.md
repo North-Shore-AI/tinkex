@@ -29,7 +29,7 @@ This design supports multi-tenant usage where different API keys, base URLs, and
 ```elixir
 # Runtime options take precedence
 config = Tinkex.Config.new(
-  api_key: "runtime-key",        # Overrides env/config
+  api_key: "tml-runtime-key",        # Overrides env/config
   timeout: 60_000                # Overrides default
 )
 ```
@@ -117,8 +117,10 @@ Tinkex reads these environment variables as fallback configuration:
 Your Tinkex API authentication key.
 
 ```bash
-export TINKER_API_KEY="your-api-key-here"
+export TINKER_API_KEY="tml-your-api-key-here"
 ```
+
+The API key must start with the `tml-` prefix.
 
 ```elixir
 # Automatically used if no other api_key specified
@@ -141,11 +143,11 @@ config = Tinkex.Config.new()  # Uses TINKER_BASE_URL if set
 
 ```bash
 # Development
-export TINKER_API_KEY="dev-key-123"
+export TINKER_API_KEY="tml-dev-key-123"
 export TINKER_BASE_URL="https://dev.tinker.example.com"
 
 # Production
-export TINKER_API_KEY="prod-key-456"
+export TINKER_API_KEY="tml-prod-key-456"
 # Uses default production URL
 ```
 
@@ -418,7 +420,7 @@ Attach custom metadata to sessions for tracking and debugging:
 
 ```elixir
 config = Tinkex.Config.new(
-  api_key: "your-key",
+  api_key: "tml-your-key",
   user_metadata: %{
     user_id: "user-12345",
     experiment: "baseline-v1",
@@ -525,7 +527,7 @@ config :tinkex,
 import Config
 
 config :tinkex,
-  api_key: "test-api-key",
+  api_key: "tml-test-api-key",
   base_url: "http://localhost:4000",
   enable_http_pools: false,  # Use mock
   metrics_enabled: false,    # Faster tests
@@ -579,7 +581,7 @@ Never hardcode API keys:
 
 ```elixir
 # ❌ BAD: Hardcoded key
-config :tinkex, api_key: "sk-abc123..."
+config :tinkex, api_key: "tml-sk-abc123..."
 
 # ✅ GOOD: Environment variable
 config :tinkex, api_key: System.get_env("TINKER_API_KEY")
@@ -890,7 +892,7 @@ end
 ```elixir
 # config/dev.exs
 config :tinkex,
-  api_key: "dev-key",
+  api_key: "tml-dev-key",
   base_url: "http://localhost:4000",
   timeout: 5_000,
   max_retries: 0,  # Fail fast in development
@@ -947,12 +949,12 @@ api_key is required. Pass :api_key option or set TINKER_API_KEY env var
 
 **Solution**: Set the environment variable
 ```bash
-export TINKER_API_KEY="your-key-here"
+export TINKER_API_KEY="tml-your-key-here"
 ```
 
 Or pass explicitly:
 ```elixir
-config = Tinkex.Config.new(api_key: "your-key")
+config = Tinkex.Config.new(api_key: "tml-your-key")
 ```
 
 ## Further Reading

@@ -519,7 +519,7 @@ defmodule Tinkex.TelemetryReporterTest do
 
   describe "disabled telemetry" do
     test "returns :ignore when disabled via option" do
-      config = Tinkex.Config.new(api_key: "test-key", base_url: "http://localhost")
+      config = Tinkex.Config.new(api_key: "tml-test-key", base_url: "http://localhost")
 
       assert :ignore =
                Reporter.start_link(

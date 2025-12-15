@@ -40,4 +40,10 @@ defmodule Tinkex.Types.LossFnTypeTest do
       end
     end
   end
+
+  describe "values/0" do
+    test "lists all valid loss types" do
+      assert LossFnType.values() == [:cross_entropy, :importance_sampling, :ppo, :cispo, :dro]
+    end
+  end
 end

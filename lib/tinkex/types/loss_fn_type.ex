@@ -28,6 +28,12 @@ defmodule Tinkex.Types.LossFnType do
   @type t :: :cross_entropy | :importance_sampling | :ppo | :cispo | :dro
 
   @doc """
+  List all valid loss function types.
+  """
+  @spec values() :: [t()]
+  def values, do: [:cross_entropy, :importance_sampling, :ppo, :cispo, :dro]
+
+  @doc """
   Parse wire format string to atom.
 
   ## Examples

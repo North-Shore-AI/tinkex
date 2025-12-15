@@ -84,6 +84,8 @@ defmodule Tinkex.CLICheckpointTest do
       "1000"
     ]
 
+    args = List.replace_at(args, Enum.find_index(args, &(&1 == "test-key")), "tml-test-key")
+
     output =
       capture_io(fn ->
         assert {:ok, %{command: :checkpoint, metadata: metadata}} = CLI.run(args)
@@ -144,7 +146,7 @@ defmodule Tinkex.CLICheckpointTest do
                    "--output",
                    output_path,
                    "--api-key",
-                   "test-key"
+                   "tml-test-key"
                  ])
       end)
 

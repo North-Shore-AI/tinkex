@@ -24,6 +24,7 @@ defmodule Tinkex.TrainingClient.Operations do
     ForwardRequest,
     LoadWeightsRequest,
     LoadWeightsResponse,
+    LossFnType,
     LoraConfig,
     OptimStepRequest,
     SaveWeightsForSamplerRequest,
@@ -69,32 +70,37 @@ defmodule Tinkex.TrainingClient.Operations do
   @spec send_forward_backward_request(list(), atom() | String.t(), integer(), keyword(), map()) ::
           {:ok, map()} | {:error, Error.t()}
   def send_forward_backward_request(chunk, loss_fn, seq_id, opts, state) do
-    request = %ForwardBackwardRequest{
-      forward_backward_input: %ForwardBackwardInput{
-        data: chunk,
-        loss_fn: loss_fn,
-        loss_fn_config: Keyword.get(opts, :loss_fn_config)
-      },
-      model_id: state.model_id,
-      seq_id: seq_id
-    }
+    loss_fn_config = Keyword.get(opts, :loss_fn_config)
 
-    case state.training_api.forward_backward_future(request,
-           config: state.config,
-           telemetry_metadata:
-             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
-         ) do
-      {:ok, %{"request_id" => request_id}} ->
-        {:ok, %{request_id: request_id}}
+    with :ok <- validate_loss_fn(loss_fn),
+         {:ok, loss_fn_config} <- validate_loss_fn_config(loss_fn_config) do
+      request = %ForwardBackwardRequest{
+        forward_backward_input: %ForwardBackwardInput{
+          data: chunk,
+          loss_fn: loss_fn,
+          loss_fn_config: loss_fn_config
+        },
+        model_id: state.model_id,
+        seq_id: seq_id
+      }
 
-      {:ok, %{request_id: _} = future} ->
-        {:ok, future}
+      case state.training_api.forward_backward_future(request,
+             config: state.config,
+             telemetry_metadata:
+               base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
+           ) do
+        {:ok, %{"request_id" => request_id}} ->
+          {:ok, %{request_id: request_id}}
 
-      {:error, %Error{} = error} ->
-        {:error, error}
+        {:ok, %{request_id: _} = future} ->
+          {:ok, future}
 
-      other ->
-        {:error, Error.new(:validation, "Invalid forward_backward response: #{inspect(other)}")}
+        {:error, %Error{} = error} ->
+          {:error, error}
+
+        other ->
+          {:error, Error.new(:validation, "Invalid forward_backward response: #{inspect(other)}")}
+      end
     end
   end
 
@@ -104,32 +110,37 @@ defmodule Tinkex.TrainingClient.Operations do
   @spec send_forward_request(list(), atom() | String.t(), integer(), keyword(), map()) ::
           {:ok, map()} | {:error, Error.t()}
   def send_forward_request(chunk, loss_fn, seq_id, opts, state) do
-    request = %ForwardRequest{
-      forward_input: %ForwardBackwardInput{
-        data: chunk,
-        loss_fn: loss_fn,
-        loss_fn_config: Keyword.get(opts, :loss_fn_config)
-      },
-      model_id: state.model_id,
-      seq_id: seq_id
-    }
+    loss_fn_config = Keyword.get(opts, :loss_fn_config)
 
-    case state.training_api.forward_future(request,
-           config: state.config,
-           telemetry_metadata:
-             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
-         ) do
-      {:ok, %{"request_id" => request_id}} ->
-        {:ok, %{request_id: request_id}}
+    with :ok <- validate_loss_fn(loss_fn),
+         {:ok, loss_fn_config} <- validate_loss_fn_config(loss_fn_config) do
+      request = %ForwardRequest{
+        forward_input: %ForwardBackwardInput{
+          data: chunk,
+          loss_fn: loss_fn,
+          loss_fn_config: loss_fn_config
+        },
+        model_id: state.model_id,
+        seq_id: seq_id
+      }
 
-      {:ok, %{request_id: _} = future} ->
-        {:ok, future}
+      case state.training_api.forward_future(request,
+             config: state.config,
+             telemetry_metadata:
+               base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
+           ) do
+        {:ok, %{"request_id" => request_id}} ->
+          {:ok, %{request_id: request_id}}
 
-      {:error, %Error{} = error} ->
-        {:error, error}
+        {:ok, %{request_id: _} = future} ->
+          {:ok, future}
 
-      other ->
-        {:error, Error.new(:validation, "Invalid forward response: #{inspect(other)}")}
+        {:error, %Error{} = error} ->
+          {:error, error}
+
+        other ->
+          {:error, Error.new(:validation, "Invalid forward response: #{inspect(other)}")}
+      end
     end
   end
 
@@ -518,6 +529,104 @@ defmodule Tinkex.TrainingClient.Operations do
       base when is_binary(base) -> {:ok, base}
       other -> {:error, Error.new(:validation, "invalid base_model: #{inspect(other)}")}
     end
+  end
+
+  defp validate_loss_fn(loss_fn) when is_atom(loss_fn) do
+    if loss_fn in LossFnType.values() do
+      :ok
+    else
+      {:error,
+       Error.new(:validation, "Invalid loss_fn: #{inspect(loss_fn)}",
+         category: :user,
+         data: %{allowed: Enum.map(LossFnType.values(), &LossFnType.to_string/1)}
+       )}
+    end
+  end
+
+  defp validate_loss_fn(loss_fn) when is_binary(loss_fn) do
+    if LossFnType.parse(loss_fn) do
+      :ok
+    else
+      {:error,
+       Error.new(:validation, "Invalid loss_fn: #{inspect(loss_fn)}",
+         category: :user,
+         data: %{allowed: Enum.map(LossFnType.values(), &LossFnType.to_string/1)}
+       )}
+    end
+  end
+
+  defp validate_loss_fn(loss_fn) do
+    {:error,
+     Error.new(:validation, "Invalid loss_fn: #{inspect(loss_fn)}",
+       category: :user,
+       data: %{allowed: Enum.map(LossFnType.values(), &LossFnType.to_string/1)}
+     )}
+  end
+
+  defp validate_loss_fn_config(nil), do: {:ok, nil}
+
+  defp validate_loss_fn_config(loss_fn_config) when is_map(loss_fn_config) do
+    Enum.reduce_while(loss_fn_config, {:ok, %{}}, fn {key, value}, {:ok, acc} ->
+      with {:ok, normalized_key} <- normalize_loss_fn_config_key(key),
+           {:ok, normalized_value} <- normalize_loss_fn_config_value(normalized_key, value) do
+        {:cont, {:ok, Map.put(acc, normalized_key, normalized_value)}}
+      else
+        {:error, %Error{} = error} ->
+          {:halt, {:error, error}}
+      end
+    end)
+  end
+
+  defp validate_loss_fn_config(loss_fn_config) do
+    {:error,
+     Error.new(
+       :validation,
+       "Invalid loss_fn_config: expected a map, got: #{inspect(loss_fn_config)}",
+       category: :user,
+       data: %{loss_fn_config: loss_fn_config}
+     )}
+  end
+
+  defp normalize_loss_fn_config_key(key) when is_atom(key), do: {:ok, Atom.to_string(key)}
+  defp normalize_loss_fn_config_key(key) when is_binary(key), do: {:ok, key}
+
+  defp normalize_loss_fn_config_key(key) do
+    {:error,
+     Error.new(
+       :validation,
+       "Invalid loss_fn_config key: #{inspect(key)} (expected string or atom)",
+       category: :user,
+       data: %{key: key}
+     )}
+  end
+
+  defp normalize_loss_fn_config_value(_key, value) when is_float(value), do: {:ok, value}
+  defp normalize_loss_fn_config_value(_key, value) when is_integer(value), do: {:ok, value * 1.0}
+
+  defp normalize_loss_fn_config_value(key, value) when is_binary(value) do
+    value = String.trim(value)
+
+    case Float.parse(value) do
+      {number, ""} ->
+        {:ok, number}
+
+      _ ->
+        {:error,
+         Error.new(
+           :validation,
+           "Invalid loss_fn_config value for #{inspect(key)}: #{inspect(value)}",
+           category: :user,
+           data: %{key: key, value: value}
+         )}
+    end
+  end
+
+  defp normalize_loss_fn_config_value(key, value) do
+    {:error,
+     Error.new(:validation, "Invalid loss_fn_config value for #{inspect(key)}: #{inspect(value)}",
+       category: :user,
+       data: %{key: key, value: value}
+     )}
   end
 
   defp parse_model_id(%CreateModelResponse{model_id: model_id}), do: model_id

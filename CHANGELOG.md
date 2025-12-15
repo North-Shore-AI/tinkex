@@ -2,7 +2,10 @@
 
 All notable changes to this project will be documented in this file.
 
-## [Unreleased]
+## [0.3.2] - 2025-12-15
+
+- Breaking: `Tinkex.Config` now requires `api_key` to start with the `tml-` prefix (Python SDK parity); tests and guides updated accordingly.
+- Fix: validate `loss_fn` and normalize/validate `loss_fn_config` client-side for `TrainingClient.forward/4` and `TrainingClient.forward_backward/4`, matching Python SDK expectations and preventing avoidable server 500s.
 
 ## [0.3.1] - 2025-12-13
 

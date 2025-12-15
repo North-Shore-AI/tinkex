@@ -182,7 +182,7 @@ defmodule Tinkex.CLIManagementTest do
                        "--limit",
                        "0",
                        "--api-key",
-                       "k",
+                       "tml-k",
                        "--format",
                        "json"
                      ])
@@ -213,7 +213,7 @@ defmodule Tinkex.CLIManagementTest do
                    "--run-id",
                    "run-a",
                    "--api-key",
-                   "k",
+                   "tml-k",
                    "--format",
                    "json"
                  ])
@@ -241,7 +241,7 @@ defmodule Tinkex.CLIManagementTest do
                    "info",
                    "tinker://run-a/weights/0001",
                    "--api-key",
-                   "k",
+                   "tml-k",
                    "--format",
                    "json"
                  ])
@@ -265,7 +265,13 @@ defmodule Tinkex.CLIManagementTest do
   test "checkpoint publish and unpublish dispatch to API" do
     capture_io(fn ->
       assert {:ok, %{command: :checkpoint, action: :publish}} =
-               CLI.run(["checkpoint", "publish", "tinker://run-1/weights/0001", "--api-key", "k"])
+               CLI.run([
+                 "checkpoint",
+                 "publish",
+                 "tinker://run-1/weights/0001",
+                 "--api-key",
+                 "tml-k"
+               ])
     end)
 
     assert_received {:publish, "tinker://run-1/weights/0001"}
@@ -277,7 +283,7 @@ defmodule Tinkex.CLIManagementTest do
                  "unpublish",
                  "tinker://run-1/weights/0001",
                  "--api-key",
-                 "k"
+                 "tml-k"
                ])
     end)
 
@@ -294,7 +300,7 @@ defmodule Tinkex.CLIManagementTest do
                    "tinker://run-1/weights/0001",
                    "tinker://run-2/weights/0002",
                    "--api-key",
-                   "k"
+                   "tml-k"
                  ])
       end)
 
@@ -327,7 +333,7 @@ defmodule Tinkex.CLIManagementTest do
                        "tinker://run-1/weights/0001",
                        "tinker://run-2/weights/0002",
                        "--api-key",
-                       "k"
+                       "tml-k"
                      ])
           end)
       end)
@@ -350,7 +356,7 @@ defmodule Tinkex.CLIManagementTest do
                    "delete",
                    "/not-a-tinker-path",
                    "--api-key",
-                   "k"
+                   "tml-k"
                  ])
       end)
 
@@ -367,7 +373,7 @@ defmodule Tinkex.CLIManagementTest do
                    "delete",
                    "tinker://run-1/weights/0001",
                    "--api-key",
-                   "k"
+                   "tml-k"
                  ])
       end)
 
@@ -384,7 +390,7 @@ defmodule Tinkex.CLIManagementTest do
                    "delete",
                    "tinker://run-1/weights/0001",
                    "--api-key",
-                   "k",
+                   "tml-k",
                    "--yes"
                  ])
       end)
@@ -405,7 +411,7 @@ defmodule Tinkex.CLIManagementTest do
                        "--limit",
                        "0",
                        "--api-key",
-                       "k",
+                       "tml-k",
                        "--format",
                        "json"
                      ])
@@ -435,7 +441,7 @@ defmodule Tinkex.CLIManagementTest do
     output =
       capture_io(fn ->
         assert {:ok, %{command: :run, action: :info, run_id: "run-b"}} =
-                 CLI.run(["run", "info", "run-b", "--api-key", "k"])
+                 CLI.run(["run", "info", "run-b", "--api-key", "tml-k"])
       end)
 
     assert output =~ "run-b"

@@ -13,7 +13,7 @@ Centralized environment handling is provided by `Tinkex.Env` and fed into `Tinke
 
 ## Supported environment variables
 
-- `TINKER_API_KEY` (required): API key. Masked in inspect output.
+- `TINKER_API_KEY` (required): API key (must start with `tml-`). Masked in inspect output.
 - `TINKER_BASE_URL`: Base URL override. Default: `https://tinker.thinkingmachines.dev/services/tinker-prod`.
 - `TINKER_TAGS`: Comma-separated tags. Default: `["tinkex-elixir"]`.
 - `TINKER_FEATURE_GATES`: Comma-separated feature gates. Default: `["async_sampling"]` when unset/empty (opts > app config > env still override).
@@ -63,7 +63,7 @@ Pass options to override everything else for a specific client:
 
 ```elixir
 config = Tinkex.Config.new(
-  api_key: "override-key",
+  api_key: "tml-override-key",
   base_url: "https://staging.example.com",
   telemetry_enabled?: false,
   dump_headers?: true,
@@ -118,13 +118,13 @@ Override proxy settings at runtime when creating a config:
 ```elixir
 # String URL format (recommended for simplicity)
 config = Tinkex.Config.new(
-  api_key: "your-key",
+  api_key: "tml-your-key",
   proxy: "http://user:pass@proxy.example.com:8080"
 )
 
 # Tuple format (for advanced use cases)
 config = Tinkex.Config.new(
-  api_key: "your-key",
+  api_key: "tml-your-key",
   proxy: {:http, "proxy.example.com", 8080, []},
   proxy_headers: [{"proxy-authorization", "Basic abc123"}]
 )

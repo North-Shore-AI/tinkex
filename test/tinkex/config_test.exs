@@ -13,9 +13,9 @@ defmodule Tinkex.ConfigTest do
 
   describe "new/1" do
     test "creates config with defaults" do
-      config = Config.new(api_key: "test-key")
+      config = Config.new(api_key: "tml-test-key")
 
-      assert config.api_key == "test-key"
+      assert config.api_key == "tml-test-key"
       assert config.base_url =~ "tinker.thinkingmachines.dev"
       assert config.timeout == 60_000
       assert config.max_retries == 10
@@ -34,7 +34,7 @@ defmodule Tinkex.ConfigTest do
       with_base_url("https://staging.example.com", fn ->
         config =
           Config.new(
-            api_key: "test-key",
+            api_key: "tml-test-key",
             base_url: "https://staging.example.com",
             timeout: 60_000,
             max_retries: 5
@@ -47,31 +47,31 @@ defmodule Tinkex.ConfigTest do
     end
 
     test "accepts custom http_pool" do
-      config = Config.new(api_key: "test-key", http_pool: :custom_pool)
+      config = Config.new(api_key: "tml-test-key", http_pool: :custom_pool)
       assert config.http_pool == :custom_pool
     end
 
     test "accepts user_metadata" do
-      config = Config.new(api_key: "test-key", user_metadata: %{user_id: "123"})
+      config = Config.new(api_key: "tml-test-key", user_metadata: %{user_id: "123"})
       assert config.user_metadata == %{user_id: "123"}
     end
 
     test "normalizes recovery policy maps" do
-      config = Config.new(api_key: "test-key", recovery: %{enabled: true, max_attempts: 5})
+      config = Config.new(api_key: "tml-test-key", recovery: %{enabled: true, max_attempts: 5})
 
       assert %Tinkex.Recovery.Policy{enabled: true, max_attempts: 5} = config.recovery
     end
 
     test "uses env and app config precedence" do
-      System.put_env("TINKER_API_KEY", "env-key")
-      Application.put_env(:tinkex, :api_key, "app-key")
+      System.put_env("TINKER_API_KEY", "tml-env-key")
+      Application.put_env(:tinkex, :api_key, "tml-app-key")
 
-      config = Config.new(api_key: "opt-key")
-      assert config.api_key == "opt-key"
+      config = Config.new(api_key: "tml-opt-key")
+      assert config.api_key == "tml-opt-key"
 
       Application.delete_env(:tinkex, :api_key)
       config = Config.new()
-      assert config.api_key == "env-key"
+      assert config.api_key == "tml-env-key"
 
       System.delete_env("TINKER_API_KEY")
     end
@@ -100,7 +100,7 @@ defmodule Tinkex.ConfigTest do
         restore_app(app_snapshot)
       end)
 
-      System.put_env("TINKER_API_KEY", "env-key")
+      System.put_env("TINKER_API_KEY", "tml-env-key")
       System.put_env("TINKER_BASE_URL", "https://env.example.com/base")
       System.put_env("TINKER_TELEMETRY", "1")
       System.put_env("TINKER_LOG", "debug")
@@ -110,7 +110,7 @@ defmodule Tinkex.ConfigTest do
       System.put_env("TINKEX_HTTP_CLIENT", "Tinkex.API")
       System.put_env("TINKEX_HTTP_POOL", "env_pool")
 
-      Application.put_env(:tinkex, :api_key, "app-key")
+      Application.put_env(:tinkex, :api_key, "tml-app-key")
       Application.put_env(:tinkex, :base_url, "https://app.example.com/base")
       Application.put_env(:tinkex, :telemetry_enabled?, false)
       Application.put_env(:tinkex, :log_level, :warn)
@@ -121,7 +121,7 @@ defmodule Tinkex.ConfigTest do
       Application.put_env(:tinkex, :http_pool, :app_pool)
 
       config = Config.new()
-      assert config.api_key == "app-key"
+      assert config.api_key == "tml-app-key"
       assert config.base_url == "https://app.example.com/base"
       refute config.telemetry_enabled?
       assert config.log_level == :warn
@@ -133,7 +133,7 @@ defmodule Tinkex.ConfigTest do
 
       config =
         Config.new(
-          api_key: "opt-key",
+          api_key: "tml-opt-key",
           base_url: "https://opt.example.com/base",
           telemetry_enabled?: true,
           log_level: :error,
@@ -144,7 +144,7 @@ defmodule Tinkex.ConfigTest do
           http_pool: :opt_pool
         )
 
-      assert config.api_key == "opt-key"
+      assert config.api_key == "tml-opt-key"
       assert config.base_url == "https://opt.example.com/base"
       assert config.telemetry_enabled?
       assert config.log_level == :error
@@ -165,7 +165,7 @@ defmodule Tinkex.ConfigTest do
       Application.delete_env(:tinkex, :http_pool)
 
       config = Config.new()
-      assert config.api_key == "env-key"
+      assert config.api_key == "tml-env-key"
       assert config.base_url == "https://env.example.com/base"
       assert config.telemetry_enabled?
       assert config.log_level == :debug
@@ -188,23 +188,23 @@ defmodule Tinkex.ConfigTest do
       System.delete_env("TINKER_FEATURE_GATES")
       Application.delete_env(:tinkex, :feature_gates)
 
-      default_config = Config.new(api_key: "key")
+      default_config = Config.new(api_key: "tml-key")
       assert default_config.feature_gates == ["async_sampling"]
 
       System.put_env("TINKER_FEATURE_GATES", "env1,env2")
-      env_config = Config.new(api_key: "key")
+      env_config = Config.new(api_key: "tml-key")
       assert env_config.feature_gates == ["env1", "env2"]
 
       Application.put_env(:tinkex, :feature_gates, ["app"])
-      app_config = Config.new(api_key: "key")
+      app_config = Config.new(api_key: "tml-key")
       assert app_config.feature_gates == ["app"]
 
-      opt_config = Config.new(api_key: "key", feature_gates: [])
+      opt_config = Config.new(api_key: "tml-key", feature_gates: [])
       assert opt_config.feature_gates == []
     end
 
     test "pulls cloudflare credentials from env" do
-      System.put_env("TINKER_API_KEY", "key")
+      System.put_env("TINKER_API_KEY", "tml-key")
       System.put_env("CLOUDFLARE_ACCESS_CLIENT_ID", "cf-id")
       System.put_env("CLOUDFLARE_ACCESS_CLIENT_SECRET", "cf-secret")
 
@@ -228,20 +228,20 @@ defmodule Tinkex.ConfigTest do
 
     test "raises with invalid timeout" do
       assert_raise ArgumentError, ~r/timeout must be a positive integer/, fn ->
-        Config.new(api_key: "key", timeout: -1)
+        Config.new(api_key: "tml-key", timeout: -1)
       end
     end
 
     test "raises with invalid max_retries" do
       assert_raise ArgumentError, ~r/max_retries must be a non-negative integer/, fn ->
-        Config.new(api_key: "key", max_retries: -1)
+        Config.new(api_key: "tml-key", max_retries: -1)
       end
     end
 
     test "normalizes default headers and query" do
       config =
         Config.new(
-          api_key: "key",
+          api_key: "tml-key",
           default_headers: [foo: 1, bar: :baz],
           default_query: %{limit: 10, mode: :fast}
         )
@@ -252,7 +252,7 @@ defmodule Tinkex.ConfigTest do
 
     test "validates http_client modules" do
       assert_raise ArgumentError, ~r/http_client must implement/, fn ->
-        Config.new(api_key: "key", http_client: String)
+        Config.new(api_key: "tml-key", http_client: String)
       end
     end
   end
@@ -261,7 +261,7 @@ defmodule Tinkex.ConfigTest do
     test "returns config if valid" do
       with_base_url("https://example.com", fn ->
         config = %Config{
-          api_key: "key",
+          api_key: "tml-key",
           base_url: "https://example.com",
           http_pool: :pool,
           timeout: 1_000,
@@ -296,6 +296,30 @@ defmodule Tinkex.ConfigTest do
         end
       end)
     end
+
+    test "raises if api_key is missing 'tml-' prefix" do
+      with_base_url("https://example.com", fn ->
+        config = %Config{
+          api_key: "not-prefixed",
+          base_url: "https://example.com",
+          http_pool: :pool,
+          timeout: 1_000,
+          max_retries: 2,
+          user_metadata: nil,
+          tags: [],
+          feature_gates: [],
+          telemetry_enabled?: false,
+          log_level: nil,
+          cf_access_client_id: nil,
+          cf_access_client_secret: nil,
+          dump_headers?: false
+        }
+
+        assert_raise ArgumentError, ~r/api_key must start with the 'tml-' prefix/, fn ->
+          Config.validate!(config)
+        end
+      end)
+    end
   end
 
   describe "mask_api_key/1" do
@@ -320,7 +344,7 @@ defmodule Tinkex.ConfigTest do
     test "hides cloudflare secret" do
       config =
         Config.new(
-          api_key: "key",
+          api_key: "tml-key",
           cf_access_client_secret: "super-secret"
         )
 

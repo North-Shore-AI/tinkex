@@ -13,7 +13,7 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.3.1 Highlights
+## 0.3.2 Highlights
 
 - Kimi K2 tokenization support via `tiktoken_ex` (TikToken-style `tiktoken.model` tokenizers, not HuggingFace `tokenizer.json`).
 - Vision sampling example prefers Qwen3-VL models and uses a bundled PNG sample (`examples/multimodal_resume_and_cleanup.exs`).
@@ -21,6 +21,7 @@ Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-
 - HuggingFace tokenizer/artifact downloads are escript-safe (OTP CA certs; no `CAStore.file_path/0` dependency) and avoid noisy `:httpc` notices.
 - EXLA is optional and is not started automatically; enable it explicitly when needed for Nx operations.
 - New Kimi K2 guide + live sampling example.
+- Client-side validation: invalid `loss_fn` / malformed `loss_fn_config` now raise validation errors before reaching the server.
 
 ## Features
 
@@ -70,7 +71,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.3.1"}
+    {:tinkex, "~> 0.3.2"}
   ]
 end
 ```
@@ -353,7 +354,7 @@ IO.puts("\nExtracted to #{download.destination}")
 Create a `ServiceClient`, derive a `SamplingClient`, and issue sampling requests via Tasks so you can `Task.await/2` or orchestrate concurrency with `Task.await_many/2` or `Task.async_stream/3`.
 
 ```elixir
-config = Tinkex.Config.new(api_key: "tenant-key")
+config = Tinkex.Config.new(api_key: "tml-tenant-key")
 
 {:ok, service} = Tinkex.ServiceClient.start_link(config: config)
 {:ok, sampler} = Tinkex.ServiceClient.create_sampling_client(service, base_model: "meta-llama/Llama-3.1-8B")

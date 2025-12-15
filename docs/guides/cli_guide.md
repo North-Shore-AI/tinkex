@@ -108,7 +108,7 @@ The checkpoint command writes a JSON metadata file to the specified `--output` p
 
 ```bash
 ./tinkex checkpoint \
-  --base-model Qwen/Qwen2.5-7B \
+  --base-model Qwen/Qwen3-8B \
   --rank 64 \
   --seed 42 \
   --train-mlp \
@@ -825,7 +825,7 @@ cat output.json | jq .
 ```bash
 #!/bin/bash
 # Set environment variables for cleaner command lines
-export TINKER_API_KEY="your-api-key"
+export TINKER_API_KEY="tml-your-api-key"
 export TINKER_BASE_URL="https://tinker.thinkingmachines.dev/services/tinker-prod"
 
 # Now you can omit --api-key and --base-url
@@ -836,7 +836,7 @@ export TINKER_BASE_URL="https://tinker.thinkingmachines.dev/services/tinker-prod
 
 # Or use them programmatically
 ./tinkex checkpoint \
-  --base-model Qwen/Qwen2.5-7B \
+  --base-model Qwen/Qwen3-8B \
   --output checkpoint.json
 ```
 
