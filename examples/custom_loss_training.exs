@@ -14,7 +14,7 @@
 defmodule Tinkex.Examples.CustomLossTraining do
   @default_base_url "https://tinker.thinkingmachines.dev/services/tinker-prod"
   @default_model "meta-llama/Llama-3.1-8B"
-  @await_timeout 120_000
+  @await_timeout :infinity
 
   alias Tinkex.Error
   alias Tinkex.Types.{AdamParams, Datum, ModelInput, TensorData}

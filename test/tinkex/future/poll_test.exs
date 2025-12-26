@@ -1,43 +1,26 @@
 defmodule Tinkex.Future.PollTest do
   use Tinkex.HTTPCase, async: true
 
-  alias Tinkex.Future
   alias Tinkex.Error
+  alias Tinkex.Future
 
   setup :setup_http_client
 
   defmodule TestObserver do
     @behaviour Tinkex.QueueStateObserver
 
-    def register(pid) when is_pid(pid) do
-      :persistent_term.put({__MODULE__, :pid}, pid)
-    end
-
-    def unregister do
-      :persistent_term.erase({__MODULE__, :pid})
-    end
-
     @impl true
     def on_queue_state_change(queue_state) do
-      maybe_send(queue_state, %{})
+      on_queue_state_change(queue_state, %{})
     end
 
     @impl true
     def on_queue_state_change(queue_state, metadata) do
-      maybe_send(queue_state, metadata)
-    end
-
-    defp maybe_send(queue_state, metadata) do
-      case :persistent_term.get({__MODULE__, :pid}, nil) do
+      case Map.get(metadata, :observer_pid) do
         pid when is_pid(pid) -> send(pid, {:observer_called, queue_state, metadata})
         _ -> :ok
       end
     end
-  end
-
-  setup _context do
-    on_exit(fn -> TestObserver.unregister() end)
-    :ok
   end
 
   describe "poll/2" do
@@ -117,8 +100,7 @@ defmodule Tinkex.Future.PollTest do
         {200, %{"status" => "completed", "result" => %{"done" => true}}, []}
       ])
 
-      handler_id = attach_telemetry([[:tinkex, :queue, :state_change]])
-      TestObserver.register(self())
+      {:ok, _} = TelemetryHelpers.attach_isolated([:tinkex, :queue, :state_change])
 
       parent = self()
 
@@ -129,6 +111,7 @@ defmodule Tinkex.Future.PollTest do
       task =
         Future.poll("req-try",
           config: config,
+          telemetry_metadata: %{observer_pid: self()},
           sleep_fun: sleep_fun,
           queue_state_observer: TestObserver
         )
@@ -136,7 +119,11 @@ defmodule Tinkex.Future.PollTest do
       assert {:ok, %{"done" => true}} = Task.await(task, 1_000)
       assert_receive {:slept, 1_000}
 
-      assert_receive {:telemetry, [:tinkex, :queue, :state_change], %{}, metadata}
+      {:telemetry, _, %{}, metadata} =
+        TelemetryHelpers.assert_telemetry(
+          [:tinkex, :queue, :state_change],
+          %{request_id: "req-try"}
+        )
 
       assert metadata.queue_state == :paused_rate_limit
       assert metadata.request_id == "req-try"
@@ -144,8 +131,6 @@ defmodule Tinkex.Future.PollTest do
 
       assert_receive {:observer_called, :paused_rate_limit,
                       %{queue_state_reason: "server throttle"}}
-
-      :telemetry.detach(handler_id)
     end
 
     test "returns api_timeout when pending beyond timeout", %{bypass: bypass, config: config} do
@@ -173,19 +158,20 @@ defmodule Tinkex.Future.PollTest do
         resp(conn, 410, %{"message" => "promise expired", "category" => "server"})
       end)
 
-      handler_id = attach_telemetry([[:tinkex, :future, :api_error]])
+      {:ok, _} = TelemetryHelpers.attach_isolated([:tinkex, :future, :api_error])
 
       task = Future.poll("req-expired", config: config)
 
       assert {:error, %Error{status: 410, category: :server} = error} = Task.await(task, 1_000)
       assert error.message =~ "expired"
 
-      assert_receive {:telemetry, [:tinkex, :future, :api_error], measurements, metadata}
-      assert metadata.request_id == "req-expired"
-      assert metadata.status == 410
-      assert is_integer(measurements.elapsed_time)
+      {:telemetry, _, measurements, _metadata} =
+        TelemetryHelpers.assert_telemetry(
+          [:tinkex, :future, :api_error],
+          %{request_id: "req-expired", status: 410}
+        )
 
-      :telemetry.detach(handler_id)
+      assert is_integer(measurements.elapsed_time)
     end
 
     test "emits timeout telemetry when poll exceeds timeout", %{bypass: bypass, config: config} do
@@ -193,7 +179,7 @@ defmodule Tinkex.Future.PollTest do
         resp(conn, 200, %{"status" => "pending"})
       end)
 
-      handler_id = attach_telemetry([[:tinkex, :future, :timeout]])
+      {:ok, _} = TelemetryHelpers.attach_isolated([:tinkex, :future, :timeout])
 
       task =
         Future.poll("req-timeout-telemetry",
@@ -204,17 +190,13 @@ defmodule Tinkex.Future.PollTest do
 
       assert {:error, %Error{type: :api_timeout}} = Task.await(task, 1_000)
 
-      assert_receive {:telemetry, [:tinkex, :future, :timeout], measurements, metadata}
-      assert metadata.request_id == "req-timeout-telemetry"
+      {:telemetry, _, measurements, _metadata} =
+        TelemetryHelpers.assert_telemetry(
+          [:tinkex, :future, :timeout],
+          %{request_id: "req-timeout-telemetry"}
+        )
+
       assert measurements.elapsed_time >= 0
-
-      :telemetry.detach(handler_id)
     end
-  end
-
-  defp resp(conn, status, body) do
-    conn
-    |> Plug.Conn.put_resp_content_type("application/json")
-    |> Plug.Conn.resp(status, Jason.encode!(body))
   end
 end

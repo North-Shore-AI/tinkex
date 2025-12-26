@@ -40,7 +40,8 @@ defmodule Tinkex.Env do
       default_headers: default_headers(env),
       default_query: default_query(env),
       http_client: http_client(env),
-      http_pool: http_pool(env)
+      http_pool: http_pool(env),
+      otel_propagate: otel_propagate(env)
     }
   end
 
@@ -211,6 +212,20 @@ defmodule Tinkex.Env do
     |> fetch("TINKEX_HTTP_POOL")
     |> normalize()
     |> parse_atom()
+  end
+
+  @doc """
+  Get OpenTelemetry propagation setting from environment.
+
+  Set `TINKEX_OTEL_PROPAGATE=true` to enable W3C Trace Context propagation.
+  When enabled, outgoing requests will carry traceparent/tracestate headers.
+  """
+  @spec otel_propagate(env_source()) :: boolean()
+  def otel_propagate(env \\ :system) do
+    env
+    |> fetch("TINKEX_OTEL_PROPAGATE")
+    |> normalize()
+    |> normalize_bool(default: false)
   end
 
   defp parse_proxy_headers(nil), do: []

@@ -17,8 +17,8 @@ defmodule Tinkex.ServiceClient do
   alias Tinkex.RestClient
   alias Tinkex.SessionManager
   alias Tinkex.Telemetry
-  alias Tinkex.Telemetry.Reporter
   alias Tinkex.Telemetry.Capture, as: TelemetryCapture
+  alias Tinkex.Telemetry.Reporter
   require TelemetryCapture
   alias Tinkex.Types.LoraConfig
 
@@ -345,30 +345,9 @@ defmodule Tinkex.ServiceClient do
     TelemetryCapture.capture_exceptions reporter: state.telemetry, fatal?: true do
       rest_client = RestClient.new(state.session_id, state.config)
 
-      case RestClient.get_weights_info_by_tinker_path(rest_client, path) do
-        {:ok, weights_info} ->
-          case start_training_client_from_weights(weights_info, opts, state) do
-            {:ok, training_client, new_counter} ->
-              case load_checkpoint(state.training_client_module, training_client, path, opts) do
-                {:ok, load_task} ->
-                  case await_load_task(load_task, opts) do
-                    {:ok, _response} ->
-                      {:reply, {:ok, training_client},
-                       %{state | training_client_counter: new_counter}}
-
-                    {:error, reason} ->
-                      stop_training_client(training_client)
-                      {:reply, {:error, reason}, state}
-                  end
-
-                {:error, reason} ->
-                  stop_training_client(training_client)
-                  {:reply, {:error, reason}, state}
-              end
-
-            {:error, reason} ->
-              {:reply, {:error, reason}, state}
-          end
+      case create_training_client_from_checkpoint(rest_client, path, opts, state) do
+        {:ok, training_client, new_counter} ->
+          {:reply, {:ok, training_client}, %{state | training_client_counter: new_counter}}
 
         {:error, reason} ->
           {:reply, {:error, reason}, state}
@@ -459,14 +438,12 @@ defmodule Tinkex.ServiceClient do
   end
 
   defp telemetry_reporter_for(server) do
-    try do
-      case telemetry_reporter(server) do
-        {:ok, pid} -> pid
-        _ -> nil
-      end
-    catch
-      _, _ -> nil
+    case telemetry_reporter(server) do
+      {:ok, pid} -> pid
+      _ -> nil
     end
+  catch
+    _, _ -> nil
   end
 
   @impl true
@@ -478,6 +455,27 @@ defmodule Tinkex.ServiceClient do
 
   def terminate(_reason, state) do
     Reporter.stop(state[:telemetry])
+    :ok
+  end
+
+  defp create_training_client_from_checkpoint(rest_client, path, opts, state) do
+    with {:ok, weights_info} <- RestClient.get_weights_info_by_tinker_path(rest_client, path),
+         {:ok, training_client, new_counter} <-
+           start_training_client_from_weights(weights_info, opts, state),
+         {:ok, load_task} <-
+           load_checkpoint(state.training_client_module, training_client, path, opts),
+         {:ok, _response} <- await_load_task(load_task, opts) do
+      {:ok, training_client, new_counter}
+    else
+      {:error, _reason} = error ->
+        maybe_stop_training_client_on_error(error, opts, state, path)
+        error
+    end
+  end
+
+  defp maybe_stop_training_client_on_error(_error, _opts, _state, _path) do
+    # Training client cleanup is handled implicitly since with-else
+    # only triggers when an error occurs before training client is returned.
     :ok
   end
 
@@ -531,11 +529,6 @@ defmodule Tinkex.ServiceClient do
       :exit, reason ->
         {:error, reason}
     end
-  end
-
-  defp stop_training_client(pid) when is_pid(pid) do
-    Process.exit(pid, :kill)
-    :ok
   end
 
   defp lora_config_from_weights_info(%{lora_rank: nil}), do: %LoraConfig{}

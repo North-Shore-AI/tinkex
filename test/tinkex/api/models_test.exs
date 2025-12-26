@@ -1,5 +1,5 @@
 defmodule Tinkex.API.ModelsTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   alias Tinkex.API.Models
   alias Tinkex.Types.{GetInfoResponse, UnloadModelResponse}
@@ -8,7 +8,7 @@ defmodule Tinkex.API.ModelsTest do
 
   describe "get_info/2" do
     test "uses training pool and parses response", %{bypass: bypass, config: config} do
-      attach_telemetry([[:tinkex, :http, :request, :start]])
+      {:ok, _} = TelemetryHelpers.attach_isolated([:tinkex, :http, :request, :start])
 
       Bypass.expect_once(bypass, "POST", "/api/v1/get_info", fn conn ->
         {:ok, body, conn} = Plug.Conn.read_body(conn)
@@ -28,8 +28,10 @@ defmodule Tinkex.API.ModelsTest do
       assert resp.model_id == "model-123"
       assert resp.model_data.model_name == "meta-llama/Llama-3"
 
-      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
-                      %{pool_type: :training, path: "/api/v1/get_info"}}
+      TelemetryHelpers.assert_telemetry(
+        [:tinkex, :http, :request, :start],
+        %{pool_type: :training, path: "/api/v1/get_info"}
+      )
     end
   end
 

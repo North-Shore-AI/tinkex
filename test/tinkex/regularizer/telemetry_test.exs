@@ -1,5 +1,5 @@
 defmodule Tinkex.Regularizer.TelemetryTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: true
   @moduletag capture_log: true
 
   alias Tinkex.Regularizer.Telemetry
@@ -17,19 +17,21 @@ defmodule Tinkex.Regularizer.TelemetryTest do
     end
   end
 
+  setup do
+    Process.put(:telemetry_handlers, [])
+
+    on_exit(fn ->
+      Process.get(:telemetry_handlers, [])
+      |> Enum.each(&Telemetry.detach/1)
+    end)
+
+    :ok
+  end
+
   describe "attach_logger/1" do
-    setup do
-      on_exit(fn ->
-        # Clean up any attached handlers
-        :telemetry.list_handlers([:tinkex, :custom_loss, :start])
-        |> Enum.each(fn %{id: id} -> :telemetry.detach(id) end)
-      end)
-
-      :ok
-    end
-
     test "attaches handler to all events" do
       handler_id = Telemetry.attach_logger()
+      track_handler(handler_id)
 
       # Check handler is attached
       handlers = :telemetry.list_handlers([:tinkex, :custom_loss, :start])
@@ -40,6 +42,7 @@ defmodule Tinkex.Regularizer.TelemetryTest do
 
     test "accepts custom handler_id" do
       handler_id = Telemetry.attach_logger(handler_id: "my-custom-id")
+      track_handler(handler_id)
 
       assert handler_id == "my-custom-id"
 
@@ -48,6 +51,7 @@ defmodule Tinkex.Regularizer.TelemetryTest do
 
     test "accepts custom log level" do
       handler_id = Telemetry.attach_logger(level: :debug)
+      track_handler(handler_id)
 
       # Handler should be attached
       handlers = :telemetry.list_handlers([:tinkex, :custom_loss, :start])
@@ -60,6 +64,7 @@ defmodule Tinkex.Regularizer.TelemetryTest do
   describe "detach/1" do
     test "detaches previously attached handler" do
       handler_id = Telemetry.attach_logger()
+      track_handler(handler_id)
 
       # Verify attached
       handlers_before = :telemetry.list_handlers([:tinkex, :custom_loss, :start])
@@ -80,6 +85,7 @@ defmodule Tinkex.Regularizer.TelemetryTest do
       # We attach and emit an event to ensure no errors
 
       handler_id = Telemetry.attach_logger(level: :warning)
+      track_handler(handler_id)
 
       # Should not raise
       :telemetry.execute(
@@ -93,6 +99,7 @@ defmodule Tinkex.Regularizer.TelemetryTest do
 
     test "handles regularizer compute stop event" do
       handler_id = Telemetry.attach_logger(level: :warning)
+      track_handler(handler_id)
 
       # Should not raise
       :telemetry.execute(
@@ -106,6 +113,7 @@ defmodule Tinkex.Regularizer.TelemetryTest do
 
     test "handles custom_loss exception event" do
       handler_id = Telemetry.attach_logger(level: :warning)
+      track_handler(handler_id)
 
       # Should not raise
       :telemetry.execute(
@@ -116,5 +124,11 @@ defmodule Tinkex.Regularizer.TelemetryTest do
 
       :telemetry.detach(handler_id)
     end
+  end
+
+  defp track_handler(handler_id) do
+    handlers = Process.get(:telemetry_handlers, [])
+    Process.put(:telemetry_handlers, [handler_id | handlers])
+    handler_id
   end
 end

@@ -12,8 +12,8 @@ defmodule Tinkex.API.ResponseHandler do
 
   require Logger
 
+  alias Tinkex.API.{Compression, Headers, Response}
   alias Tinkex.Error
-  alias Tinkex.API.{Response, Compression, Headers}
   alias Tinkex.Types.RequestErrorCategory
 
   @doc """

@@ -1,5 +1,5 @@
 defmodule Tinkex.TrainingClientObserverTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
 
@@ -9,6 +9,7 @@ defmodule Tinkex.TrainingClientObserverTest do
     test "TrainingClient declares the behaviour" do
       # Check that the module has @behaviour Tinkex.QueueStateObserver
       # by verifying the callback is implemented
+      assert Code.ensure_loaded?(TrainingClient)
       assert function_exported?(TrainingClient, :on_queue_state_change, 2)
       assert function_exported?(TrainingClient, :on_queue_state_change, 1)
     end
@@ -63,7 +64,7 @@ defmodule Tinkex.TrainingClientObserverTest do
           TrainingClient.on_queue_state_change(:active, %{model_id: model_id})
         end)
 
-      assert log == ""
+      refute log =~ model_id
     end
 
     test "respects 60-second debounce interval", %{model_id: model_id, debounce_key: debounce_key} do
@@ -81,7 +82,7 @@ defmodule Tinkex.TrainingClientObserverTest do
           TrainingClient.on_queue_state_change(:paused_rate_limit, %{model_id: model_id})
         end)
 
-      assert log2 == ""
+      refute log2 =~ model_id
 
       # Simulate time passing by clearing the debounce state
       :persistent_term.erase(debounce_key)

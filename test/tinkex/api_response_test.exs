@@ -1,5 +1,5 @@
 defmodule Tinkex.APIResponseTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   alias Tinkex.API
   alias Tinkex.API.Response

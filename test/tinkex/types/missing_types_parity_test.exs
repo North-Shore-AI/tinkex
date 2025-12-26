@@ -8,10 +8,10 @@ defmodule Tinkex.Types.MissingTypesParityTest do
 
   alias Tinkex.Types.{
     FutureRetrieveRequest,
+    RequestFailedResponse,
     SessionHeartbeatRequest,
     SessionHeartbeatResponse,
-    TelemetryResponse,
-    RequestFailedResponse
+    TelemetryResponse
   }
 
   describe "FutureRetrieveRequest (Python parity)" do

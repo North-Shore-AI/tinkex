@@ -1,7 +1,7 @@
 defmodule Tinkex.Types.CheckpointTypesTest do
   use ExUnit.Case, async: true
 
-  alias Tinkex.Types.{Checkpoint, CheckpointsListResponse, CheckpointArchiveUrlResponse}
+  alias Tinkex.Types.{Checkpoint, CheckpointArchiveUrlResponse, CheckpointsListResponse}
 
   describe "Checkpoint" do
     test "creates struct with all fields" do

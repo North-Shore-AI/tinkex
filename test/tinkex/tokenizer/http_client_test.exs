@@ -1,12 +1,17 @@
 defmodule Tinkex.Tokenizer.HTTPClientTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use Supertester.ExUnitFoundation,
+    isolation: :full_isolation,
+    ets_isolation: [:tinkex_tokenizers]
 
+  alias Supertester.ETSIsolation
   alias Tinkex.Tokenizer
 
-  setup do
+  setup %{isolation_context: ctx} do
     {:ok, _} = Application.ensure_all_started(:tinkex)
-    :ets.delete_all_objects(:tinkex_tokenizers)
-    :ok
+    tokenizer_cache = Map.fetch!(ctx.isolated_ets_tables, :tinkex_tokenizers)
+    {:ok, _} = ETSIsolation.inject_table(Tokenizer, :cache_table, tokenizer_cache, create: false)
+
+    {:ok, tokenizer_cache: tokenizer_cache}
   end
 
   test "passes an escript-safe HTTP client to tokenizers loaders" do

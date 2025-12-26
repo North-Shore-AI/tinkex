@@ -56,30 +56,8 @@ defmodule Tinkex.CLI.Parser do
         {:error,
          invalid_option_message({:checkpoint, action}, invalid, &checkpoint_management_help/0)}
 
-      action in [:info, :publish, :unpublish, :delete, :download] and remaining == [] ->
-        {:error, "Checkpoint path is required\n\n" <> checkpoint_management_help()}
-
-      action in [:info, :publish, :unpublish, :download] and length(remaining) > 1 ->
-        {:error,
-         unexpected_args_message(
-           {:checkpoint, action},
-           Enum.drop(remaining, 1),
-           &checkpoint_management_help/0
-         )}
-
-      remaining != [] and action == :list ->
-        {:error,
-         unexpected_args_message({:checkpoint, action}, remaining, &checkpoint_management_help/0)}
-
       true ->
-        parsed_map =
-          case {action, remaining} do
-            {:delete, paths} -> Map.put(parsed_map, :paths, paths)
-            {_act, [path | _]} -> Map.put(parsed_map, :path, path)
-            _ -> parsed_map
-          end
-
-        {:command, {:checkpoint, action}, parsed_map}
+        validate_checkpoint_action(action, remaining, parsed_map)
     end
   end
 
@@ -95,21 +73,69 @@ defmodule Tinkex.CLI.Parser do
       invalid != [] ->
         {:error, invalid_option_message({:run, action}, invalid, &run_management_help/0)}
 
-      action == :info and remaining == [] ->
-        {:error, "Run ID is required\n\n" <> run_management_help()}
+      true ->
+        validate_run_action(action, remaining, parsed_map)
+    end
+  end
 
-      remaining != [] and action == :list ->
-        {:error, unexpected_args_message({:run, action}, remaining, &run_management_help/0)}
+  defp validate_checkpoint_action(action, remaining, parsed_map) do
+    case check_checkpoint_args(action, remaining) do
+      :ok ->
+        parsed_map = update_checkpoint_parsed_map(action, remaining, parsed_map)
+        {:command, {:checkpoint, action}, parsed_map}
+
+      {:error, message} ->
+        {:error, message <> "\n\n" <> checkpoint_management_help()}
+    end
+  end
+
+  defp check_checkpoint_args(action, remaining)
+       when action in [:info, :publish, :unpublish, :delete, :download] do
+    cond do
+      remaining == [] ->
+        {:error, "Checkpoint path is required"}
+
+      action in [:info, :publish, :unpublish, :download] and length(remaining) > 1 ->
+        {:error,
+         "Unexpected argument(s): " <> Enum.map_join(Enum.drop(remaining, 1), " ", &"'#{&1}'")}
 
       true ->
-        parsed_map =
-          case {action, remaining} do
-            {:info, [run_id | _]} -> Map.put(parsed_map, :run_id, run_id)
-            _ -> parsed_map
-          end
-
-        {:command, {:run, action}, parsed_map}
+        :ok
     end
+  end
+
+  defp check_checkpoint_args(:list, remaining) do
+    if remaining != [],
+      do: {:error, "Unexpected argument(s): " <> Enum.map_join(remaining, " ", &"'#{&1}'")},
+      else: :ok
+  end
+
+  defp check_checkpoint_args(_action, _remaining), do: :ok
+
+  defp update_checkpoint_parsed_map(:delete, paths, parsed_map),
+    do: Map.put(parsed_map, :paths, paths)
+
+  defp update_checkpoint_parsed_map(_action, [path | _], parsed_map),
+    do: Map.put(parsed_map, :path, path)
+
+  defp update_checkpoint_parsed_map(_action, [], parsed_map), do: parsed_map
+
+  defp validate_run_action(:info, [], _parsed_map) do
+    {:error, "Run ID is required\n\n" <> run_management_help()}
+  end
+
+  defp validate_run_action(:list, remaining, _parsed_map) when remaining != [] do
+    {:error, unexpected_args_message({:run, :list}, remaining, &run_management_help/0)}
+  end
+
+  defp validate_run_action(action, remaining, parsed_map) do
+    parsed_map =
+      case {action, remaining} do
+        {:info, [run_id | _]} -> Map.put(parsed_map, :run_id, run_id)
+        _ -> parsed_map
+      end
+
+    {:command, {:run, action}, parsed_map}
   end
 
   defp parse_subcommand(command, argv, switches, help_fun) do

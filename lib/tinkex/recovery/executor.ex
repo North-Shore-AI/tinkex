@@ -176,18 +176,16 @@ defmodule Tinkex.Recovery.Executor do
   end
 
   defp maybe_start_next(state) do
-    cond do
-      map_size(state.in_progress) >= state.max_concurrent ->
-        state
+    if map_size(state.in_progress) >= state.max_concurrent do
+      state
+    else
+      case :queue.out(state.queue) do
+        {{:value, entry}, queue} ->
+          start_attempt(entry, %{state | queue: queue})
 
-      true ->
-        case :queue.out(state.queue) do
-          {{:value, entry}, queue} ->
-            start_attempt(entry, %{state | queue: queue})
-
-          {:empty, _queue} ->
-            state
-        end
+        {:empty, _queue} ->
+          state
+      end
     end
   end
 
@@ -344,11 +342,9 @@ defmodule Tinkex.Recovery.Executor do
   defp maybe_on_failure(%{policy: %{on_failure: nil}}, _reason), do: :ok
 
   defp maybe_on_failure(entry, reason) do
-    try do
-      entry.policy.on_failure.(entry.run_id, reason)
-    catch
-      _, _ -> :ok
-    end
+    entry.policy.on_failure.(entry.run_id, reason)
+  catch
+    _, _ -> :ok
   end
 
   defp backoff_delay(%Policy{} = policy, attempt) do

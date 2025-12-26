@@ -1,5 +1,5 @@
 defmodule Tinkex.Integration.TrainingLoopTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   require Logger
 
@@ -17,13 +17,7 @@ defmodule Tinkex.Integration.TrainingLoopTest do
     bypass: bypass,
     config: config
   } do
-    {:ok, request_log} = Agent.start_link(fn -> [] end)
-
-    on_exit(fn ->
-      if Process.alive?(request_log) do
-        Agent.stop(request_log, :normal)
-      end
-    end)
+    request_log = start_supervised!({Agent, fn -> [] end})
 
     Bypass.expect(bypass, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)

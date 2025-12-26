@@ -1,5 +1,5 @@
 defmodule Tinkex.Integration.SamplingWorkflowTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   alias Tinkex.{RateLimiter, SamplingClient, ServiceClient}
   alias Tinkex.Types.{ModelInput, SampleResponse, SamplingParams}
@@ -89,11 +89,7 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
   end
 
   test "backs off after 429 across concurrent sampling tasks", %{bypass: bypass, config: config} do
-    {:ok, call_log} = Agent.start_link(fn -> [] end)
-
-    on_exit(fn ->
-      if Process.alive?(call_log), do: Agent.stop(call_log, :normal)
-    end)
+    call_log = start_supervised!({Agent, fn -> [] end})
 
     Bypass.expect(bypass, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
@@ -191,11 +187,7 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
   end
 
   test "surface server and user errors without retries", %{bypass: bypass, config: config} do
-    {:ok, counter} = Agent.start_link(fn -> 0 end)
-
-    on_exit(fn ->
-      if Process.alive?(counter), do: Agent.stop(counter, :normal)
-    end)
+    counter = start_supervised!({Agent, fn -> 0 end})
 
     Bypass.expect(bypass, fn conn ->
       {:ok, _body, conn} = Plug.Conn.read_body(conn)
@@ -283,11 +275,7 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
       end
     end)
 
-    {:ok, call_log} = Agent.start_link(fn -> %{a: [], b: []} end)
-
-    on_exit(fn ->
-      if Process.alive?(call_log), do: Agent.stop(call_log, :normal)
-    end)
+    call_log = start_supervised!({Agent, fn -> %{a: [], b: []} end})
 
     Bypass.expect(bypass_a, fn conn ->
       {:ok, _body, conn} = Plug.Conn.read_body(conn)

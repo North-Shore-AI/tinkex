@@ -10,8 +10,8 @@ defmodule Tinkex.Telemetry.Reporter.Serializer do
 
   alias Tinkex.Types.Telemetry.{
     GenericEvent,
-    SessionStartEvent,
     SessionEndEvent,
+    SessionStartEvent,
     UnhandledExceptionEvent
   }
 
@@ -83,7 +83,6 @@ defmodule Tinkex.Telemetry.Reporter.Serializer do
   def platform do
     :os.type()
     |> Tuple.to_list()
-    |> Enum.map(&to_string/1)
-    |> Enum.join("/")
+    |> Enum.map_join("/", &to_string/1)
   end
 end

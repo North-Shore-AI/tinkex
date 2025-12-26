@@ -5,16 +5,16 @@ defmodule Tinkex.Types.ModelInput do
   Mirrors Python tinker.types.ModelInput.
   """
 
-  alias Tinkex.Types.EncodedTextChunk
   alias Tinkex.{Error, Tokenizer}
+  alias Tinkex.Types.{EncodedTextChunk, ImageAssetPointerChunk, ImageChunk}
 
   @derive {Jason.Encoder, only: [:chunks]}
   defstruct chunks: []
 
   @type chunk ::
           EncodedTextChunk.t()
-          | Tinkex.Types.ImageChunk.t()
-          | Tinkex.Types.ImageAssetPointerChunk.t()
+          | ImageChunk.t()
+          | ImageAssetPointerChunk.t()
   @type t :: %__MODULE__{
           chunks: [chunk()]
         }
@@ -158,10 +158,10 @@ defmodule Tinkex.Types.ModelInput do
   end
 
   defp chunk_length(%EncodedTextChunk{} = chunk), do: EncodedTextChunk.length(chunk)
-  defp chunk_length(%Tinkex.Types.ImageChunk{} = chunk), do: Tinkex.Types.ImageChunk.length(chunk)
+  defp chunk_length(%ImageChunk{} = chunk), do: ImageChunk.length(chunk)
 
-  defp chunk_length(%Tinkex.Types.ImageAssetPointerChunk{} = chunk),
-    do: Tinkex.Types.ImageAssetPointerChunk.length(chunk)
+  defp chunk_length(%ImageAssetPointerChunk{} = chunk),
+    do: ImageAssetPointerChunk.length(chunk)
 
   defp validate_opts(opts) do
     if is_list(opts) and Keyword.keyword?(opts) do

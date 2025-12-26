@@ -9,13 +9,18 @@ defmodule Tinkex.Tokenizer do
   v1.0; callers must provide fully formatted prompts/strings before encoding.
   """
 
-  alias Tokenizers.{Encoding, Tokenizer}
+  alias Tinkex.Error
+  alias Tinkex.HuggingFace
+  alias Tinkex.TrainingClient
+
   alias TiktokenEx.Encoding, as: TikEncoding
   alias TiktokenEx.Kimi, as: TikKimi
-  alias Tinkex.HuggingFace
-  alias Tinkex.{Error, TrainingClient}
+
+  alias Tokenizers.Encoding
+  alias Tokenizers.Tokenizer
 
   @tokenizer_table :tinkex_tokenizers
+  @cache_override_key :tinkex_tokenizer_cache_override
   @llama3_tokenizer "thinkingmachineslabinc/meta-llama-3-tokenizer"
   @kimi_tokenizer "moonshotai/Kimi-K2-Thinking"
   @kimi_revision "612681931a8c906ddb349f8ad0f582cb552189cd"
@@ -25,6 +30,28 @@ defmodule Tinkex.Tokenizer do
 
   @typedoc "Loaded tokenizer handle."
   @type handle :: Tokenizer.t() | TikEncoding.t()
+
+  @doc """
+  Return the ETS table used for tokenizer caching.
+
+  Tests can override this via `__supertester_set_table__/2`.
+  """
+  @spec cache_table() :: atom() | :ets.tid()
+  def cache_table do
+    Process.get(@cache_override_key, @tokenizer_table)
+  end
+
+  @doc false
+  @spec __supertester_set_table__(:cache_table, atom() | :ets.tid()) :: :ok
+  def __supertester_set_table__(:cache_table, table) do
+    if table == @tokenizer_table do
+      Process.delete(@cache_override_key)
+    else
+      Process.put(@cache_override_key, table)
+    end
+
+    :ok
+  end
 
   @doc """
   Resolve the tokenizer ID for the given model.
@@ -65,9 +92,9 @@ defmodule Tinkex.Tokenizer do
   end
 
   def get_or_load_tokenizer(tokenizer_id, opts) do
-    ensure_table!()
+    table = ensure_table!()
 
-    case :ets.lookup(@tokenizer_table, tokenizer_id) do
+    case :ets.lookup(table, tokenizer_id) do
       [{^tokenizer_id, tokenizer}] ->
         {:ok, tokenizer}
 
@@ -302,72 +329,99 @@ defmodule Tinkex.Tokenizer do
   defp count_slashes(s), do: s |> String.graphemes() |> Enum.count(&(&1 == "/"))
 
   defp load_tokenizer(load_fun, tokenizer_id, load_opts) do
-    try do
-      case load_fun.(tokenizer_id, load_opts) do
-        {:ok, tokenizer} -> {:ok, tokenizer}
-        {:error, reason} -> {:error, reason}
-        other -> {:error, {:unexpected_load_result, other}}
-      end
-    rescue
-      e -> {:error, e}
-    catch
-      :exit, reason -> {:error, reason}
+    case load_fun.(tokenizer_id, load_opts) do
+      {:ok, tokenizer} -> {:ok, tokenizer}
+      {:error, reason} -> {:error, reason}
+      other -> {:error, {:unexpected_load_result, other}}
     end
+  rescue
+    e -> {:error, e}
+  catch
+    :exit, reason -> {:error, reason}
   end
 
   defp cache_tokenizer(tokenizer_id, tokenizer) do
-    case :ets.insert_new(@tokenizer_table, {tokenizer_id, tokenizer}) do
+    table = cache_table()
+
+    case :ets.insert_new(table, {tokenizer_id, tokenizer}) do
       true ->
         {:ok, tokenizer}
 
       false ->
-        case :ets.lookup(@tokenizer_table, tokenizer_id) do
+        case :ets.lookup(table, tokenizer_id) do
           [{^tokenizer_id, existing}] ->
             {:ok, existing}
 
           [] ->
-            :ets.insert(@tokenizer_table, {tokenizer_id, tokenizer})
+            :ets.insert(table, {tokenizer_id, tokenizer})
             {:ok, tokenizer}
         end
     end
   end
 
   defp ensure_table! do
-    case :ets.whereis(@tokenizer_table) do
+    table = cache_table()
+    ensure_table_for(table)
+  end
+
+  defp ensure_table_for(table) when is_reference(table) do
+    validate_table_reference!(table)
+    table
+  end
+
+  defp ensure_table_for(table) when is_atom(table) do
+    ensure_named_table!(table)
+  end
+
+  defp validate_table_reference!(table) do
+    case :ets.info(table) do
       :undefined ->
-        # Ensure the application is started so the shared ETS tables are created
-        case Application.ensure_all_started(:tinkex) do
-          {:ok, _} ->
-            :ok
-
-          {:error, {:already_started, _}} ->
-            :ok
-
-          {:error, reason} ->
-            raise ArgumentError, "could not start :tinkex application: #{inspect(reason)}"
-        end
-
-        case :ets.whereis(@tokenizer_table) do
-          :undefined ->
-            :ets.new(@tokenizer_table, [:set, :public, :named_table, read_concurrency: true])
-
-          _ ->
-            @tokenizer_table
-        end
+        raise ArgumentError, "tokenizer cache table is not available: #{inspect(table)}"
 
       _ ->
-        @tokenizer_table
+        :ok
+    end
+  end
+
+  defp ensure_named_table!(table) do
+    case :ets.whereis(table) do
+      :undefined -> start_app_and_get_table!(table)
+      _ -> table
+    end
+  end
+
+  defp start_app_and_get_table!(table) do
+    ensure_tinkex_started!()
+
+    case :ets.whereis(table) do
+      :undefined ->
+        :ets.new(table, [:set, :public, :named_table, read_concurrency: true])
+
+      _ ->
+        table
+    end
+  end
+
+  defp ensure_tinkex_started! do
+    # Ensure the application is started so the shared ETS tables are created
+    case Application.ensure_all_started(:tinkex) do
+      {:ok, _} ->
+        :ok
+
+      {:error, {:already_started, _}} ->
+        :ok
+
+      {:error, reason} ->
+        raise ArgumentError, "could not start :tinkex application: #{inspect(reason)}"
     end
   end
 
   defp safe_call_info(fun, training_client) when is_function(fun, 1) do
-    try do
-      fun.(training_client)
-    rescue
-      _ -> :error
-    catch
-      :exit, _ -> :error
-    end
+    fun.(training_client)
+  rescue
+    _ -> :error
+  catch
+    :exit, _ -> :error
   end
 
   defp format_load_error(tokenizer_id, reason) do

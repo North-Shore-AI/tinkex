@@ -12,8 +12,8 @@ defmodule Tinkex.API.Retry do
 
   require Logger
 
-  alias Tinkex.Config
   alias Tinkex.API.{Headers, ResponseHandler}
+  alias Tinkex.Config
 
   # Python SDK parity constants from _constants.py
   @initial_retry_delay 500
@@ -207,10 +207,8 @@ defmodule Tinkex.API.Retry do
   defp dump_body(nil), do: "nil"
 
   defp dump_body(body) do
-    try do
-      IO.iodata_to_binary(body)
-    rescue
-      _ -> inspect(body)
-    end
+    IO.iodata_to_binary(body)
+  rescue
+    _ -> inspect(body)
   end
 end

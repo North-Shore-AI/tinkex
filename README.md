@@ -13,15 +13,12 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.3.2 Highlights
+## 0.3.3 Highlights
 
-- Kimi K2 tokenization support via `tiktoken_ex` (TikToken-style `tiktoken.model` tokenizers, not HuggingFace `tokenizer.json`).
-- Vision sampling example prefers Qwen3-VL models and uses a bundled PNG sample (`examples/multimodal_resume_and_cleanup.exs`).
-- Reported `sdk_version` / `x-stainless-package-version` are pinned to the official Python Tinker SDK version configured in `mix.exs`.
-- HuggingFace tokenizer/artifact downloads are escript-safe (OTP CA certs; no `CAStore.file_path/0` dependency) and avoid noisy `:httpc` notices.
-- EXLA is optional and is not started automatically; enable it explicitly when needed for Nx operations.
-- New Kimi K2 guide + live sampling example.
-- Client-side validation: invalid `loss_fn` / malformed `loss_fn_config` now raise validation errors before reaching the server.
+- **Streaming Sampling**: New `SamplingClient.sample_stream/4` function for real-time token streaming via SSE. Process tokens incrementally as they are generated.
+- **OpenTelemetry Integration**: Opt-in W3C Trace Context propagation (`traceparent`/`tracestate` headers). Enable with `otel_propagate: true` or `TINKEX_OTEL_PROPAGATE=true`.
+- **Circuit Breaker**: Per-endpoint circuit breaker pattern via `Tinkex.CircuitBreaker` and `Tinkex.CircuitBreaker.Registry` for resilient API calls.
+- **Future Polling (Python SDK Parity)**: Polling loop handles 408/5xx/connection errors internally with backoff and uses a 45s per-request poll timeout (overall poll timeout defaults to infinity).
 
 ## Features
 
@@ -31,6 +28,9 @@ Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-
 - **EXLA Backend (optional)**: Use EXLA for GPU/CPU-accelerated Nx operations by starting `:exla` and setting `Nx.default_backend/1`
 - **Kimi K2 tokenizers**: Tokenize `moonshotai/Kimi-K2-*` models via `tiktoken_ex` (`tiktoken.model` + Kimi `pat_str`) with HuggingFace artifact caching
 - **SamplingClient**: Generate text completions with customizable sampling parameters
+- **Streaming Sampling**: `SamplingClient.sample_stream/4` for real-time SSE-based token streaming
+- **Circuit Breaker**: `Tinkex.CircuitBreaker` and `Tinkex.CircuitBreaker.Registry` for resilient API calls with automatic failure detection and recovery
+- **OpenTelemetry**: Opt-in W3C Trace Context propagation for distributed tracing across services
 - **ServiceClient**: Manage models, sessions, and service operations
 - **RestClient**: List sessions, enumerate user checkpoints, fetch archive URLs, and delete checkpoints
 - **CheckpointDownload**: Memory-efficient streaming downloads with O(1) memory usage and optional progress reporting
@@ -71,7 +71,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.3.2"}
+    {:tinkex, "~> 0.3.3"}
   ]
 end
 ```
@@ -112,7 +112,7 @@ datum = %Tinkex.Types.Datum{
   [datum],
   :cross_entropy
 )
-{:ok, result} = Task.await(task)
+{:ok, result} = Task.await(task, :infinity)
 
 # Custom loss training (per-datum logprobs list)
 loss_fn = fn _data, [logprobs] ->
@@ -126,7 +126,7 @@ end
     [datum],
     loss_fn
   )
-{:ok, _custom_output} = Task.await(custom_task)
+{:ok, _custom_output} = Task.await(custom_task, :infinity)
 
 # Optimize model parameters
 {:ok, optim_task} = Tinkex.TrainingClient.optim_step(
@@ -152,7 +152,7 @@ params = %Tinkex.Types.SamplingParams{
   sampling_params: params,
   num_samples: 1
 )
-{:ok, response} = Task.await(sample_task)
+{:ok, response} = Task.await(sample_task, :infinity)
 ```
 
 ## Recovery (opt-in)
@@ -363,14 +363,77 @@ prompt = Tinkex.Types.ModelInput.from_ints([1, 2, 3])
 params = %Tinkex.Types.SamplingParams{max_tokens: 64, temperature: 0.7}
 
 {:ok, task} = Tinkex.SamplingClient.sample(sampler, prompt, params, num_samples: 2)
-{:ok, response} = Task.await(task, 5_000)
+{:ok, response} = Task.await(task, :infinity)
 ```
 
 - Sampling requests are lock-free reads from ETS; you can fan out 20–50 tasks safely.
+- `Task.await/1` defaults to 5s; use `Task.await(task, :infinity)` (shown above) or set your own timeout for long-running calls.
 - Rate limits are enforced per `{base_url, api_key}` bucket using a shared `Tinkex.RateLimiter`; a `429` sets a backoff window that later sampling calls will wait through before hitting the server again.
 - Sampling uses `max_retries: 0` at the HTTP layer: server/user errors (e.g., 5xx, 400) surface immediately so callers can decide how to retry.
 - Multi-tenant safety: different API keys or base URLs use separate rate limiters and stay isolated even when one tenant is backing off.
 - Prefer asynchronous client creation for fan-out workflows: `Tinkex.ServiceClient.create_sampling_client_async/2`, `Tinkex.ServiceClient.create_lora_training_client_async/3`, `Tinkex.ServiceClient.create_training_client_from_state_async/3`, `Tinkex.SamplingClient.create_async/2`, and `Tinkex.TrainingClient.create_sampling_client_async/3` return Tasks you can await or `Task.await_many/2`.
+
+## Streaming Sampling
+
+Stream tokens incrementally as they are generated using `sample_stream/4`:
+
+```elixir
+{:ok, stream} = Tinkex.SamplingClient.sample_stream(sampler, prompt, params)
+
+Enum.each(stream, fn chunk ->
+  IO.write(chunk.token)
+end)
+```
+
+Each chunk is a `Tinkex.Types.SampleStreamChunk` containing:
+- `token`: The generated token string
+- `token_id`: The token ID
+- `index`: Position in the sequence
+- `finish_reason`: Set on the final chunk (e.g., "stop", "length")
+
+## Circuit Breaker
+
+Protect your application from cascading failures with per-endpoint circuit breakers:
+
+```elixir
+alias Tinkex.CircuitBreaker.Registry
+
+# Execute calls through a circuit breaker
+case Registry.call("sampling", fn ->
+  Tinkex.SamplingClient.sample(client, prompt, params)
+end) do
+  {:ok, task} -> Task.await(task, :infinity)
+  {:error, :circuit_open} -> {:error, "Service temporarily unavailable"}
+  {:error, reason} -> {:error, reason}
+end
+
+# Check circuit state
+Registry.state("sampling")
+# => :closed | :open | :half_open
+
+# Configure thresholds
+Registry.call("sampling", fn -> ... end,
+  failure_threshold: 5,
+  reset_timeout_ms: 30_000
+)
+```
+
+## OpenTelemetry Integration
+
+Enable W3C Trace Context propagation for distributed tracing:
+
+```elixir
+# Via config
+config = Tinkex.Config.new(
+  api_key: "tml-...",
+  otel_propagate: true
+)
+
+# Via environment variable
+# export TINKEX_OTEL_PROPAGATE=true
+```
+
+When enabled, Tinkex injects `traceparent` and `tracestate` headers on outgoing requests, allowing traces to span across services. Requires the `opentelemetry` and `opentelemetry_api` packages (optional).
 
 ## Telemetry Quickstart
 
@@ -460,6 +523,16 @@ Sampling and training clients automatically tag HTTP telemetry with `session_id`
   )
 ```
 
+To tag every HTTP/future telemetry event, set `user_metadata` on the config. Per-request `telemetry_metadata` merges on top (overrides on conflicts):
+
+```elixir
+config =
+  Tinkex.Config.new(
+    api_key: "tml-...",
+    user_metadata: %{env: "staging", team: "ml-platform"}
+  )
+```
+
 ## Custom Loss Training
 
 `TrainingClient.forward_backward_custom/4` now mirrors the Python SDK: it runs a forward pass, hands **per-datum logprobs** to your loss function, computes gradients in Nx, sends them back to the backend as synthetic weights, and returns a `ForwardBackwardOutput` ready for `optim_step/2`.
@@ -483,14 +556,14 @@ loss_fn = fn _data, [logprobs] ->
 end
 
 {:ok, task} = Tinkex.TrainingClient.forward_backward_custom(training_client, data, loss_fn)
-{:ok, %Tinkex.Types.ForwardBackwardOutput{} = output} = Task.await(task)
+{:ok, %Tinkex.Types.ForwardBackwardOutput{} = output} = Task.await(task, :infinity)
 
 IO.inspect(output.metrics, label: "metrics (merged with server loss)")
 
 # Apply gradients
 {:ok, adam} = Tinkex.Types.AdamParams.new(learning_rate: 1.0e-4)
 {:ok, optim_task} = Tinkex.TrainingClient.optim_step(training_client, adam)
-{:ok, _resp} = Task.await(optim_task)
+{:ok, _resp} = Task.await(optim_task, :infinity)
 ```
 
 Regularizer-style terms can be folded directly into your loss function (as shown with `l1`). For a full script that hits the live API, see `examples/custom_loss_training.exs`.

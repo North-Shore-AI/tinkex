@@ -327,31 +327,29 @@ defmodule Tinkex.CLI.Commands.Sample do
   end
 
   defp await_sampling_task(%Task{} = task, timeout) do
-    try do
-      case Task.await(task, timeout) do
-        {:ok, %SampleResponse{} = response} ->
-          {:ok, response}
+    case Task.await(task, timeout) do
+      {:ok, %SampleResponse{} = response} ->
+        {:ok, response}
 
-        {:error, %Error{} = error} ->
-          {:error, error}
+      {:error, %Error{} = error} ->
+        {:error, error}
 
-        {:error, reason} ->
-          {:error, Error.new(:request_failed, "Sampling failed: #{inspect(reason)}")}
+      {:error, reason} ->
+        {:error, Error.new(:request_failed, "Sampling failed: #{inspect(reason)}")}
 
-        %SampleResponse{} = response ->
-          {:ok, response}
+      %SampleResponse{} = response ->
+        {:ok, response}
 
-        other ->
-          {:error, Error.new(:request_failed, "Unexpected sampling result: #{inspect(other)}")}
-      end
-    catch
-      :exit, {:timeout, _} ->
-        {:error,
-         Error.new(:api_timeout, "Timed out while awaiting sampling", data: %{timeout: timeout})}
-
-      :exit, reason ->
-        {:error, Error.new(:request_failed, "Sampling task exited: #{inspect(reason)}")}
+      other ->
+        {:error, Error.new(:request_failed, "Unexpected sampling result: #{inspect(other)}")}
     end
+  catch
+    :exit, {:timeout, _} ->
+      {:error,
+       Error.new(:api_timeout, "Timed out while awaiting sampling", data: %{timeout: timeout})}
+
+    :exit, reason ->
+      {:error, Error.new(:request_failed, "Sampling task exited: #{inspect(reason)}")}
   end
 
   defp format_sample_output(%SampleResponse{} = response, model_name, options, deps) do

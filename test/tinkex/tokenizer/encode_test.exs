@@ -1,15 +1,20 @@
 defmodule Tinkex.Tokenizer.EncodeTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use Supertester.ExUnitFoundation,
+    isolation: :full_isolation,
+    ets_isolation: [:tinkex_tokenizers]
 
+  alias Supertester.ETSIsolation
   alias Tinkex.Tokenizer
   alias Tinkex.Types.{GetInfoResponse, ModelData}
   alias Tokenizers.Tokenizer, as: HFTokenizer
 
-  setup do
-    ensure_table()
-    :ets.delete_all_objects(:tinkex_tokenizers)
+  setup %{isolation_context: ctx} do
     {:ok, _} = Application.ensure_all_started(:tokenizers)
-    :ok
+
+    tokenizer_cache = Map.fetch!(ctx.isolated_ets_tables, :tinkex_tokenizers)
+    {:ok, _} = ETSIsolation.inject_table(Tokenizer, :cache_table, tokenizer_cache, create: false)
+
+    {:ok, tokenizer_cache: tokenizer_cache}
   end
 
   test "get_tokenizer_id uses training client info when provided" do
@@ -45,14 +50,8 @@ defmodule Tinkex.Tokenizer.EncodeTest do
   end
 
   @tag :network
-  test "encode caches tokenizer by resolved id" do
-    {:ok, counter} = Agent.start_link(fn -> 0 end)
-
-    on_exit(fn ->
-      if Process.alive?(counter) do
-        Agent.stop(counter)
-      end
-    end)
+  test "encode caches tokenizer by resolved id", %{tokenizer_cache: tokenizer_cache} do
+    counter = start_supervised!({Agent, fn -> 0 end})
 
     load_fun = fn id, opts ->
       Agent.update(counter, &(&1 + 1))
@@ -69,11 +68,6 @@ defmodule Tinkex.Tokenizer.EncodeTest do
     assert ids1 == ids2
 
     assert Agent.get(counter, & &1) == 1
-    assert [{^model_name, _}] = :ets.lookup(:tinkex_tokenizers, model_name)
-  end
-
-  defp ensure_table do
-    {:ok, _} = Application.ensure_all_started(:tinkex)
-    :ok
+    assert [{^model_name, _}] = :ets.lookup(tokenizer_cache, model_name)
   end
 end

@@ -3,7 +3,7 @@ defmodule Tinkex.Examples.AdamAndChunkingLive do
 
   @default_base_url "https://tinker.thinkingmachines.dev/services/tinker-prod"
   @default_model "meta-llama/Llama-3.1-8B"
-  @await_timeout 60_000
+  @await_timeout :infinity
   @default_preview_count 1_025
   @default_run_count 128
 

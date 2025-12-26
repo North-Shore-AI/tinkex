@@ -1,12 +1,48 @@
 defmodule Tinkex.MetricsTest do
-  use ExUnit.Case, async: false
+  use Supertester.ExUnitFoundation,
+    isolation: :full_isolation,
+    telemetry_isolation: true
+
+  alias Supertester.TelemetryHelpers
 
   @http_stop_event [:tinkex, :http, :request, :stop]
 
   setup do
+    test_id = TelemetryHelpers.get_test_id!()
+    handler_id = "tinkex-metrics-test-#{test_id}"
+
+    _ = :telemetry.detach("tinkex-metrics")
+
+    :ok =
+      :telemetry.attach(
+        handler_id,
+        @http_stop_event,
+        fn event, measurements, metadata, _config ->
+          if metadata[:supertester_test_id] == test_id do
+            Tinkex.Metrics.handle_event(event, measurements, metadata, nil)
+          end
+        end,
+        nil
+      )
+
     assert :ok = Tinkex.Metrics.reset()
 
-    on_exit(fn -> Tinkex.Metrics.reset() end)
+    on_exit(fn ->
+      :telemetry.detach(handler_id)
+
+      case :telemetry.attach_many(
+             "tinkex-metrics",
+             [@http_stop_event],
+             &Tinkex.Metrics.handle_event/4,
+             nil
+           ) do
+        :ok -> :ok
+        {:error, :already_exists} -> :ok
+      end
+
+      Tinkex.Metrics.reset()
+    end)
+
     :ok
   end
 
@@ -73,6 +109,7 @@ defmodule Tinkex.MetricsTest do
       |> Kernel.*(1_000)
       |> System.convert_time_unit(:microsecond, :native)
 
-    :telemetry.execute(@http_stop_event, %{duration: native}, %{result: result})
+    metadata = TelemetryHelpers.current_test_metadata(%{result: result})
+    :telemetry.execute(@http_stop_event, %{duration: native}, metadata)
   end
 end

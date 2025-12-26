@@ -79,7 +79,7 @@ defmodule Tinkex.ConfigProxyTest do
       end
 
       assert_raise ArgumentError, ~r/proxy must be/, fn ->
-        Config.new(api_key: "tml-test", proxy: {:http, "proxy.example.com", 99999, []})
+        Config.new(api_key: "tml-test", proxy: {:http, "proxy.example.com", 99_999, []})
       end
     end
   end

@@ -49,7 +49,7 @@ defmodule Tinkex.Examples.SaveWeightsAndSample do
     with {:ok, prompt} <- ModelInput.from_text(prompt_text, model_name: base_model),
          params <- %SamplingParams{max_tokens: max_tokens},
          {:ok, future} <- Tinkex.SamplingClient.sample(sampler, prompt, params),
-         {:ok, resp} <- Task.await(future, 120_000) do
+         {:ok, resp} <- Task.await(future, :infinity) do
       Enum.each(resp.sequences, fn seq ->
         IO.puts("== SAMPLE ==")
 

@@ -15,7 +15,7 @@ defmodule Tinkex.Recovery.Monitor do
   require Logger
 
   alias Tinkex.Config
-  alias Tinkex.Recovery.Policy
+  alias Tinkex.Recovery.{Executor, Policy}
   alias Tinkex.Types.TrainingRun
 
   @type option ::
@@ -108,18 +108,23 @@ defmodule Tinkex.Recovery.Monitor do
   end
 
   def handle_call({:monitor, run_id, service_pid, metadata}, _from, state) do
-    with {:ok, %{config: config}} <- state.rest_client_fun.(service_pid) do
-      entry = %{service_pid: service_pid, config: config, metadata: normalize_metadata(metadata)}
+    case state.rest_client_fun.(service_pid) do
+      {:ok, %{config: config}} ->
+        entry = %{
+          service_pid: service_pid,
+          config: config,
+          metadata: normalize_metadata(metadata)
+        }
 
-      runs = Map.put(state.runs, run_id, entry)
+        runs = Map.put(state.runs, run_id, entry)
 
-      new_state =
-        state
-        |> Map.put(:runs, runs)
-        |> schedule_poll()
+        new_state =
+          state
+          |> Map.put(:runs, runs)
+          |> schedule_poll()
 
-      {:reply, :ok, new_state}
-    else
+        {:reply, :ok, new_state}
+
       {:error, reason} ->
         {:reply, {:error, reason}, state}
     end
@@ -173,7 +178,7 @@ defmodule Tinkex.Recovery.Monitor do
       run: run
     ]
 
-    case Tinkex.Recovery.Executor.recover(executor, run_id, entry.service_pid, state.policy, opts) do
+    case Executor.recover(executor, run_id, entry.service_pid, state.policy, opts) do
       :ok ->
         %{state | runs: Map.delete(state.runs, run_id)}
 

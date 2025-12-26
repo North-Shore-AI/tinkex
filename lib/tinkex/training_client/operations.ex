@@ -24,14 +24,16 @@ defmodule Tinkex.TrainingClient.Operations do
     ForwardRequest,
     LoadWeightsRequest,
     LoadWeightsResponse,
-    LossFnType,
     LoraConfig,
+    LossFnType,
     OptimStepRequest,
     SaveWeightsForSamplerRequest,
     SaveWeightsForSamplerResponse,
     SaveWeightsRequest,
     SaveWeightsResponse
   }
+
+  alias Tinkex.TrainingClient.{DataProcessor, Polling}
 
   @doc """
   Ensure a model exists, creating one if necessary.
@@ -422,14 +424,14 @@ defmodule Tinkex.TrainingClient.Operations do
         task =
           state.future_module.poll(
             future,
-            Tinkex.TrainingClient.Polling.poll_opts_with_type(state, opts, "ForwardCustomLoss")
+            Polling.poll_opts_with_type(state, opts, "ForwardCustomLoss")
           )
 
-        Tinkex.TrainingClient.Polling.unlink_task(task)
+        Polling.unlink_task(task)
         task
       end)
 
-    Tinkex.TrainingClient.Polling.await_forward_results_for_custom_loss(
+    Polling.await_forward_results_for_custom_loss(
       polling_tasks,
       state.future_module
     )
@@ -460,52 +462,55 @@ defmodule Tinkex.TrainingClient.Operations do
   @spec send_backward_for_custom_loss(list(), [integer()], keyword(), map()) ::
           {:ok, [ForwardBackwardOutput.t()]} | {:error, Error.t()}
   def send_backward_for_custom_loss(linear_data, seq_ids, opts, state) do
-    chunks = Tinkex.TrainingClient.DataProcessor.chunk_data(linear_data)
+    chunks = DataProcessor.chunk_data(linear_data)
 
-    if length(chunks) != length(seq_ids) do
+    with :ok <- validate_chunk_count(chunks, seq_ids),
+         {:ok, futures} <- send_backward_requests(chunks, seq_ids, opts, state) do
+      poll_backward_futures(futures, opts, state)
+    end
+  end
+
+  defp validate_chunk_count(chunks, seq_ids) do
+    if length(chunks) == length(seq_ids) do
+      :ok
+    else
       {:error,
        Error.new(
          :validation,
          "Chunk count mismatch for custom loss backward: expected #{length(seq_ids)}, got #{length(chunks)}"
        )}
-    else
-      send_result =
-        Enum.reduce_while(Enum.zip(seq_ids, chunks), {:ok, []}, fn {seq_id, chunk}, {:ok, acc} ->
-          case send_forward_backward_request(chunk, :cross_entropy, seq_id, opts, state) do
-            {:ok, future} -> {:cont, {:ok, [future | acc]}}
-            {:error, reason} -> {:halt, {:error, reason}}
-          end
-        end)
-
-      case send_result do
-        {:error, _} = error ->
-          error
-
-        {:ok, futures_rev} ->
-          futures = Enum.reverse(futures_rev)
-
-          polling_tasks =
-            Enum.map(futures, fn future ->
-              task =
-                state.future_module.poll(
-                  future,
-                  Tinkex.TrainingClient.Polling.poll_opts_with_type(
-                    state,
-                    opts,
-                    "ForwardBackwardCustomLoss"
-                  )
-                )
-
-              Tinkex.TrainingClient.Polling.unlink_task(task)
-              task
-            end)
-
-          Tinkex.TrainingClient.Polling.await_forward_backward_results(
-            polling_tasks,
-            state.future_module
-          )
-      end
     end
+  end
+
+  defp send_backward_requests(chunks, seq_ids, opts, state) do
+    result =
+      Enum.reduce_while(Enum.zip(seq_ids, chunks), {:ok, []}, fn {seq_id, chunk}, {:ok, acc} ->
+        case send_forward_backward_request(chunk, :cross_entropy, seq_id, opts, state) do
+          {:ok, future} -> {:cont, {:ok, [future | acc]}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+
+    case result do
+      {:ok, futures_rev} -> {:ok, Enum.reverse(futures_rev)}
+      {:error, _} = error -> error
+    end
+  end
+
+  defp poll_backward_futures(futures, opts, state) do
+    polling_tasks =
+      Enum.map(futures, fn future ->
+        task =
+          state.future_module.poll(
+            future,
+            Polling.poll_opts_with_type(state, opts, "ForwardBackwardCustomLoss")
+          )
+
+        Polling.unlink_task(task)
+        task
+      end)
+
+    Polling.await_forward_backward_results(polling_tasks, state.future_module)
   end
 
   @doc """
@@ -640,12 +645,12 @@ defmodule Tinkex.TrainingClient.Operations do
     task =
       state.future_module.poll(
         future,
-        Tinkex.TrainingClient.Polling.poll_opts_with_type(state, opts, "SaveWeights")
+        Polling.poll_opts_with_type(state, opts, "SaveWeights")
       )
 
-    Tinkex.TrainingClient.Polling.unlink_task(task)
+    Polling.unlink_task(task)
 
-    case Tinkex.TrainingClient.Polling.safe_await(
+    case Polling.safe_await(
            state.future_module,
            task,
            await_timeout(opts)
@@ -659,12 +664,12 @@ defmodule Tinkex.TrainingClient.Operations do
     task =
       state.future_module.poll(
         future,
-        Tinkex.TrainingClient.Polling.poll_opts_with_type(state, opts, "LoadWeights")
+        Polling.poll_opts_with_type(state, opts, "LoadWeights")
       )
 
-    Tinkex.TrainingClient.Polling.unlink_task(task)
+    Polling.unlink_task(task)
 
-    case Tinkex.TrainingClient.Polling.safe_await(
+    case Polling.safe_await(
            state.future_module,
            task,
            await_timeout(opts)
@@ -678,11 +683,11 @@ defmodule Tinkex.TrainingClient.Operations do
     task =
       state.future_module.poll(
         future,
-        Tinkex.TrainingClient.Polling.poll_opts_with_type(state, opts, "SaveWeightsForSampler")
+        Polling.poll_opts_with_type(state, opts, "SaveWeightsForSampler")
       )
 
-    Tinkex.TrainingClient.Polling.unlink_task(task)
-    Tinkex.TrainingClient.Polling.safe_await(state.future_module, task, await_timeout(opts))
+    Polling.unlink_task(task)
+    Polling.safe_await(state.future_module, task, await_timeout(opts))
   end
 
   defp maybe_put(opts, _key, nil), do: opts

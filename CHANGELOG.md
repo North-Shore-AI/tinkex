@@ -2,6 +2,58 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.3] - 2025-12-26
+
+### Added
+
+- **Streaming Sampling**: New `SamplingClient.sample_stream/4` function for real-time token streaming via Server-Sent Events (SSE)
+  - Added `SampleStreamChunk` type for incremental token processing
+  - Added `API.Sampling.sample_stream/2` endpoint implementation
+  - Stream supports token-by-token enumeration with finish reasons and metadata
+
+- **OpenTelemetry Integration**: Opt-in W3C Trace Context propagation for distributed tracing
+  - Added `Telemetry.Otel` module for traceparent/tracestate header injection
+  - Enable with `otel_propagate: true` in config or `TINKEX_OTEL_PROPAGATE=true` environment variable
+  - Gracefully degrades when OpenTelemetry packages not installed
+
+- **Circuit Breaker**: Per-endpoint circuit breaker pattern for resilient API calls
+  - Added `CircuitBreaker` module with three states: closed, open, half-open
+  - Added `CircuitBreaker.Registry` for ETS-based multi-process circuit breaker management
+  - Configurable failure thresholds and reset timeouts
+  - Automatic failure detection and recovery
+
+### Changed
+
+- **Future Polling (Python SDK Parity)**: Polling loop now handles transient errors internally instead of delegating to HTTP retry layer
+  - Continues polling on 408 (Request Timeout) and 5xx (Server Errors) until `poll_timeout`
+  - Retries connection errors with exponential backoff
+  - Passes `max_retries: 0` to HTTP layer; polling loop manages all retry logic
+  - Fixed backoff overflow by capping iteration exponent
+- **Polling Defaults**: Future polling now defaults to a 45s per-request HTTP timeout (Python parity) and sampling futures inherit that default unless explicitly overridden.
+- **Retry Config Parity**: `Tinkex.API.RetryConfig` now defaults to `max_retries: 10` to match the Python SDK.
+- **Telemetry Metadata**: `config.user_metadata` is now merged into HTTP + Future telemetry metadata; per-request `telemetry_metadata` still overrides on conflicts.
+- **Examples/Docs**: Task await samples now default to `:infinity` in examples and README, matching the cookbook’s no-timeout behavior.
+- **Examples**: `examples/run_all.sh` now logs timestamps and durations for each script run.
+- **Logo Update**: Redesigned project logo with modern coral/salmon gradient aesthetic, neural network iconography, and hexagonal frame
+- **Code Quality**: Extensive refactoring across 50+ files for improved readability and maintainability
+  - Simplified conditional logic throughout codebase
+  - Extracted helper functions to reduce complexity
+  - Improved error handling patterns
+  - Reduced cyclomatic complexity in high-traffic modules
+
+### Documentation
+
+- Added comprehensive implementation guide for fresh agents
+- Added gaps analysis document identifying enhancement opportunities
+- Added current state documentation (v0.3.2 baseline)
+- Added model registry planning document (deferred feature)
+- Added test infrastructure overhaul/refactor plan with verification checklist
+
+### Tests
+
+- Added `test/tinkex/future_test.exs` for Future polling behavior (408/5xx/connection error handling, Python SDK parity)
+- Refactored async test suite with Supertester v0.4 isolation (telemetry/logger/ETS) and Bypass-based HTTP cases to eliminate flakiness
+
 ## [0.3.2] - 2025-12-15
 
 - Breaking: `Tinkex.Config` now requires `api_key` to start with the `tml-` prefix (Python SDK parity); tests and guides updated accordingly.

@@ -43,60 +43,137 @@ defmodule Tinkex.CLI.Pagination do
 
     case fetch_fun.(request_limit, offset) do
       {:ok, {items, cursor}} ->
-        new_total = total_count || cursor_total(cursor)
-        new_target = update_target(target, new_total, initial_offset)
-        new_acc = acc ++ items
-        new_offset = offset + length(items)
+        ctx = %{
+          fetch_fun: fetch_fun,
+          acc: acc,
+          offset: offset,
+          page_size: page_size,
+          target: target,
+          total_count: total_count,
+          initial_offset: initial_offset,
+          label: label
+        }
 
-        cond do
-          new_target != :all and length(new_acc) >= new_target ->
-            final_total = new_total || new_target + initial_offset
-
-            maybe_log_progress(
-              label,
-              min(length(new_acc), new_target),
-              progress_total(new_target, new_total, initial_offset)
-            )
-
-            {:ok, %{items: Enum.take(new_acc, new_target), total: final_total}}
-
-          new_target == :all and length(items) < request_limit and is_nil(new_total) ->
-            maybe_log_progress(
-              label,
-              length(new_acc),
-              progress_total(new_target, new_total, initial_offset)
-            )
-
-            {:ok, %{items: new_acc, total: new_offset}}
-
-          new_target == :all and is_integer(progress_total(new_target, new_total, initial_offset)) and
-              length(new_acc) >= progress_total(new_target, new_total, initial_offset) ->
-            final_total = new_total || length(new_acc) + initial_offset
-
-            maybe_log_progress(
-              label,
-              length(new_acc),
-              progress_total(new_target, new_total, initial_offset)
-            )
-
-            {:ok, %{items: new_acc, total: final_total}}
-
-          true ->
-            paginate_with(
-              fetch_fun,
-              new_acc,
-              new_offset,
-              page_size,
-              new_target,
-              new_total,
-              initial_offset,
-              label
-            )
-        end
+        handle_page_result(ctx, items, cursor)
 
       {:error, _} = error ->
         error
     end
+  end
+
+  defp handle_page_result(ctx, items, cursor) do
+    new_total = ctx.total_count || cursor_total(cursor)
+    new_target = update_target(ctx.target, new_total, ctx.initial_offset)
+    new_acc = ctx.acc ++ items
+    new_offset = ctx.offset + length(items)
+
+    page_state = %{
+      new_acc: new_acc,
+      new_target: new_target,
+      new_total: new_total,
+      new_offset: new_offset,
+      initial_offset: ctx.initial_offset,
+      items_count: length(items),
+      request_limit: requested_limit(ctx.page_size, ctx.target, length(ctx.acc))
+    }
+
+    case determine_pagination_action(page_state) do
+      {:target_reached, final_total} ->
+        log_and_return_target_reached(ctx.label, page_state, final_total)
+
+      {:all_exhausted_no_total, final_total} ->
+        log_and_return_complete(ctx.label, page_state, final_total)
+
+      {:all_complete, final_total} ->
+        log_and_return_complete(ctx.label, page_state, final_total)
+
+      :continue ->
+        paginate_with(
+          ctx.fetch_fun,
+          new_acc,
+          new_offset,
+          ctx.page_size,
+          new_target,
+          new_total,
+          ctx.initial_offset,
+          ctx.label
+        )
+    end
+  end
+
+  defp determine_pagination_action(page_state) do
+    %{
+      new_acc: new_acc,
+      new_target: new_target,
+      new_total: new_total,
+      new_offset: new_offset,
+      initial_offset: initial_offset,
+      items_count: items_count,
+      request_limit: request_limit
+    } = page_state
+
+    progress = progress_total(new_target, new_total, initial_offset)
+
+    cond do
+      target_reached?(new_target, new_acc) ->
+        {:target_reached, new_total || new_target + initial_offset}
+
+      all_exhausted_no_total?(new_target, items_count, request_limit, new_total) ->
+        {:all_exhausted_no_total, new_offset}
+
+      all_complete?(new_target, progress, new_acc) ->
+        {:all_complete, new_total || length(new_acc) + initial_offset}
+
+      true ->
+        :continue
+    end
+  end
+
+  defp target_reached?(target, acc) when target != :all, do: length(acc) >= target
+  defp target_reached?(_target, _acc), do: false
+
+  defp all_exhausted_no_total?(:all, items_count, request_limit, total),
+    do: items_count < request_limit and is_nil(total)
+
+  defp all_exhausted_no_total?(_target, _items_count, _request_limit, _total), do: false
+
+  defp all_complete?(:all, progress, acc) when is_integer(progress), do: length(acc) >= progress
+  defp all_complete?(_target, _progress, _acc), do: false
+
+  defp log_and_return_target_reached(label, page_state, final_total) do
+    %{
+      new_acc: new_acc,
+      new_target: new_target,
+      new_total: new_total,
+      initial_offset: initial_offset
+    } =
+      page_state
+
+    maybe_log_progress(
+      label,
+      min(length(new_acc), new_target),
+      progress_total(new_target, new_total, initial_offset)
+    )
+
+    {:ok, %{items: Enum.take(new_acc, new_target), total: final_total}}
+  end
+
+  defp log_and_return_complete(label, page_state, final_total) do
+    %{
+      new_acc: new_acc,
+      new_target: new_target,
+      new_total: new_total,
+      initial_offset: initial_offset
+    } =
+      page_state
+
+    maybe_log_progress(
+      label,
+      length(new_acc),
+      progress_total(new_target, new_total, initial_offset)
+    )
+
+    {:ok, %{items: new_acc, total: final_total}}
   end
 
   @doc """

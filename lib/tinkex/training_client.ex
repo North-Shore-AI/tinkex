@@ -31,8 +31,8 @@ defmodule Tinkex.TrainingClient do
   alias Tinkex.API.{Models, Service, Training, Weights}
   alias Tinkex.Error
   alias Tinkex.Future.Combiner
-  alias Tinkex.Telemetry.Reporter
   alias Tinkex.Telemetry.Capture, as: TelemetryCapture
+  alias Tinkex.Telemetry.Reporter
   require TelemetryCapture
   alias Tinkex.Training.CustomLoss
 
@@ -439,62 +439,17 @@ defmodule Tinkex.TrainingClient do
       {seq_ids, new_counter} =
         DataProcessor.allocate_request_ids(length(chunks), state.request_id_counter)
 
-      send_result =
-        Enum.reduce_while(Enum.zip(seq_ids, chunks), {:ok, []}, fn {seq_id, chunk}, {:ok, acc} ->
-          case Operations.send_forward_backward_request(chunk, loss_fn, seq_id, opts, state) do
-            {:ok, future} -> {:cont, {:ok, [future | acc]}}
-            {:error, reason} -> {:halt, {:error, reason}}
-          end
-        end)
+      send_fn = &Operations.send_forward_backward_request/5
+      send_result = send_multi_requests(seq_ids, chunks, loss_fn, opts, state, send_fn)
 
-      case send_result do
-        {:error, reason} ->
-          {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
-
-        {:ok, futures_rev} ->
-          futures = Enum.reverse(futures_rev)
-
-          start_background_task(
-            fn ->
-              reply =
-                try do
-                  polling_tasks =
-                    Enum.map(futures, fn future ->
-                      task =
-                        state.future_module.poll(
-                          future,
-                          Polling.poll_opts_with_type(state, opts, "ForwardBackward")
-                        )
-
-                      Polling.unlink_task(task)
-                      task
-                    end)
-
-                  case Polling.await_forward_backward_results(polling_tasks, state.future_module) do
-                    {:ok, outputs} ->
-                      {:ok, Combiner.combine_forward_backward_results(outputs)}
-
-                    {:error, %Error{} = error} ->
-                      {:error, error}
-                  end
-                rescue
-                  e ->
-                    {:error,
-                     %Error{
-                       message: "Polling failed: #{Exception.message(e)}",
-                       type: :request_failed,
-                       data: %{exception: e, stacktrace: __STACKTRACE__}
-                     }}
-                end
-
-              safe_reply(from, reply)
-            end,
-            from,
-            state.telemetry
-          )
-
-          {:noreply, %{state | request_id_counter: new_counter}}
-      end
+      dispatch_multi_result(
+        send_result,
+        opts,
+        state,
+        from,
+        new_counter,
+        &poll_and_reply_forward_backward/4
+      )
     end)
   end
 
@@ -507,61 +462,23 @@ defmodule Tinkex.TrainingClient do
         DataProcessor.allocate_request_ids(length(chunks), state.request_id_counter)
 
       send_result =
-        Enum.reduce_while(Enum.zip(seq_ids, chunks), {:ok, []}, fn {seq_id, chunk}, {:ok, acc} ->
-          case Operations.send_forward_request(chunk, loss_fn, seq_id, opts, state) do
-            {:ok, future} -> {:cont, {:ok, [future | acc]}}
-            {:error, reason} -> {:halt, {:error, reason}}
-          end
-        end)
+        send_multi_requests(
+          seq_ids,
+          chunks,
+          loss_fn,
+          opts,
+          state,
+          &Operations.send_forward_request/5
+        )
 
-      case send_result do
-        {:error, reason} ->
-          {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
-
-        {:ok, futures_rev} ->
-          futures = Enum.reverse(futures_rev)
-
-          start_background_task(
-            fn ->
-              reply =
-                try do
-                  polling_tasks =
-                    Enum.map(futures, fn future ->
-                      task =
-                        state.future_module.poll(
-                          future,
-                          Polling.poll_opts_with_type(state, opts, "Forward")
-                        )
-
-                      Polling.unlink_task(task)
-                      task
-                    end)
-
-                  case Polling.await_forward_results(polling_tasks, state.future_module) do
-                    {:ok, outputs} ->
-                      {:ok, Combiner.combine_forward_backward_results(outputs)}
-
-                    {:error, %Error{} = error} ->
-                      {:error, error}
-                  end
-                rescue
-                  e ->
-                    {:error,
-                     %Error{
-                       message: "Polling failed: #{Exception.message(e)}",
-                       type: :request_failed,
-                       data: %{exception: e, stacktrace: __STACKTRACE__}
-                     }}
-                end
-
-              safe_reply(from, reply)
-            end,
-            from,
-            state.telemetry
-          )
-
-          {:noreply, %{state | request_id_counter: new_counter}}
-      end
+      dispatch_multi_result(
+        send_result,
+        opts,
+        state,
+        from,
+        new_counter,
+        &poll_and_reply_forward/4
+      )
     end)
   end
 
@@ -576,42 +493,15 @@ defmodule Tinkex.TrainingClient do
           {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
 
         {:ok, future} ->
-          start_background_task(
-            fn ->
-              reply =
-                try do
-                  task =
-                    state.future_module.poll(
-                      future,
-                      Polling.poll_opts_with_type(state, opts, "OptimStep")
-                    )
-
-                  Polling.unlink_task(task)
-
-                  case Polling.safe_await(state.future_module, task, await_timeout(opts)) do
-                    {:ok, result} ->
-                      {:ok, OptimStepResponse.from_json(result)}
-
-                    {:error, %Error{} = error} ->
-                      {:error, error}
-                  end
-                rescue
-                  e ->
-                    {:error,
-                     %Error{
-                       message: "Polling failed: #{Exception.message(e)}",
-                       type: :request_failed,
-                       data: %{exception: e, stacktrace: __STACKTRACE__}
-                     }}
-                end
-
-              safe_reply(from, reply)
-            end,
+          dispatch_single_result(
+            future,
+            opts,
+            state,
             from,
-            state.telemetry
+            new_counter,
+            "OptimStep",
+            &OptimStepResponse.from_json/1
           )
-
-          {:noreply, %{state | request_id_counter: new_counter}}
       end
     end)
   end
@@ -672,28 +562,8 @@ defmodule Tinkex.TrainingClient do
           {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
 
         {:ok, response} ->
-          start_background_task(
-            fn ->
-              reply =
-                try do
-                  Operations.handle_save_state_response(response, state, opts)
-                rescue
-                  e ->
-                    {:error,
-                     %Error{
-                       message: "Save state failed: #{Exception.message(e)}",
-                       type: :request_failed,
-                       data: %{exception: e, stacktrace: __STACKTRACE__}
-                     }}
-                end
-
-              safe_reply(from, reply)
-            end,
-            from,
-            state.telemetry
-          )
-
-          {:noreply, %{state | request_id_counter: new_counter}}
+          ctx = %{response: response, state: state, opts: opts}
+          dispatch_operation_task(from, new_counter, state.telemetry, ctx, &save_state_task/2)
       end
     end)
   end
@@ -709,28 +579,8 @@ defmodule Tinkex.TrainingClient do
           {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
 
         {:ok, response} ->
-          start_background_task(
-            fn ->
-              reply =
-                try do
-                  Operations.handle_load_state_response(response, state, opts)
-                rescue
-                  e ->
-                    {:error,
-                     %Error{
-                       message: "Load state failed: #{Exception.message(e)}",
-                       type: :request_failed,
-                       data: %{exception: e, stacktrace: __STACKTRACE__}
-                     }}
-                end
-
-              safe_reply(from, reply)
-            end,
-            from,
-            state.telemetry
-          )
-
-          {:noreply, %{state | request_id_counter: new_counter}}
+          ctx = %{response: response, state: state, opts: opts}
+          dispatch_operation_task(from, new_counter, state.telemetry, ctx, &load_state_task/2)
       end
     end)
   end
@@ -740,50 +590,31 @@ defmodule Tinkex.TrainingClient do
     capture_telemetry(state, fn ->
       seq_id = state.request_id_counter
       new_counter = seq_id + 1
-
-      # Put name as path in opts for the request
       opts_with_path = Keyword.put(opts, :path, name)
 
-      {normalized_opts, next_sampling_counter} =
+      {normalized_opts, next_counter} =
         Operations.normalize_save_weights_opts(opts_with_path, state)
 
       case Operations.send_save_weights_for_sampler_request(seq_id, normalized_opts, state) do
         {:error, reason} ->
-          {:reply, {:error, reason},
-           %{
-             state
-             | request_id_counter: new_counter,
-               sampling_session_counter: next_sampling_counter
-           }}
+          new_state = %{
+            state
+            | request_id_counter: new_counter,
+              sampling_session_counter: next_counter
+          }
+
+          {:reply, {:error, reason}, new_state}
 
         {:ok, response} ->
-          start_background_task(
-            fn ->
-              reply =
-                try do
-                  Operations.handle_save_weights_response(response, state, normalized_opts)
-                rescue
-                  e ->
-                    {:error,
-                     %Error{
-                       message: "Save weights failed: #{Exception.message(e)}",
-                       type: :request_failed,
-                       data: %{exception: e, stacktrace: __STACKTRACE__}
-                     }}
-                end
+          ctx = %{response: response, state: state, opts: normalized_opts}
 
-              safe_reply(from, reply)
-            end,
-            from,
-            state.telemetry
-          )
+          new_state = %{
+            state
+            | request_id_counter: new_counter,
+              sampling_session_counter: next_counter
+          }
 
-          {:noreply,
-           %{
-             state
-             | request_id_counter: new_counter,
-               sampling_session_counter: next_sampling_counter
-           }}
+          dispatch_weights_task(from, new_state, ctx, &save_weights_task/2)
       end
     end)
   end
@@ -793,50 +624,34 @@ defmodule Tinkex.TrainingClient do
     capture_telemetry(state, fn ->
       seq_id = state.request_id_counter
       new_counter = seq_id + 1
-
-      {normalized_opts, next_sampling_counter} =
-        Operations.normalize_save_weights_opts(opts, state)
+      {normalized_opts, next_counter} = Operations.normalize_save_weights_opts(opts, state)
 
       case Operations.send_save_weights_for_sampler_request(seq_id, normalized_opts, state) do
         {:error, reason} ->
-          {:reply, {:error, reason},
-           %{
-             state
-             | request_id_counter: new_counter,
-               sampling_session_counter: next_sampling_counter
-           }}
+          new_state = %{
+            state
+            | request_id_counter: new_counter,
+              sampling_session_counter: next_counter
+          }
+
+          {:reply, {:error, reason}, new_state}
 
         {:ok, response} ->
-          start_background_task(
-            fn ->
-              reply =
-                with {:ok, save_response} <-
-                       Operations.handle_save_weights_response(response, state, normalized_opts),
-                     {:ok, sampling_client} <-
-                       Operations.start_sampling_client_from_save(
-                         save_response,
-                         seq_id,
-                         opts,
-                         state
-                       ) do
-                  {:ok, sampling_client}
-                else
-                  {:error, %Error{} = error} -> {:error, error}
-                  {:error, reason} -> {:error, reason}
-                end
+          ctx = %{
+            response: response,
+            normalized_opts: normalized_opts,
+            seq_id: seq_id,
+            opts: opts,
+            state: state
+          }
 
-              safe_reply(from, reply)
-            end,
-            from,
-            state.telemetry
-          )
+          new_state = %{
+            state
+            | request_id_counter: new_counter,
+              sampling_session_counter: next_counter
+          }
 
-          {:noreply,
-           %{
-             state
-             | request_id_counter: new_counter,
-               sampling_session_counter: next_sampling_counter
-           }}
+          dispatch_weights_and_client_task(from, new_state, ctx)
       end
     end)
   end
@@ -867,86 +682,10 @@ defmodule Tinkex.TrainingClient do
   @impl true
   def handle_call({:forward_backward_custom, data, loss_fn, opts}, from, state) do
     capture_telemetry(state, fn ->
-      with {:ok, placeholder_gradients} <- DataProcessor.build_placeholder_gradients(data) do
-        placeholder_linear_data = CustomLoss.build_linear_loss_data(data, placeholder_gradients)
-        linear_chunks = DataProcessor.chunk_data(placeholder_linear_data)
-        chunks = DataProcessor.chunk_data(data)
+      case DataProcessor.build_placeholder_gradients(data) do
+        {:ok, placeholder_gradients} ->
+          handle_custom_loss_forward(data, loss_fn, placeholder_gradients, opts, from, state)
 
-        forward_count = length(chunks)
-        backward_count = length(linear_chunks)
-
-        {seq_ids, new_counter} =
-          DataProcessor.allocate_request_ids(
-            forward_count + backward_count,
-            state.request_id_counter
-          )
-
-        {forward_seq_ids, backward_seq_ids} = Enum.split(seq_ids, forward_count)
-
-        send_result =
-          Enum.reduce_while(Enum.zip(forward_seq_ids, chunks), {:ok, []}, fn {seq_id, chunk},
-                                                                             {:ok, acc} ->
-            case Operations.send_forward_request(chunk, :cross_entropy, seq_id, opts, state) do
-              {:ok, future} -> {:cont, {:ok, [future | acc]}}
-              {:error, reason} -> {:halt, {:error, reason}}
-            end
-          end)
-
-        case send_result do
-          {:error, reason} ->
-            {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
-
-          {:ok, forward_futures_rev} ->
-            forward_futures = Enum.reverse(forward_futures_rev)
-
-            start_background_task(
-              fn ->
-                reply =
-                  try do
-                    with {:ok, forward_outputs} <-
-                           Operations.poll_forward_custom_loss(forward_futures, opts, state),
-                         {:ok, logprobs} <-
-                           CustomLoss.extract_per_datum_logprobs(forward_outputs),
-                         {:ok, {gradients, metrics}} <-
-                           CustomLoss.compute_gradients(data, logprobs, loss_fn),
-                         {:ok, linear_data} <-
-                           Operations.build_linear_loss_data_safe(data, gradients),
-                         {:ok, backward_outputs} <-
-                           Operations.send_backward_for_custom_loss(
-                             linear_data,
-                             backward_seq_ids,
-                             opts,
-                             state
-                           ) do
-                      combined = Combiner.combine_forward_backward_results(backward_outputs)
-                      {:ok, Operations.merge_custom_metrics(combined, metrics)}
-                    else
-                      {:error, %Error{} = error} ->
-                        {:error, error}
-
-                      {:error, reason} ->
-                        {:error,
-                         Error.new(:request_failed, "Custom loss failed: #{inspect(reason)}")}
-                    end
-                  rescue
-                    e ->
-                      {:error,
-                       %Error{
-                         message: "Custom loss failed: #{Exception.message(e)}",
-                         type: :request_failed,
-                         data: %{exception: e, stacktrace: __STACKTRACE__}
-                       }}
-                  end
-
-                safe_reply(from, reply)
-              end,
-              from,
-              state.telemetry
-            )
-
-            {:noreply, %{state | request_id_counter: new_counter}}
-        end
-      else
         {:error, reason} ->
           {:reply, {:error, reason}, state}
       end
@@ -956,6 +695,88 @@ defmodule Tinkex.TrainingClient do
   @impl true
   def handle_call(_message, _from, state),
     do: capture_telemetry(state, fn -> {:reply, {:error, :unsupported}, state} end)
+
+  defp handle_custom_loss_forward(data, loss_fn, placeholder_gradients, opts, from, state) do
+    placeholder_linear_data = CustomLoss.build_linear_loss_data(data, placeholder_gradients)
+    linear_chunks = DataProcessor.chunk_data(placeholder_linear_data)
+    chunks = DataProcessor.chunk_data(data)
+
+    forward_count = length(chunks)
+    backward_count = length(linear_chunks)
+
+    {seq_ids, new_counter} =
+      DataProcessor.allocate_request_ids(forward_count + backward_count, state.request_id_counter)
+
+    {forward_seq_ids, backward_seq_ids} = Enum.split(seq_ids, forward_count)
+
+    send_result =
+      Enum.reduce_while(Enum.zip(forward_seq_ids, chunks), {:ok, []}, fn {seq_id, chunk},
+                                                                         {:ok, acc} ->
+        case Operations.send_forward_request(chunk, :cross_entropy, seq_id, opts, state) do
+          {:ok, future} -> {:cont, {:ok, [future | acc]}}
+          {:error, reason} -> {:halt, {:error, reason}}
+        end
+      end)
+
+    case send_result do
+      {:error, reason} ->
+        {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
+
+      {:ok, forward_futures_rev} ->
+        forward_futures = Enum.reverse(forward_futures_rev)
+
+        ctx = %{
+          data: data,
+          loss_fn: loss_fn,
+          backward_seq_ids: backward_seq_ids,
+          opts: opts,
+          state: state
+        }
+
+        start_background_task(
+          fn -> execute_custom_loss_and_reply(forward_futures, ctx, from) end,
+          from,
+          state.telemetry
+        )
+
+        {:noreply, %{state | request_id_counter: new_counter}}
+    end
+  end
+
+  defp execute_custom_loss_and_reply(forward_futures, ctx, from) do
+    reply = execute_custom_loss(forward_futures, ctx)
+    safe_reply(from, reply)
+  end
+
+  defp execute_custom_loss(forward_futures, ctx) do
+    %{data: data, loss_fn: loss_fn, backward_seq_ids: backward_seq_ids, opts: opts, state: state} =
+      ctx
+
+    with {:ok, forward_outputs} <-
+           Operations.poll_forward_custom_loss(forward_futures, opts, state),
+         {:ok, logprobs} <- CustomLoss.extract_per_datum_logprobs(forward_outputs),
+         {:ok, {gradients, metrics}} <- CustomLoss.compute_gradients(data, logprobs, loss_fn),
+         {:ok, linear_data} <- Operations.build_linear_loss_data_safe(data, gradients),
+         {:ok, backward_outputs} <-
+           Operations.send_backward_for_custom_loss(linear_data, backward_seq_ids, opts, state) do
+      combined = Combiner.combine_forward_backward_results(backward_outputs)
+      {:ok, Operations.merge_custom_metrics(combined, metrics)}
+    else
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      {:error, reason} ->
+        {:error, Error.new(:request_failed, "Custom loss failed: #{inspect(reason)}")}
+    end
+  rescue
+    e ->
+      {:error,
+       %Error{
+         message: "Custom loss failed: #{Exception.message(e)}",
+         type: :request_failed,
+         data: %{exception: e, stacktrace: __STACKTRACE__}
+       }}
+  end
 
   @impl true
   def handle_info(_msg, state), do: {:noreply, state}
@@ -976,11 +797,177 @@ defmodule Tinkex.TrainingClient do
   # Private helpers
 
   defp safe_reply(from, reply) do
-    try do
-      GenServer.reply(from, reply)
-    rescue
-      ArgumentError -> :ok
+    GenServer.reply(from, reply)
+  rescue
+    ArgumentError -> :ok
+  end
+
+  # Multi-request helpers for forward/forward_backward
+  defp send_multi_requests(seq_ids, chunks, loss_fn, opts, state, send_fn) do
+    Enum.reduce_while(Enum.zip(seq_ids, chunks), {:ok, []}, fn {seq_id, chunk}, {:ok, acc} ->
+      case send_fn.(chunk, loss_fn, seq_id, opts, state) do
+        {:ok, future} -> {:cont, {:ok, [future | acc]}}
+        {:error, reason} -> {:halt, {:error, reason}}
+      end
+    end)
+  end
+
+  defp dispatch_multi_result({:error, reason}, _opts, state, _from, new_counter, _poll_fn) do
+    {:reply, {:error, reason}, %{state | request_id_counter: new_counter}}
+  end
+
+  defp dispatch_multi_result({:ok, futures_rev}, opts, state, from, new_counter, poll_fn) do
+    futures = Enum.reverse(futures_rev)
+    task_fn = fn -> poll_fn.(futures, opts, state, from) end
+    start_background_task(task_fn, from, state.telemetry)
+    {:noreply, %{state | request_id_counter: new_counter}}
+  end
+
+  defp dispatch_single_result(future, opts, state, from, new_counter, operation, transform_fn) do
+    task_fn = fn -> poll_and_reply_single(future, opts, state, from, operation, transform_fn) end
+    start_background_task(task_fn, from, state.telemetry)
+    {:noreply, %{state | request_id_counter: new_counter}}
+  end
+
+  # Operation task dispatch helpers
+  defp dispatch_operation_task(from, new_counter, telemetry, ctx, task_fn) do
+    start_background_task(fn -> task_fn.(ctx, from) end, from, telemetry)
+    {:noreply, %{ctx.state | request_id_counter: new_counter}}
+  end
+
+  defp save_state_task(ctx, from) do
+    safe_operation_and_reply(from, "Save state", fn ->
+      Operations.handle_save_state_response(ctx.response, ctx.state, ctx.opts)
+    end)
+  end
+
+  defp load_state_task(ctx, from) do
+    safe_operation_and_reply(from, "Load state", fn ->
+      Operations.handle_load_state_response(ctx.response, ctx.state, ctx.opts)
+    end)
+  end
+
+  defp dispatch_weights_task(from, new_state, ctx, task_fn) do
+    start_background_task(fn -> task_fn.(ctx, from) end, from, ctx.state.telemetry)
+    {:noreply, new_state}
+  end
+
+  defp save_weights_task(ctx, from) do
+    safe_operation_and_reply(from, "Save weights", fn ->
+      Operations.handle_save_weights_response(ctx.response, ctx.state, ctx.opts)
+    end)
+  end
+
+  defp dispatch_weights_and_client_task(from, new_state, ctx) do
+    task_fn = fn -> execute_weights_and_client_task(ctx, from) end
+    start_background_task(task_fn, from, ctx.state.telemetry)
+    {:noreply, new_state}
+  end
+
+  defp execute_weights_and_client_task(ctx, from) do
+    reply =
+      with {:ok, save_response} <-
+             Operations.handle_save_weights_response(ctx.response, ctx.state, ctx.normalized_opts),
+           {:ok, sampling_client} <-
+             Operations.start_sampling_client_from_save(
+               save_response,
+               ctx.seq_id,
+               ctx.opts,
+               ctx.state
+             ) do
+        {:ok, sampling_client}
+      else
+        {:error, %Error{} = error} -> {:error, error}
+        {:error, reason} -> {:error, reason}
+      end
+
+    safe_reply(from, reply)
+  end
+
+  defp poll_and_reply_forward_backward(futures, opts, state, from) do
+    reply =
+      safe_poll_futures(futures, opts, state, "ForwardBackward", fn polling_tasks ->
+        case Polling.await_forward_backward_results(polling_tasks, state.future_module) do
+          {:ok, outputs} -> {:ok, Combiner.combine_forward_backward_results(outputs)}
+          {:error, %Error{} = error} -> {:error, error}
+        end
+      end)
+
+    safe_reply(from, reply)
+  end
+
+  defp poll_and_reply_forward(futures, opts, state, from) do
+    reply =
+      safe_poll_futures(futures, opts, state, "Forward", fn polling_tasks ->
+        case Polling.await_forward_results(polling_tasks, state.future_module) do
+          {:ok, outputs} -> {:ok, Combiner.combine_forward_backward_results(outputs)}
+          {:error, %Error{} = error} -> {:error, error}
+        end
+      end)
+
+    safe_reply(from, reply)
+  end
+
+  defp poll_and_reply_single(future, opts, state, from, operation, transform_fn) do
+    reply = safe_poll_single(future, opts, state, operation, transform_fn)
+    safe_reply(from, reply)
+  end
+
+  defp safe_poll_futures(futures, opts, state, operation, await_fn) do
+    polling_tasks =
+      Enum.map(futures, fn future ->
+        task =
+          state.future_module.poll(future, Polling.poll_opts_with_type(state, opts, operation))
+
+        Polling.unlink_task(task)
+        task
+      end)
+
+    await_fn.(polling_tasks)
+  rescue
+    e ->
+      {:error, polling_error(e, __STACKTRACE__)}
+  end
+
+  defp safe_poll_single(future, opts, state, operation, transform_fn) do
+    task = state.future_module.poll(future, Polling.poll_opts_with_type(state, opts, operation))
+    Polling.unlink_task(task)
+
+    case Polling.safe_await(state.future_module, task, await_timeout(opts)) do
+      {:ok, result} -> {:ok, transform_fn.(result)}
+      {:error, %Error{} = error} -> {:error, error}
     end
+  rescue
+    e ->
+      {:error, polling_error(e, __STACKTRACE__)}
+  end
+
+  defp polling_error(e, stacktrace) do
+    %Error{
+      message: "Polling failed: #{Exception.message(e)}",
+      type: :request_failed,
+      data: %{exception: e, stacktrace: stacktrace}
+    }
+  end
+
+  defp safe_operation_and_reply(from, operation_name, operation_fn) do
+    reply =
+      try do
+        operation_fn.()
+      rescue
+        e ->
+          {:error, operation_error(operation_name, e, __STACKTRACE__)}
+      end
+
+    safe_reply(from, reply)
+  end
+
+  defp operation_error(operation_name, e, stacktrace) do
+    %Error{
+      message: "#{operation_name} failed: #{Exception.message(e)}",
+      type: :request_failed,
+      data: %{exception: e, stacktrace: stacktrace}
+    }
   end
 
   defp capture_telemetry(state, fun) when is_function(fun, 0) do

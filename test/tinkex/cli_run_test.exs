@@ -4,7 +4,7 @@ defmodule Tinkex.CLIRunTest do
   import ExUnit.CaptureIO
 
   alias Tinkex.CLI
-  alias Tinkex.Types.{SampleResponse, SampledSequence, SamplingParams}
+  alias Tinkex.Types.{SampledSequence, SampleResponse, SamplingParams}
 
   defmodule ServiceStub do
     def start_link(opts) do

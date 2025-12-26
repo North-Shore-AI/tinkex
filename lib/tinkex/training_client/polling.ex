@@ -123,21 +123,19 @@ defmodule Tinkex.TrainingClient.Polling do
   @spec safe_await(module(), Task.t(), timeout()) ::
           {:ok, any()} | {:error, Error.t()}
   def safe_await(future_module, task, timeout) do
-    try do
-      future_module.await(task, timeout)
-    rescue
-      e ->
-        {:error,
-         Error.new(:request_failed, "Polling task failed: #{Exception.message(e)}",
-           data: %{exception: e, stacktrace: __STACKTRACE__}
-         )}
-    catch
-      :exit, reason ->
-        {:error,
-         Error.new(:request_failed, "Polling task exited: #{inspect(reason)}",
-           data: %{exit_reason: reason}
-         )}
-    end
+    future_module.await(task, timeout)
+  rescue
+    e ->
+      {:error,
+       Error.new(:request_failed, "Polling task failed: #{Exception.message(e)}",
+         data: %{exception: e, stacktrace: __STACKTRACE__}
+       )}
+  catch
+    :exit, reason ->
+      {:error,
+       Error.new(:request_failed, "Polling task exited: #{inspect(reason)}",
+         data: %{exit_reason: reason}
+       )}
   end
 
   @doc """
@@ -148,6 +146,10 @@ defmodule Tinkex.TrainingClient.Polling do
     poll_opts(state, opts)
     |> Keyword.put(:tinker_request_type, request_type)
   end
+
+  # Python SDK uses 45s per-request timeout for retrieve_future
+  # This leaves room for retries within the overall await_timeout (typically 60s)
+  @default_polling_http_timeout 45_000
 
   @doc """
   Build base poll options from state and user-provided options.
@@ -163,14 +165,18 @@ defmodule Tinkex.TrainingClient.Polling do
     # Users can override with their own observer via opts[:queue_state_observer]
     observer = Keyword.get(opts, :queue_state_observer, Tinkex.TrainingClient.Observer)
 
+    # Use Python SDK's 45s default for polling HTTP timeout (not config.timeout which is 60s)
+    # This leaves room for retries within the await_timeout
+    http_timeout = Keyword.get(opts, :http_timeout, @default_polling_http_timeout)
+
     opts
     |> Keyword.take([
       :timeout,
-      :http_timeout,
       :telemetry_metadata,
       :sleep_fun
     ])
     |> Keyword.put(:config, state.config)
+    |> Keyword.put(:http_timeout, http_timeout)
     |> Keyword.put(:telemetry_metadata, telemetry_metadata)
     |> Keyword.put(:queue_state_observer, observer)
   end

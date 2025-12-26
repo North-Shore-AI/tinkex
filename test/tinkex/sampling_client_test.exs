@@ -1,5 +1,5 @@
 defmodule Tinkex.SamplingClientTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   import ExUnit.CaptureLog
 

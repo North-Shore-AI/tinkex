@@ -121,15 +121,22 @@ defmodule Tinkex.CheckpointDownload do
   end
 
   defp do_download(url, dest_path, http_pool, progress_fn) do
-    # Build Finch request for streaming download.
-    # Uses Finch.stream_while to stream response chunks directly to disk,
-    # avoiding loading the entire file into memory. This is critical for
-    # large checkpoints (100MB-GBs) that would cause OOM errors.
     request = Finch.build(:get, url, [])
     pool_name = PoolKey.resolve_pool_name(http_pool, url, :futures)
+    initial_acc = build_initial_download_acc(dest_path, progress_fn)
 
-    # Initialize accumulator for streaming
-    initial_acc = %{
+    case Finch.stream_while(request, pool_name, initial_acc, &handle_stream_event/2) do
+      {:ok, acc} ->
+        finalize_download(acc)
+
+      {:error, exception, acc} ->
+        maybe_close_file(acc)
+        {:error, {:download_failed, exception}}
+    end
+  end
+
+  defp build_initial_download_acc(dest_path, progress_fn) do
+    %{
       file: nil,
       dest_path: dest_path,
       downloaded: 0,
@@ -137,64 +144,51 @@ defmodule Tinkex.CheckpointDownload do
       progress_fn: progress_fn,
       status: nil
     }
+  end
 
-    # Stream the response using stream_while for reducer-style accumulation
-    result =
-      Finch.stream_while(request, pool_name, initial_acc, fn
-        {:status, status}, acc ->
-          {:cont, %{acc | status: status}}
+  defp handle_stream_event({:status, status}, acc) do
+    {:cont, %{acc | status: status}}
+  end
 
-        {:headers, headers}, acc ->
-          # Extract content-length from headers
-          content_length =
-            headers
-            |> Enum.find(fn {k, _} -> String.downcase(k) == "content-length" end)
-            |> case do
-              {_, len} -> String.to_integer(len)
-              nil -> nil
-            end
+  defp handle_stream_event({:headers, headers}, acc) do
+    content_length = extract_content_length(headers)
+    file = ensure_file_open(acc)
+    {:cont, %{acc | total: content_length, file: file}}
+  end
 
-          # Open file for writing (only if not already open)
-          file =
-            if acc.file == nil do
-              File.open!(acc.dest_path, [:write, :binary])
-            else
-              acc.file
-            end
+  defp handle_stream_event({:data, chunk}, acc) do
+    IO.binwrite(acc.file, chunk)
+    downloaded = acc.downloaded + byte_size(chunk)
+    report_progress(acc.progress_fn, downloaded, acc.total)
+    {:cont, %{acc | downloaded: downloaded}}
+  end
 
-          {:cont, %{acc | total: content_length, file: file}}
+  defp extract_content_length(headers) do
+    headers
+    |> Enum.find(fn {k, _} -> String.downcase(k) == "content-length" end)
+    |> case do
+      {_, len} -> String.to_integer(len)
+      nil -> nil
+    end
+  end
 
-        {:data, chunk}, acc ->
-          # Write chunk to file
-          IO.binwrite(acc.file, chunk)
+  defp ensure_file_open(%{file: nil, dest_path: dest_path}) do
+    File.open!(dest_path, [:write, :binary])
+  end
 
-          downloaded = acc.downloaded + byte_size(chunk)
+  defp ensure_file_open(%{file: file}), do: file
 
-          # Report progress if callback provided
-          if acc.progress_fn && acc.total do
-            acc.progress_fn.(downloaded, acc.total)
-          end
+  defp report_progress(nil, _downloaded, _total), do: :ok
+  defp report_progress(_progress_fn, _downloaded, nil), do: :ok
+  defp report_progress(progress_fn, downloaded, total), do: progress_fn.(downloaded, total)
 
-          {:cont, %{acc | downloaded: downloaded}}
-      end)
+  defp finalize_download(acc) do
+    maybe_close_file(acc)
 
-    # Clean up: close file if it was opened
-    # Note: Finch.stream returns the final accumulator value directly on success
-    case result do
-      {:ok, acc} ->
-        maybe_close_file(acc)
-
-        # Check status code
-        case acc.status do
-          200 -> :ok
-          status when status != nil -> {:error, {:download_failed, status}}
-          nil -> {:error, {:download_failed, :no_response}}
-        end
-
-      {:error, exception, acc} ->
-        # Close partially written file if present in accumulator
-        maybe_close_file(acc)
-        {:error, {:download_failed, exception}}
+    case acc.status do
+      200 -> :ok
+      status when status != nil -> {:error, {:download_failed, status}}
+      nil -> {:error, {:download_failed, :no_response}}
     end
   end
 

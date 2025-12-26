@@ -35,8 +35,8 @@ defmodule Tinkex.Telemetry.Reporter do
 
   alias Tinkex.Types.Telemetry.{
     GenericEvent,
-    SessionStartEvent,
     SessionEndEvent,
+    SessionStartEvent,
     UnhandledExceptionEvent
   }
 
@@ -685,8 +685,7 @@ defmodule Tinkex.Telemetry.Reporter do
   defp platform do
     :os.type()
     |> Tuple.to_list()
-    |> Enum.map(&to_string/1)
-    |> Enum.join("/")
+    |> Enum.map_join("/", &to_string/1)
   end
 
   defp iso_timestamp do
@@ -723,13 +722,11 @@ defmodule Tinkex.Telemetry.Reporter do
 
   # Format stacktrace - try to get the current process stacktrace
   defp format_stacktrace_with_trace(exception) do
-    try do
-      # Try to get the stacktrace from the exception if it has one
-      stacktrace = get_exception_stacktrace(exception)
-      Exception.format(:error, exception, stacktrace)
-    rescue
-      _ -> format_stacktrace_fallback(exception)
-    end
+    # Try to get the stacktrace from the exception if it has one
+    stacktrace = get_exception_stacktrace(exception)
+    Exception.format(:error, exception, stacktrace)
+  rescue
+    _ -> format_stacktrace_fallback(exception)
   end
 
   defp get_exception_stacktrace(%{stacktrace: stacktrace}) when is_list(stacktrace) do
@@ -745,11 +742,9 @@ defmodule Tinkex.Telemetry.Reporter do
   end
 
   defp format_stacktrace_fallback(exception) do
-    try do
-      Exception.format(:error, exception, [])
-    rescue
-      _ -> nil
-    end
+    Exception.format(:error, exception, [])
+  rescue
+    _ -> nil
   end
 
   defp uuid do

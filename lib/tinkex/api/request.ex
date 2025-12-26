@@ -9,10 +9,10 @@ defmodule Tinkex.API.Request do
   - Content-type header management
   """
 
-  alias Tinkex.Transform
+  alias Tinkex.API.Headers
   alias Tinkex.Files.Transform, as: FileTransform
   alias Tinkex.Multipart.{Encoder, FormSerializer}
-  alias Tinkex.API.Headers
+  alias Tinkex.Transform
 
   @doc """
   Prepares the request body and updates headers as needed.
@@ -100,22 +100,18 @@ defmodule Tinkex.API.Request do
   end
 
   defp extract_multipart_boundary(headers) do
-    case header_multipart?(headers) do
-      false ->
-        nil
-
-      true ->
-        headers
-        |> Enum.find_value(fn
-          {name, value} ->
-            if String.downcase(name) == "content-type" do
-              parse_boundary(value)
-            end
-
-          _ ->
-            nil
-        end)
+    if header_multipart?(headers) do
+      find_boundary_in_headers(headers)
+    else
+      nil
     end
+  end
+
+  defp find_boundary_in_headers(headers) do
+    Enum.find_value(headers, fn
+      {name, value} -> if String.downcase(name) == "content-type", do: parse_boundary(value)
+      _ -> nil
+    end)
   end
 
   defp parse_boundary(content_type) do

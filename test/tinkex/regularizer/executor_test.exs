@@ -2,7 +2,7 @@ defmodule Tinkex.Regularizer.ExecutorTest do
   use ExUnit.Case, async: true
 
   alias Tinkex.Regularizer.Executor
-  alias Tinkex.Types.{RegularizerSpec, RegularizerOutput}
+  alias Tinkex.Types.{RegularizerOutput, RegularizerSpec}
 
   describe "execute_all/4 with empty list" do
     test "returns empty list for empty regularizers" do

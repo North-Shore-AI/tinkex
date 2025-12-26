@@ -1,9 +1,13 @@
 defmodule Tinkex.Recovery.ExecutorTest do
-  use Supertester.ExUnitFoundation, isolation: :basic
+  use Supertester.ExUnitFoundation,
+    isolation: :basic,
+    telemetry_isolation: true
 
+  alias Supertester.TelemetryHelpers
   alias Tinkex.Recovery.{Executor, Policy}
-  alias Tinkex.Types.Checkpoint
   alias Tinkex.TestSupport.Recovery.ServiceStub
+  alias Tinkex.Types.Checkpoint
+  require TelemetryHelpers
 
   setup do
     service_pid = make_ref()
@@ -40,8 +44,8 @@ defmodule Tinkex.Recovery.ExecutorTest do
          service_client_module: ServiceStub, rest_module: Tinkex.API.Rest, send_after: send_after}
       )
 
-    handler =
-      attach_recovery_events([
+    {:ok, _} =
+      TelemetryHelpers.attach_isolated([
         [:tinkex, :recovery, :started],
         [:tinkex, :recovery, :completed]
       ])
@@ -51,19 +55,20 @@ defmodule Tinkex.Recovery.ExecutorTest do
     assert :ok =
              Executor.recover(executor, "run-123", service_pid, policy,
                last_checkpoint: checkpoint,
-               metadata: %{training_pid: :old_training}
+               metadata: TelemetryHelpers.current_test_metadata(%{training_pid: :old_training})
              )
 
     assert_receive {:client_created, ^service_pid, "tinker://run/checkpoint", []}
     assert_receive {:recovered, :old_training, :new_training_client, %Checkpoint{}}
 
-    assert_receive {:telemetry, [:tinkex, :recovery, :completed], _meas, meta}
+    {:telemetry, _, _meas, meta} =
+      TelemetryHelpers.assert_telemetry([:tinkex, :recovery, :completed])
+
     assert meta.run_id == "run-123"
 
     monitor = Process.monitor(executor)
     GenServer.stop(executor)
     assert_receive {:DOWN, ^monitor, :process, ^executor, _}
-    :telemetry.detach(handler)
   end
 
   test "backs off and emits exhausted after max attempts", %{
@@ -94,42 +99,27 @@ defmodule Tinkex.Recovery.ExecutorTest do
          service_client_module: ServiceStub, rest_module: Tinkex.API.Rest, send_after: send_after}
       )
 
-    handler =
-      attach_recovery_events([
+    {:ok, _} =
+      TelemetryHelpers.attach_isolated([
         [:tinkex, :recovery, :failed],
         [:tinkex, :recovery, :exhausted]
       ])
 
     assert :ok =
              Executor.recover(executor, "run-exhausted", service_pid, policy,
-               last_checkpoint: "tinker://run/checkpoint"
+               last_checkpoint: "tinker://run/checkpoint",
+               metadata: TelemetryHelpers.current_test_metadata()
              )
 
     assert_receive {:failure_callback, "run-exhausted", :not_ready}
 
-    assert_receive {:telemetry, [:tinkex, :recovery, :exhausted], _meas, meta}
+    {:telemetry, _, _meas, meta} =
+      TelemetryHelpers.assert_telemetry([:tinkex, :recovery, :exhausted])
+
     assert meta.run_id == "run-exhausted"
 
     monitor = Process.monitor(executor)
     GenServer.stop(executor)
     assert_receive {:DOWN, ^monitor, :process, ^executor, _}
-    :telemetry.detach(handler)
-  end
-
-  defp attach_recovery_events(events) do
-    handler_id = "recovery-handler-#{:erlang.unique_integer([:positive])}"
-    parent = self()
-
-    :ok =
-      :telemetry.attach_many(
-        handler_id,
-        events,
-        fn event, measurements, metadata, _config ->
-          send(parent, {:telemetry, event, measurements, metadata})
-        end,
-        nil
-      )
-
-    handler_id
   end
 end

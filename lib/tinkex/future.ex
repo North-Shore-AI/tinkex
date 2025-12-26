@@ -49,6 +49,7 @@ defmodule Tinkex.Future do
   @telemetry_connection_error [:tinkex, :future, :connection_error]
   @telemetry_request_failed [:tinkex, :future, :request_failed]
   @telemetry_validation_error [:tinkex, :future, :validation_error]
+  @default_polling_http_timeout 45_000
   @initial_backoff 1_000
   @max_backoff 30_000
 
@@ -118,11 +119,14 @@ defmodule Tinkex.Future do
       request_payload: %{request_id: request_id},
       prev_queue_state: opts[:initial_queue_state],
       config: config,
-      metadata: build_metadata(opts[:telemetry_metadata], request_id),
+      metadata:
+        opts[:telemetry_metadata]
+        |> build_metadata(request_id)
+        |> merge_user_metadata(config),
       request_type: opts[:tinker_request_type],
       observer: opts[:queue_state_observer],
       sleep_fun: sleep_fun,
-      http_timeout: Keyword.get(opts, :http_timeout, config.timeout),
+      http_timeout: Keyword.get(opts, :http_timeout, @default_polling_http_timeout),
       poll_timeout: Keyword.get(opts, :timeout, :infinity),
       create_roundtrip_time: opts[:tinker_create_roundtrip_time],
       raw_response?: Keyword.get(opts, :raw_response?, true),
@@ -142,16 +146,14 @@ defmodule Tinkex.Future do
   """
   @spec await(poll_task(), timeout()) :: poll_result()
   def await(%Task{} = task, timeout \\ :infinity) do
-    try do
-      Task.await(task, timeout)
-    catch
-      :exit, {:timeout, _} ->
-        Task.shutdown(task, :brutal_kill)
-        {:error, build_await_timeout_error(timeout)}
+    Task.await(task, timeout)
+  catch
+    :exit, {:timeout, _} ->
+      Task.shutdown(task, :brutal_kill)
+      {:error, build_await_timeout_error(timeout)}
 
-      :exit, reason ->
-        {:error, build_await_exit_error(reason)}
-    end
+    :exit, reason ->
+      {:error, build_await_exit_error(reason)}
   end
 
   @doc """
@@ -169,46 +171,91 @@ defmodule Tinkex.Future do
   defp poll_loop(state, iteration) do
     case ensure_within_timeout(state) do
       {:error, error} ->
-        emit_telemetry(@telemetry_timeout, %{elapsed_time: elapsed_since_start(state)}, %{
-          request_id: state.request_id,
-          request_type: state.request_type,
-          iteration: iteration
-        })
+        emit_telemetry(
+          @telemetry_timeout,
+          %{elapsed_time: elapsed_since_start(state)},
+          merge_user_metadata(
+            %{
+              request_id: state.request_id,
+              request_type: state.request_type,
+              iteration: iteration
+            },
+            state.config
+          )
+        )
 
         {:error, error}
 
       :ok ->
-        case Futures.retrieve(state.request_payload,
-               config: state.config,
-               timeout: state.http_timeout,
-               tinker_request_iteration: iteration,
-               tinker_request_type: state.request_type,
-               tinker_create_roundtrip_time: state.create_roundtrip_time,
-               raw_response?: state.raw_response?
-             ) do
-          {:ok, response} ->
-            response
-            |> FutureRetrieveResponse.from_json()
-            |> handle_response(state, iteration)
-
-          {:error, %Error{status: 410} = error} ->
-            expired_error =
-              Error.new(
-                :api_status,
-                "Promise expired for request #{state.request_id}; submit a new request.",
-                status: 410,
-                category: error.category || :server,
-                data: %{request_id: state.request_id, original_error: error}
-              )
-
-            emit_error_telemetry(@telemetry_api_error, expired_error, iteration, state)
-            {:error, expired_error}
-
-          {:error, %Error{} = error} ->
-            emit_error_telemetry(telemetry_event_for_error(error), error, iteration, state)
-            {:error, error}
-        end
+        do_poll(state, iteration)
     end
+  end
+
+  # Pass max_retries: 0 to disable HTTP-level retries for polling.
+  # The polling loop handles retries for 408/5xx, matching Python SDK behavior.
+  defp do_poll(state, iteration) do
+    case Futures.retrieve(state.request_payload,
+           config: state.config,
+           timeout: state.http_timeout,
+           max_retries: 0,
+           tinker_request_iteration: iteration,
+           tinker_request_type: state.request_type,
+           tinker_create_roundtrip_time: state.create_roundtrip_time,
+           raw_response?: state.raw_response?
+         ) do
+      {:ok, response} ->
+        response
+        |> FutureRetrieveResponse.from_json()
+        |> handle_response(state, iteration)
+
+      {:error, %Error{status: 410} = error} ->
+        handle_expired_error(error, state, iteration)
+
+      # Python SDK parity: Continue polling on 408 (Request Timeout).
+      # The server returns 408 when the request is still being processed.
+      # Python uses `continue` (no backoff) for 408, so we do immediate retry.
+      {:error, %Error{status: 408} = error} ->
+        emit_error_telemetry(@telemetry_api_error, error, iteration, state)
+        # No sleep - immediate retry like Python SDK
+        poll_loop(%{state | last_failed_error: error}, iteration + 1)
+
+      # Python SDK parity: Continue polling on 5xx (Server Errors).
+      # These are transient and should be retried indefinitely until poll_timeout.
+      # Python uses `continue` (no backoff) for 5xx, so we do immediate retry.
+      {:error, %Error{status: status} = error}
+      when is_integer(status) and status >= 500 and status < 600 ->
+        emit_error_telemetry(@telemetry_api_error, error, iteration, state)
+        # No sleep - immediate retry like Python SDK
+        poll_loop(%{state | last_failed_error: error}, iteration + 1)
+
+      # Python SDK parity: Continue polling on connection errors with backoff.
+      {:error, %Error{type: :api_connection} = error} ->
+        emit_error_telemetry(telemetry_event_for_error(error), error, iteration, state)
+
+        sleep_and_continue(
+          %{state | last_failed_error: error},
+          calc_backoff(iteration),
+          iteration
+        )
+
+      {:error, %Error{} = error} ->
+        emit_error_telemetry(telemetry_event_for_error(error), error, iteration, state)
+        {:error, error}
+    end
+  end
+
+  defp handle_expired_error(error, state, iteration) do
+    expired_error =
+      Error.new(
+        :api_status,
+        "Promise expired for request #{state.request_id}; submit a new request.",
+        status: 410,
+        category: error.category || :server,
+        data: %{request_id: state.request_id, original_error: error}
+      )
+
+    emit_error_telemetry(@telemetry_api_error, expired_error, iteration, state)
+    {:error, expired_error}
   end
 
   defp handle_response(%FutureCompletedResponse{result: result}, _state, _iteration) do
@@ -280,7 +327,10 @@ defmodule Tinkex.Future do
   defp evaluate_timeout(_elapsed, _timeout, _state), do: :ok
 
   defp calc_backoff(iteration) when is_integer(iteration) and iteration >= 0 do
-    backoff = trunc(:math.pow(2, iteration)) * @initial_backoff
+    # Cap iteration to prevent math.pow overflow
+    # With @initial_backoff=1000, iteration 5 gives 32000 which exceeds @max_backoff=30000
+    capped_iteration = min(iteration, 5)
+    backoff = trunc(:math.pow(2, capped_iteration)) * @initial_backoff
     min(backoff, @max_backoff)
   end
 
@@ -339,25 +389,23 @@ defmodule Tinkex.Future do
   defp notify_observer(nil, _queue_state, _metadata), do: :ok
 
   defp notify_observer(observer, queue_state, metadata) when is_atom(observer) do
-    try do
-      # Prefer 2-arity callback with metadata for context (session_id, model_id, etc.)
-      # Fall back to 1-arity for backward compatibility with existing observers
-      if function_exported?(observer, :on_queue_state_change, 2) do
-        observer.on_queue_state_change(queue_state, metadata)
-      else
-        observer.on_queue_state_change(queue_state)
-      end
-    rescue
-      _e in UndefinedFunctionError ->
-        :ok
-
-      exception ->
-        Logger.warning(
-          "QueueStateObserver #{inspect(observer)} crashed: #{Exception.message(exception)}"
-        )
-
-        :ok
+    # Prefer 2-arity callback with metadata for context (session_id, model_id, etc.)
+    # Fall back to 1-arity for backward compatibility with existing observers
+    if function_exported?(observer, :on_queue_state_change, 2) do
+      observer.on_queue_state_change(queue_state, metadata)
+    else
+      observer.on_queue_state_change(queue_state)
     end
+  rescue
+    _e in UndefinedFunctionError ->
+      :ok
+
+    exception ->
+      Logger.warning(
+        "QueueStateObserver #{inspect(observer)} crashed: #{Exception.message(exception)}"
+      )
+
+      :ok
   end
 
   defp notify_observer(_observer, _queue_state, _metadata), do: :ok
@@ -376,20 +424,33 @@ defmodule Tinkex.Future do
     |> Map.put_new(:request_id, request_id)
   end
 
+  defp merge_user_metadata(metadata, %Config{user_metadata: %{} = user_metadata}) do
+    Map.merge(metadata, user_metadata)
+  end
+
+  defp merge_user_metadata(metadata, _config), do: metadata
+
   defp telemetry_event_for_error(%Error{type: :api_connection}), do: @telemetry_connection_error
   defp telemetry_event_for_error(%Error{type: :validation}), do: @telemetry_validation_error
   defp telemetry_event_for_error(%Error{type: :request_failed}), do: @telemetry_request_failed
   defp telemetry_event_for_error(%Error{}), do: @telemetry_api_error
 
   defp emit_error_telemetry(event, %Error{} = error, iteration, state) do
-    emit_telemetry(event, %{elapsed_time: elapsed_since_start(state)}, %{
-      request_id: state.request_id,
-      request_type: state.request_type,
-      iteration: iteration,
-      status: error.status,
-      category: error.category,
-      error_type: error.type
-    })
+    emit_telemetry(
+      event,
+      %{elapsed_time: elapsed_since_start(state)},
+      merge_user_metadata(
+        %{
+          request_id: state.request_id,
+          request_type: state.request_type,
+          iteration: iteration,
+          status: error.status,
+          category: error.category,
+          error_type: error.type
+        },
+        state.config
+      )
+    )
   end
 
   defp emit_telemetry(event, measurements, metadata) do

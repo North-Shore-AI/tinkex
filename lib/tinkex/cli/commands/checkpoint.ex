@@ -490,17 +490,11 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
   defp checkpoint_publish(config, options, deps) do
     path = Map.fetch!(options, :path)
 
-    with {:ok, format} <- management_format(options) do
-      case deps.rest_api_module.publish_checkpoint(config, path) do
-        {:ok, _} ->
-          maybe_print_json(format, deps.json_module, %{action: :publish, path: path})
-          if format == :table, do: IO.puts("Published #{path}")
-          {:ok, %{command: :checkpoint, action: :publish, path: path}}
-
-        {:error, %Error{} = error} ->
-          IO.puts(:stderr, "Publish failed: #{Error.format(error)}")
-          {:error, error}
-      end
+    with {:ok, format} <- management_format(options),
+         {:ok, _} <- deps.rest_api_module.publish_checkpoint(config, path) do
+      maybe_print_json(format, deps.json_module, %{action: :publish, path: path})
+      if format == :table, do: IO.puts("Published #{path}")
+      {:ok, %{command: :checkpoint, action: :publish, path: path}}
     else
       {:error, %Error{} = error} ->
         IO.puts(:stderr, "Publish failed: #{Error.format(error)}")
@@ -511,17 +505,11 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
   defp checkpoint_unpublish(config, options, deps) do
     path = Map.fetch!(options, :path)
 
-    with {:ok, format} <- management_format(options) do
-      case deps.rest_api_module.unpublish_checkpoint(config, path) do
-        {:ok, _} ->
-          maybe_print_json(format, deps.json_module, %{action: :unpublish, path: path})
-          if format == :table, do: IO.puts("Unpublished #{path}")
-          {:ok, %{command: :checkpoint, action: :unpublish, path: path}}
-
-        {:error, %Error{} = error} ->
-          IO.puts(:stderr, "Unpublish failed: #{Error.format(error)}")
-          {:error, error}
-      end
+    with {:ok, format} <- management_format(options),
+         {:ok, _} <- deps.rest_api_module.unpublish_checkpoint(config, path) do
+      maybe_print_json(format, deps.json_module, %{action: :unpublish, path: path})
+      if format == :table, do: IO.puts("Unpublished #{path}")
+      {:ok, %{command: :checkpoint, action: :unpublish, path: path}}
     else
       {:error, %Error{} = error} ->
         IO.puts(:stderr, "Unpublish failed: #{Error.format(error)}")
@@ -535,33 +523,32 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
     force = Map.get(options, :force, false)
     rest_client = deps.rest_client_module.new("cli", config)
 
-    with {:ok, format} <- management_format(options) do
-      case deps.checkpoint_download_module.download(rest_client, path,
+    with {:ok, format} <- management_format(options),
+         {:ok, result} <-
+           deps.checkpoint_download_module.download(rest_client, path,
              output_dir: output_dir,
              force: force
            ) do
-        {:ok, result} ->
-          if format == :json do
-            maybe_print_json(format, deps.json_module, %{
-              path: path,
-              destination: result.destination
-            })
-          else
-            IO.puts("Downloaded to #{result.destination}")
-          end
-
-          {:ok,
-           %{command: :checkpoint, action: :download, path: path, destination: result.destination}}
-
-        {:error, reason} ->
-          IO.puts(:stderr, "Download failed: #{inspect(reason)}")
-          {:error, reason}
-      end
+      render_download_result(format, path, result, deps)
     else
       {:error, %Error{} = error} ->
         IO.puts(:stderr, "Download failed: #{Error.format(error)}")
         {:error, error}
+
+      {:error, reason} ->
+        IO.puts(:stderr, "Download failed: #{inspect(reason)}")
+        {:error, reason}
     end
+  end
+
+  defp render_download_result(format, path, result, deps) do
+    if format == :json do
+      maybe_print_json(format, deps.json_module, %{path: path, destination: result.destination})
+    else
+      IO.puts("Downloaded to #{result.destination}")
+    end
+
+    {:ok, %{command: :checkpoint, action: :download, path: path, destination: result.destination}}
   end
 
   defp checkpoint_delete(config, options, deps) do
@@ -577,79 +564,80 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
     with {:ok, format} <- management_format(options),
          {:ok, parsed_paths} <- validate_checkpoint_paths(paths) do
       tinker_paths = Enum.map(parsed_paths, & &1.tinker_path)
-
-      case confirm_delete?(tinker_paths, Map.get(options, :yes, false)) do
-        true ->
-          total = length(tinker_paths)
-
-          results =
-            parsed_paths
-            |> Enum.with_index(1)
-            |> Enum.map(fn {parsed, idx} ->
-              IO.puts("Deleting #{idx}/#{total}: #{parsed.tinker_path}")
-
-              case deps.rest_api_module.delete_checkpoint(config, parsed.tinker_path) do
-                {:ok, _} ->
-                  IO.puts("Deleted #{parsed.tinker_path}")
-                  {:ok, parsed.tinker_path}
-
-                {:error, %Error{} = error} ->
-                  IO.puts(
-                    :stderr,
-                    "Delete failed for #{parsed.tinker_path}: #{Error.format(error)}"
-                  )
-
-                  {:error, {parsed.tinker_path, error}}
-
-                {:error, reason} ->
-                  error =
-                    Error.new(:request_failed, "Delete failed for #{parsed.tinker_path}",
-                      data: %{reason: reason}
-                    )
-
-                  IO.puts(
-                    :stderr,
-                    "Delete failed for #{parsed.tinker_path}: #{Error.format(error)}"
-                  )
-
-                  {:error, {parsed.tinker_path, error}}
-              end
-            end)
-
-          summary = summarize_deletes(results, tinker_paths)
-
-          json_summary =
-            Map.update(summary, :failures, [], fn failures ->
-              Enum.map(failures, fn %{path: path, error: error} ->
-                %{path: path, error: Error.format(error)}
-              end)
-            end)
-
-          maybe_print_json(format, deps.json_module, json_summary)
-
-          if summary.failed > 0 do
-            {:error, summary}
-          else
-            {:ok, summary}
-          end
-
-        false ->
-          result = %{
-            command: :checkpoint,
-            action: :delete,
-            cancelled: true,
-            paths: tinker_paths
-          }
-
-          IO.puts("Aborted delete of #{length(paths)} checkpoint(s).")
-          maybe_print_json(format, deps.json_module, result)
-          {:ok, result}
-      end
+      execute_checkpoint_delete(config, format, parsed_paths, tinker_paths, options, deps)
     else
       {:error, %Error{} = error} ->
         IO.puts(:stderr, "Delete failed: #{Error.format(error)}")
         {:error, error}
     end
+  end
+
+  defp execute_checkpoint_delete(config, format, parsed_paths, tinker_paths, options, deps) do
+    if confirm_delete?(tinker_paths, Map.get(options, :yes, false)) do
+      perform_deletes(config, format, parsed_paths, tinker_paths, deps)
+    else
+      handle_delete_cancellation(format, tinker_paths, deps)
+    end
+  end
+
+  defp perform_deletes(config, format, parsed_paths, tinker_paths, deps) do
+    total = length(tinker_paths)
+
+    results =
+      parsed_paths
+      |> Enum.with_index(1)
+      |> Enum.map(fn {parsed, idx} ->
+        delete_single_checkpoint(config, parsed, idx, total, deps)
+      end)
+
+    summary = summarize_deletes(results, tinker_paths)
+
+    json_summary =
+      Map.update(summary, :failures, [], fn failures ->
+        Enum.map(failures, fn %{path: path, error: error} ->
+          %{path: path, error: Error.format(error)}
+        end)
+      end)
+
+    maybe_print_json(format, deps.json_module, json_summary)
+
+    if summary.failed > 0, do: {:error, summary}, else: {:ok, summary}
+  end
+
+  defp delete_single_checkpoint(config, parsed, idx, total, deps) do
+    IO.puts("Deleting #{idx}/#{total}: #{parsed.tinker_path}")
+
+    case deps.rest_api_module.delete_checkpoint(config, parsed.tinker_path) do
+      {:ok, _} ->
+        IO.puts("Deleted #{parsed.tinker_path}")
+        {:ok, parsed.tinker_path}
+
+      {:error, %Error{} = error} ->
+        IO.puts(:stderr, "Delete failed for #{parsed.tinker_path}: #{Error.format(error)}")
+        {:error, {parsed.tinker_path, error}}
+
+      {:error, reason} ->
+        error =
+          Error.new(:request_failed, "Delete failed for #{parsed.tinker_path}",
+            data: %{reason: reason}
+          )
+
+        IO.puts(:stderr, "Delete failed for #{parsed.tinker_path}: #{Error.format(error)}")
+        {:error, {parsed.tinker_path, error}}
+    end
+  end
+
+  defp handle_delete_cancellation(format, tinker_paths, deps) do
+    result = %{
+      command: :checkpoint,
+      action: :delete,
+      cancelled: true,
+      paths: tinker_paths
+    }
+
+    IO.puts("Aborted delete of #{length(tinker_paths)} checkpoint(s).")
+    maybe_print_json(format, deps.json_module, result)
+    {:ok, result}
   end
 
   defp validate_checkpoint_paths([]) do

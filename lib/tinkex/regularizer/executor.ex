@@ -33,7 +33,7 @@ defmodule Tinkex.Regularizer.Executor do
 
   alias Tinkex.Regularizer
   alias Tinkex.Regularizer.GradientTracker
-  alias Tinkex.Types.{RegularizerSpec, RegularizerOutput}
+  alias Tinkex.Types.{RegularizerOutput, RegularizerSpec}
 
   require Logger
 

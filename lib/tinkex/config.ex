@@ -32,10 +32,11 @@ defmodule Tinkex.Config do
             proxy_headers: [],
             default_headers: %{},
             default_query: %{},
-            recovery: nil
+            recovery: nil,
+            otel_propagate: false
 
   @type proxy ::
-          {:http | :https, host :: String.t(), port :: 1..65535, opts :: keyword()} | nil
+          {:http | :https, host :: String.t(), port :: 1..65_535, opts :: keyword()} | nil
 
   @type t :: %__MODULE__{
           base_url: String.t(),
@@ -56,7 +57,8 @@ defmodule Tinkex.Config do
           proxy_headers: [{String.t(), String.t()}],
           default_headers: map(),
           default_query: map(),
-          recovery: RecoveryPolicy.t() | nil
+          recovery: RecoveryPolicy.t() | nil,
+          otel_propagate: boolean()
         }
 
   @default_base_url "https://tinker.thinkingmachines.dev/services/tinker-prod"
@@ -224,6 +226,16 @@ defmodule Tinkex.Config do
       )
       |> normalize_recovery_policy()
 
+    otel_propagate =
+      pick(
+        [
+          opts[:otel_propagate],
+          Application.get_env(:tinkex, :otel_propagate),
+          env.otel_propagate
+        ],
+        false
+      )
+
     config = %__MODULE__{
       base_url: base_url,
       api_key: api_key,
@@ -243,7 +255,8 @@ defmodule Tinkex.Config do
       proxy_headers: proxy_headers,
       default_headers: default_headers,
       default_query: default_query,
-      recovery: recovery
+      recovery: recovery,
+      otel_propagate: otel_propagate
     }
 
     # Fail fast on malformed URLs so pool creation does not explode deeper in the stack.
@@ -257,6 +270,19 @@ defmodule Tinkex.Config do
   """
   @spec validate!(t()) :: t()
   def validate!(%__MODULE__{} = config) do
+    validate_required_fields!(config)
+    validate_types!(config)
+    validate_proxy!(config.proxy)
+    validate_proxy_headers!(config.proxy_headers)
+    validate_default_headers!(config.default_headers)
+    validate_default_query!(config.default_query)
+    validate_recovery!(config.recovery)
+
+    maybe_warn_about_base_url(config)
+    config
+  end
+
+  defp validate_required_fields!(%__MODULE__{} = config) do
     unless config.api_key do
       raise ArgumentError,
             "api_key is required. Pass :api_key option or set TINKER_API_KEY env var"
@@ -269,56 +295,77 @@ defmodule Tinkex.Config do
     unless config.base_url do
       raise ArgumentError, "base_url is required in config"
     end
+  end
 
-    unless is_atom(config.http_pool) do
-      raise ArgumentError, "http_pool must be an atom, got: #{inspect(config.http_pool)}"
+  defp validate_types!(%__MODULE__{} = config) do
+    validate_http_pool!(config.http_pool)
+    validate_http_client!(config.http_client)
+    validate_timeout!(config.timeout)
+    validate_max_retries!(config.max_retries)
+    validate_tags!(config.tags)
+    validate_feature_gates!(config.feature_gates)
+    validate_telemetry_enabled!(config.telemetry_enabled?)
+    validate_dump_headers!(config.dump_headers?)
+    validate_log_level!(config.log_level)
+  end
+
+  defp validate_http_pool!(http_pool) do
+    unless is_atom(http_pool) do
+      raise ArgumentError, "http_pool must be an atom, got: #{inspect(http_pool)}"
     end
+  end
 
-    unless valid_http_client?(config.http_client) do
+  defp validate_http_client!(http_client) do
+    unless valid_http_client?(http_client) do
       raise ArgumentError,
-            "http_client must implement Tinkex.HTTPClient callbacks, got: #{inspect(config.http_client)}"
+            "http_client must implement Tinkex.HTTPClient callbacks, got: #{inspect(http_client)}"
     end
+  end
 
-    unless is_integer(config.timeout) and config.timeout > 0 do
-      raise ArgumentError, "timeout must be a positive integer, got: #{inspect(config.timeout)}"
+  defp validate_timeout!(timeout) do
+    unless is_integer(timeout) and timeout > 0 do
+      raise ArgumentError, "timeout must be a positive integer, got: #{inspect(timeout)}"
     end
+  end
 
-    unless is_integer(config.max_retries) and config.max_retries >= 0 do
+  defp validate_max_retries!(max_retries) do
+    unless is_integer(max_retries) and max_retries >= 0 do
       raise ArgumentError,
-            "max_retries must be a non-negative integer, got: #{inspect(config.max_retries)}"
+            "max_retries must be a non-negative integer, got: #{inspect(max_retries)}"
     end
+  end
 
-    unless is_list(config.tags) do
-      raise ArgumentError, "tags must be a list of strings, got: #{inspect(config.tags)}"
+  defp validate_tags!(tags) do
+    unless is_list(tags) do
+      raise ArgumentError, "tags must be a list of strings, got: #{inspect(tags)}"
     end
+  end
 
-    unless is_list(config.feature_gates) do
+  defp validate_feature_gates!(feature_gates) do
+    unless is_list(feature_gates) do
       raise ArgumentError,
-            "feature_gates must be a list of strings, got: #{inspect(config.feature_gates)}"
+            "feature_gates must be a list of strings, got: #{inspect(feature_gates)}"
     end
+  end
 
-    unless is_boolean(config.telemetry_enabled?) do
+  defp validate_telemetry_enabled!(telemetry_enabled?) do
+    unless is_boolean(telemetry_enabled?) do
       raise ArgumentError,
-            "telemetry_enabled? must be boolean, got: #{inspect(config.telemetry_enabled?)}"
+            "telemetry_enabled? must be boolean, got: #{inspect(telemetry_enabled?)}"
     end
+  end
 
-    unless is_boolean(config.dump_headers?) do
+  defp validate_dump_headers!(dump_headers?) do
+    unless is_boolean(dump_headers?) do
       raise ArgumentError,
-            "dump_headers? must be boolean, got: #{inspect(config.dump_headers?)}"
+            "dump_headers? must be boolean, got: #{inspect(dump_headers?)}"
     end
+  end
 
-    unless config.log_level in [nil, :debug, :info, :warn, :error] do
+  defp validate_log_level!(log_level) do
+    unless log_level in [nil, :debug, :info, :warn, :error] do
       raise ArgumentError, "log_level must be one of :debug | :info | :warn | :error | nil"
     end
-
-    validate_proxy!(config.proxy)
-    validate_proxy_headers!(config.proxy_headers)
-    validate_default_headers!(config.default_headers)
-    validate_default_query!(config.default_query)
-    validate_recovery!(config.recovery)
-
-    maybe_warn_about_base_url(config)
-    config
   end
 
   defp maybe_warn_about_base_url(%__MODULE__{} = config) do
@@ -550,7 +597,7 @@ defmodule Tinkex.Config do
 
   defp validate_proxy!({scheme, host, port, opts})
        when scheme in [:http, :https] and is_binary(host) and is_integer(port) and
-              port in 1..65535 and is_list(opts) do
+              port in 1..65_535 and is_list(opts) do
     :ok
   end
 

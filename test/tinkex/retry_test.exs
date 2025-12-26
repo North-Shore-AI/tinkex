@@ -1,9 +1,16 @@
 defmodule Tinkex.RetryTest do
   use ExUnit.Case, async: true
 
+  alias Supertester.TelemetryHelpers
   alias Tinkex.Error
   alias Tinkex.Retry
   alias Tinkex.RetryHandler
+  require TelemetryHelpers
+
+  setup do
+    {:ok, _} = TelemetryHelpers.setup_telemetry_isolation()
+    :ok
+  end
 
   describe "with_retry/3" do
     test "returns success on first try" do
@@ -69,24 +76,13 @@ defmodule Tinkex.RetryTest do
     end
 
     test "emits telemetry events" do
-      parent = self()
-      handler_id = "test-retry-telemetry-#{System.unique_integer([:positive])}"
-
-      events = [
-        [:tinkex, :retry, :attempt, :start],
-        [:tinkex, :retry, :attempt, :stop],
-        [:tinkex, :retry, :attempt, :retry],
-        [:tinkex, :retry, :attempt, :failed]
-      ]
-
-      :telemetry.attach_many(
-        handler_id,
-        events,
-        fn event, measurements, metadata, _ ->
-          send(parent, {:telemetry, event, measurements, metadata})
-        end,
-        nil
-      )
+      {:ok, _} =
+        TelemetryHelpers.attach_isolated([
+          [:tinkex, :retry, :attempt, :start],
+          [:tinkex, :retry, :attempt, :stop],
+          [:tinkex, :retry, :attempt, :retry],
+          [:tinkex, :retry, :attempt, :failed]
+        ])
 
       counter = :counters.new(1, [])
 
@@ -103,18 +99,16 @@ defmodule Tinkex.RetryTest do
 
       opts = [
         handler: RetryHandler.new(max_retries: 5, base_delay_ms: 1, jitter_pct: 0.0),
-        telemetry_metadata: %{test: true}
+        telemetry_metadata: TelemetryHelpers.current_test_metadata(%{test: true})
       ]
 
       result = Retry.with_retry(fun, opts)
       assert result == {:ok, "success"}
 
-      :telemetry.detach(handler_id)
-
-      assert_receive {:telemetry, [:tinkex, :retry, :attempt, :start], _, _}
-      assert_receive {:telemetry, [:tinkex, :retry, :attempt, :retry], _, _}
-      assert_receive {:telemetry, [:tinkex, :retry, :attempt, :start], _, _}
-      assert_receive {:telemetry, [:tinkex, :retry, :attempt, :stop], _, _}
+      TelemetryHelpers.assert_telemetry([:tinkex, :retry, :attempt, :start])
+      TelemetryHelpers.assert_telemetry([:tinkex, :retry, :attempt, :retry])
+      TelemetryHelpers.assert_telemetry([:tinkex, :retry, :attempt, :start])
+      TelemetryHelpers.assert_telemetry([:tinkex, :retry, :attempt, :stop])
     end
 
     test "handles exceptions" do

@@ -238,10 +238,8 @@ defmodule Examples.RecoverySimulated do
       :telemetry.attach_many(
         id,
         events,
-        fn event, measurements, metadata, _ ->
-          send(parent, {:recovery_telemetry, event, measurements, metadata})
-        end,
-        nil
+        &__MODULE__.handle_recovery_event/4,
+        parent
       )
 
     id
@@ -250,6 +248,11 @@ defmodule Examples.RecoverySimulated do
   defp await_completion(timeout_ms \\ 3_000) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
     wait_until(deadline)
+  end
+
+  @doc false
+  def handle_recovery_event(event, measurements, metadata, parent) do
+    send(parent, {:recovery_telemetry, event, measurements, metadata})
   end
 
   defp wait_until(deadline) do

@@ -9,8 +9,8 @@ defmodule Tinkex.Types.Telemetry.TelemetryEvent do
   alias Tinkex.Types.Telemetry.{
     EventType,
     GenericEvent,
-    SessionStartEvent,
     SessionEndEvent,
+    SessionStartEvent,
     UnhandledExceptionEvent
   }
 

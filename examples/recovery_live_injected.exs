@@ -13,7 +13,7 @@ defmodule Tinkex.Examples.RecoveryLiveInjected do
 
   @default_base_url "https://tinker.thinkingmachines.dev/services/tinker-prod"
   @default_base_model "meta-llama/Llama-3.1-8B"
-  @await_timeout 90_000
+  @await_timeout :infinity
 
   alias Tinkex.Error
   alias Tinkex.ServiceClient
@@ -186,7 +186,23 @@ defmodule Tinkex.Examples.RecoveryLiveInjected do
     end
   end
 
-  defp await_recovery(timeout_ms \\ 90_000) do
+  defp await_recovery(timeout_ms \\ :infinity)
+
+  defp await_recovery(:infinity) do
+    receive do
+      {:recovered, old_pid, new_pid, checkpoint} ->
+        IO.puts(
+          "Recovery callback: old=#{inspect(old_pid)} new=#{inspect(new_pid)} cp=#{checkpoint.tinker_path}"
+        )
+
+        {:ok, new_pid, checkpoint}
+
+      {:recovery_failed, run_id, reason} ->
+        {:error, {:recovery_failed, run_id, reason}}
+    end
+  end
+
+  defp await_recovery(timeout_ms) when is_integer(timeout_ms) and timeout_ms > 0 do
     receive do
       {:recovered, old_pid, new_pid, checkpoint} ->
         IO.puts(

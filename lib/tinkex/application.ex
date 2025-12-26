@@ -118,11 +118,9 @@ defmodule Tinkex.Application do
   end
 
   defp create_table(name, options) do
-    try do
-      :ets.new(name, options)
-    rescue
-      ArgumentError -> name
-    end
+    :ets.new(name, options)
+  rescue
+    ArgumentError -> name
   end
 
   defp base_children(heartbeat_interval_ms, heartbeat_warning_after_ms) do

@@ -2,10 +2,10 @@ defmodule Tinkex.Types.FutureRetrieveResponseTest do
   use Supertester.ExUnitFoundation, isolation: :full_isolation
 
   alias Tinkex.Types.{
-    FutureRetrieveResponse,
-    FuturePendingResponse,
     FutureCompletedResponse,
     FutureFailedResponse,
+    FuturePendingResponse,
+    FutureRetrieveResponse,
     TryAgainResponse
   }
 

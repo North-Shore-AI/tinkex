@@ -4,6 +4,23 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT_DIR"
 
+timestamp() {
+  date +"%Y-%m-%d %H:%M:%S %Z"
+}
+
+format_duration() {
+  local total_seconds=$1
+  local hours=$((total_seconds / 3600))
+  local minutes=$(((total_seconds % 3600) / 60))
+  local seconds=$((total_seconds % 60))
+
+  if [[ $hours -gt 0 ]]; then
+    printf '%02d:%02d:%02d' "$hours" "$minutes" "$seconds"
+  else
+    printf '%02d:%02d' "$minutes" "$seconds"
+  fi
+}
+
 EXAMPLES=(
   "sampling_basic.exs"
   "training_loop.exs"
@@ -50,6 +67,20 @@ for example in "${EXAMPLES[@]}"; do
     continue
   fi
 
-  printf '\n==> Running %s\n' "$script_path"
-  mix run "$script_path"
+  start_epoch=$(date +%s)
+  printf '\n==> Running %s [%s]\n' "$script_path" "$(timestamp)"
+  if mix run "$script_path"; then
+    status=0
+  else
+    status=$?
+  fi
+  end_epoch=$(date +%s)
+  duration=$(format_duration $((end_epoch - start_epoch)))
+
+  if [[ $status -eq 0 ]]; then
+    printf '==> Finished %s [%s | %s]\n' "$script_path" "$(timestamp)" "$duration"
+  else
+    printf '==> Failed %s [%s | %s]\n' "$script_path" "$(timestamp)" "$duration" >&2
+    exit "$status"
+  fi
 done

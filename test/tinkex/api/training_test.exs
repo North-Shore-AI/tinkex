@@ -1,9 +1,8 @@
 defmodule Tinkex.API.TrainingTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
-  alias Tinkex.Types.ForwardBackwardOutput
-  alias Tinkex.Types.OptimStepResponse
   alias Tinkex.API.Training
+  alias Tinkex.Types.{ForwardBackwardOutput, OptimStepResponse}
 
   setup :setup_http_client
 
@@ -44,7 +43,7 @@ defmodule Tinkex.API.TrainingTest do
     end
 
     test "uses training pool", %{bypass: bypass, config: config} do
-      attach_telemetry([[:tinkex, :http, :request, :start]])
+      {:ok, _} = TelemetryHelpers.attach_isolated([:tinkex, :http, :request, :start])
 
       Bypass.expect(bypass, fn conn ->
         {:ok, _body, conn} = Plug.Conn.read_body(conn)
@@ -74,8 +73,10 @@ defmodule Tinkex.API.TrainingTest do
 
       {:ok, _} = Training.forward_backward(%{model_id: "model-123"}, config: config)
 
-      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
-                      %{pool_type: :training, path: "/api/v1/forward_backward"}}
+      TelemetryHelpers.assert_telemetry(
+        [:tinkex, :http, :request, :start],
+        %{pool_type: :training, path: "/api/v1/forward_backward"}
+      )
     end
   end
 

@@ -1,5 +1,5 @@
 defmodule Tinkex.API.SamplingTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   alias Tinkex.API.Sampling
 
@@ -30,13 +30,15 @@ defmodule Tinkex.API.SamplingTest do
     end
 
     test "uses sampling pool", %{bypass: bypass, config: config} do
-      attach_telemetry([[:tinkex, :http, :request, :start]])
+      {:ok, _} = TelemetryHelpers.attach_isolated([:tinkex, :http, :request, :start])
       stub_success(bypass, %{result: "ok"})
 
       {:ok, _} = Sampling.sample_async(%{session_id: "abc"}, config: config)
 
-      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
-                      %{pool_type: :sampling, path: "/api/v1/asample"}}
+      TelemetryHelpers.assert_telemetry(
+        [:tinkex, :http, :request, :start],
+        %{pool_type: :sampling, path: "/api/v1/asample"}
+      )
     end
 
     test "drops nil values from request body", %{bypass: bypass, config: config} do

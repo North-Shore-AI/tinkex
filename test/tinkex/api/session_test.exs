@@ -1,9 +1,9 @@
 defmodule Tinkex.API.SessionTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   alias Tinkex.API.Session
-  alias Tinkex.Types.CreateSessionResponse
   alias Tinkex.Config
+  alias Tinkex.Types.CreateSessionResponse
 
   defmodule StubHTTPClient do
     @behaviour Tinkex.HTTPClient
@@ -50,7 +50,7 @@ defmodule Tinkex.API.SessionTest do
 
   describe "heartbeat/2" do
     test "uses session pool and correct path", %{bypass: bypass, config: config} do
-      attach_telemetry([[:tinkex, :http, :request, :start]])
+      {:ok, _} = TelemetryHelpers.attach_isolated([:tinkex, :http, :request, :start])
 
       Bypass.expect_once(bypass, "POST", "/api/v1/session_heartbeat", fn conn ->
         conn
@@ -60,8 +60,10 @@ defmodule Tinkex.API.SessionTest do
 
       {:ok, _} = Session.heartbeat(%{session_id: "session-123"}, config: config)
 
-      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
-                      %{pool_type: :session, path: "/api/v1/session_heartbeat"}}
+      TelemetryHelpers.assert_telemetry(
+        [:tinkex, :http, :request, :start],
+        %{pool_type: :session, path: "/api/v1/session_heartbeat"}
+      )
     end
 
     test "enforces heartbeat timeout and retries", %{config: config} do

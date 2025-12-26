@@ -1,7 +1,5 @@
 defmodule Tinkex.APITest do
-  use Tinkex.HTTPCase, async: false
-  import ExUnit.CaptureLog
-  require Logger
+  use Tinkex.HTTPCase, async: true
 
   alias Tinkex.API
   alias Tinkex.API.Sampling
@@ -214,36 +212,45 @@ defmodule Tinkex.APITest do
 
   describe "telemetry events" do
     test "emits start and stop events", %{bypass: bypass, config: config} do
-      attach_telemetry([
-        [:tinkex, :http, :request, :start],
-        [:tinkex, :http, :request, :stop]
-      ])
+      {:ok, _} =
+        TelemetryHelpers.attach_isolated([
+          [:tinkex, :http, :request, :start],
+          [:tinkex, :http, :request, :stop]
+        ])
 
       stub_success(bypass, %{result: "ok"})
 
       API.post("/test", %{}, config: config)
 
-      assert_receive {:telemetry, [:tinkex, :http, :request, :start], %{system_time: _},
-                      %{method: :post, path: "/test"}}
+      {:telemetry, _, %{system_time: _}, _} =
+        TelemetryHelpers.assert_telemetry(
+          [:tinkex, :http, :request, :start],
+          %{method: :post, path: "/test"}
+        )
 
-      assert_receive {:telemetry, [:tinkex, :http, :request, :stop], %{duration: duration},
-                      %{result: :ok, path: "/test"}}
+      {:telemetry, _, %{duration: duration}, _} =
+        TelemetryHelpers.assert_telemetry(
+          [:tinkex, :http, :request, :stop],
+          %{result: :ok, path: "/test"}
+        )
 
       assert duration > 0
     end
 
     test "includes pool_type in metadata", %{bypass: bypass, config: config} do
-      attach_telemetry([[:tinkex, :http, :request, :start]])
+      {:ok, _} = TelemetryHelpers.attach_isolated([:tinkex, :http, :request, :start])
       stub_success(bypass, %{result: "ok"})
 
       API.post("/test", %{}, config: config, pool_type: :training)
 
-      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
-                      %{pool_type: :training, path: "/test"}}
+      TelemetryHelpers.assert_telemetry(
+        [:tinkex, :http, :request, :start],
+        %{pool_type: :training, path: "/test"}
+      )
     end
 
     test "different endpoints use pool metadata", %{bypass: bypass, config: config} do
-      attach_telemetry([[:tinkex, :http, :request, :start]])
+      {:ok, _} = TelemetryHelpers.attach_isolated([:tinkex, :http, :request, :start])
 
       Bypass.expect_once(bypass, "POST", "/api/v1/forward_backward", fn conn ->
         conn
@@ -253,8 +260,10 @@ defmodule Tinkex.APITest do
 
       Training.forward_backward(%{}, config: config)
 
-      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
-                      %{pool_type: :training, path: "/api/v1/forward_backward"}}
+      TelemetryHelpers.assert_telemetry(
+        [:tinkex, :http, :request, :start],
+        %{pool_type: :training, path: "/api/v1/forward_backward"}
+      )
 
       Bypass.expect_once(bypass, "POST", "/api/v1/asample", fn conn ->
         conn
@@ -264,8 +273,10 @@ defmodule Tinkex.APITest do
 
       Sampling.sample_async(%{}, config: config)
 
-      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
-                      %{pool_type: :sampling, path: "/api/v1/asample"}}
+      TelemetryHelpers.assert_telemetry(
+        [:tinkex, :http, :request, :start],
+        %{pool_type: :sampling, path: "/api/v1/asample"}
+      )
 
       Bypass.expect_once(bypass, "POST", "/api/v1/create_session", fn conn ->
         conn
@@ -275,14 +286,16 @@ defmodule Tinkex.APITest do
 
       Session.create(%{}, config: config)
 
-      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
-                      %{pool_type: :session, path: "/api/v1/create_session"}}
+      TelemetryHelpers.assert_telemetry(
+        [:tinkex, :http, :request, :start],
+        %{pool_type: :session, path: "/api/v1/create_session"}
+      )
     end
   end
 
   describe "concurrent requests" do
     test "handles 20 concurrent requests via harness", %{bypass: bypass, config: config} do
-      {:ok, counter} = Agent.start_link(fn -> 0 end)
+      counter = start_supervised!({Agent, fn -> 0 end})
 
       Bypass.expect(bypass, fn conn ->
         Agent.update(counter, &(&1 + 1))
@@ -314,8 +327,6 @@ defmodule Tinkex.APITest do
       assert {:ok, report} = ConcurrentHarness.run(scenario)
       assert report.metrics.total_operations == 20
       assert Agent.get(counter, & &1) == 20
-
-      Agent.stop(counter)
     end
   end
 
@@ -357,9 +368,14 @@ defmodule Tinkex.APITest do
       config =
         %Config{
           config
-          | cf_access_client_secret: "super-secret",
+          | api_key: "test-api-key-12345",
+            cf_access_client_id: "cf-id",
+            cf_access_client_secret: "super-secret",
             dump_headers?: true
         }
+
+      Logger.put_module_level(Tinkex.API.Retry, :info)
+      on_exit(fn -> Logger.delete_module_level(Tinkex.API.Retry) end)
 
       Bypass.expect_once(bypass, "GET", "/dump", fn conn ->
         conn
@@ -367,19 +383,22 @@ defmodule Tinkex.APITest do
         |> Plug.Conn.resp(200, ~s({"ok":true}))
       end)
 
-      previous_level = Logger.level()
-
       log =
-        capture_log([level: :debug], fn ->
-          Logger.configure(level: :debug)
+        LoggerIsolation.capture_isolated!(:debug, fn ->
           assert {:ok, %{"ok" => true}} = API.get("/dump", config: config)
         end)
 
-      Logger.configure(level: previous_level)
+      line =
+        log
+        |> String.split("\n")
+        |> Enum.find(fn entry -> String.contains?(entry, "/dump") end)
 
-      refute log =~ "super-secret"
-      refute log =~ "cf-access-client-secret"
-      assert log =~ "[REDACTED]"
+      assert line
+      assert line =~ "[REDACTED]"
+      assert String.downcase(line) =~ "x-api-key"
+      assert String.downcase(line) =~ "cf-access-client-secret"
+      refute line =~ "super-secret"
+      refute line =~ "test-api-key-12345"
     end
   end
 

@@ -14,16 +14,16 @@ defmodule Tinkex.API do
   alias Tinkex.PoolKey
 
   alias Tinkex.API.{
+    Compression,
+    Headers,
     Request,
     ResponseHandler,
     Retry,
-    Headers,
-    URL,
-    Compression,
-    StreamResponse
+    StreamResponse,
+    URL
   }
 
-  alias Tinkex.Streaming.{SSEDecoder, ServerSentEvent}
+  alias Tinkex.Streaming.{ServerSentEvent, SSEDecoder}
 
   @telemetry_start [:tinkex, :http, :request, :start]
   @telemetry_stop [:tinkex, :http, :request, :stop]
@@ -55,6 +55,7 @@ defmodule Tinkex.API do
         pool_type: pool_type,
         base_url: config.base_url
       }
+      |> merge_config_metadata(config)
       |> merge_telemetry_metadata(opts)
 
     with {:ok, prepared_headers, prepared_body} <-
@@ -112,6 +113,7 @@ defmodule Tinkex.API do
         pool_type: pool_type,
         base_url: config.base_url
       }
+      |> merge_config_metadata(config)
       |> merge_telemetry_metadata(opts)
 
     request = Finch.build(:get, url, headers)
@@ -154,6 +156,7 @@ defmodule Tinkex.API do
         pool_type: pool_type,
         base_url: config.base_url
       }
+      |> merge_config_metadata(config)
       |> merge_telemetry_metadata(opts)
 
     request = Finch.build(:delete, url, headers)
@@ -306,6 +309,12 @@ defmodule Tinkex.API do
       _ -> metadata
     end
   end
+
+  defp merge_config_metadata(metadata, %Tinkex.Config{user_metadata: %{} = meta}) do
+    Map.merge(metadata, meta)
+  end
+
+  defp merge_config_metadata(metadata, _config), do: metadata
 
   # SSE event decoding helpers
   defp decode_event(%ServerSentEvent{} = event, :raw), do: event

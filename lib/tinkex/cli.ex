@@ -7,6 +7,9 @@ defmodule Tinkex.CLI do
   weights; the run command remains scaffolded for the next phase.
   """
 
+  alias Tinkex.CLI.Commands.{Checkpoint, Run, Sample, Version}
+  alias Tinkex.CLI.Parser
+
   @doc """
   Entry point invoked by the escript executable.
   """
@@ -26,7 +29,7 @@ defmodule Tinkex.CLI do
   """
   @spec run([String.t()]) :: {:ok, term()} | {:error, term()}
   def run(argv) do
-    case Tinkex.CLI.Parser.parse(argv) do
+    case Parser.parse(argv) do
       {:help, message} ->
         IO.puts(message)
         {:ok, :help}
@@ -53,30 +56,30 @@ defmodule Tinkex.CLI do
   end
 
   defp dispatch(:version, options) do
-    Tinkex.CLI.Commands.Version.run_version(options)
+    Version.run_version(options)
   end
 
   @doc false
   @spec run_sampling(map(), map()) :: {:ok, map()} | {:error, term()}
   def run_sampling(options, overrides \\ %{}) when is_map(options) and is_map(overrides) do
-    Tinkex.CLI.Commands.Sample.run_sampling(options, overrides)
+    Sample.run_sampling(options, overrides)
   end
 
   @doc false
   @spec run_checkpoint(map(), map()) :: {:ok, map()} | {:error, term()}
   def run_checkpoint(options, overrides \\ %{}) when is_map(options) and is_map(overrides) do
-    Tinkex.CLI.Commands.Checkpoint.run_checkpoint(options, overrides)
+    Checkpoint.run_checkpoint(options, overrides)
   end
 
   @doc false
   @spec run_checkpoint_management(atom(), map(), map()) :: {:ok, map()} | {:error, term()}
   def run_checkpoint_management(action, options, overrides \\ %{}) do
-    Tinkex.CLI.Commands.Checkpoint.run_checkpoint_management(action, options, overrides)
+    Checkpoint.run_checkpoint_management(action, options, overrides)
   end
 
   @doc false
   @spec run_run_management(atom(), map(), map()) :: {:ok, map()} | {:error, term()}
   def run_run_management(action, options, overrides \\ %{}) do
-    Tinkex.CLI.Commands.Run.run_run_management(action, options, overrides)
+    Run.run_run_management(action, options, overrides)
   end
 end

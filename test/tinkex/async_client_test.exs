@@ -1,7 +1,7 @@
 defmodule Tinkex.AsyncClientTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
-  alias Tinkex.{ServiceClient, SamplingClient, TrainingClient}
+  alias Tinkex.{SamplingClient, ServiceClient, TrainingClient}
 
   setup :setup_http_client
 

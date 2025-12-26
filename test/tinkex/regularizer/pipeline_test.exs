@@ -2,7 +2,7 @@ defmodule Tinkex.Regularizer.PipelineTest do
   use ExUnit.Case, async: true
 
   alias Tinkex.Regularizer.Pipeline
-  alias Tinkex.Types.{RegularizerSpec, CustomLossOutput}
+  alias Tinkex.Types.{CustomLossOutput, RegularizerSpec}
 
   describe "compute/4 with base loss only" do
     test "computes base loss when no regularizers" do

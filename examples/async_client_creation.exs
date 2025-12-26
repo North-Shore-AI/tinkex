@@ -121,7 +121,7 @@ defmodule Tinkex.Examples.AsyncClientCreation do
 
     IO.puts("Task created, awaiting result...")
 
-    case Task.await(task, 60_000) do
+    case Task.await(task, :infinity) do
       {:ok, pid} ->
         IO.puts("✓ LoRA training client created: #{inspect(pid)}")
 
@@ -129,7 +129,7 @@ defmodule Tinkex.Examples.AsyncClientCreation do
         IO.puts("\nSaving training state to create checkpoint...")
         {:ok, save_task} = Tinkex.TrainingClient.save_state(pid, "async_demo_checkpoint")
 
-        case Task.await(save_task, 60_000) do
+        case Task.await(save_task, :infinity) do
           {:ok, save_resp} ->
             checkpoint_path = save_resp.path || save_resp[:path] || save_resp["path"]
             IO.puts("✓ Saved state to: #{checkpoint_path}")
@@ -141,7 +141,7 @@ defmodule Tinkex.Examples.AsyncClientCreation do
             restore_task =
               ServiceClient.create_training_client_from_state_async(service_pid, checkpoint_path)
 
-            case Task.await(restore_task, 120_000) do
+            case Task.await(restore_task, :infinity) do
               {:ok, restored_pid} ->
                 IO.puts("✓ Training client restored: #{inspect(restored_pid)}")
                 GenServer.stop(restored_pid)

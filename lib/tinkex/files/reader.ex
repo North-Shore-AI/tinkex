@@ -8,11 +8,9 @@ defmodule Tinkex.Files.Reader do
   @spec read_file_content(Types.file_content()) ::
           {:ok, binary()} | {:error, File.posix() | :invalid_file_content}
   def read_file_content(%File.Stream{} = stream) do
-    try do
-      {:ok, stream |> Enum.to_list() |> IO.iodata_to_binary()}
-    rescue
-      _ -> {:error, :invalid_file_content}
-    end
+    {:ok, stream |> Enum.to_list() |> IO.iodata_to_binary()}
+  rescue
+    _ -> {:error, :invalid_file_content}
   end
 
   def read_file_content(content) when is_binary(content) do
@@ -24,11 +22,9 @@ defmodule Tinkex.Files.Reader do
   end
 
   def read_file_content(content) when is_list(content) do
-    try do
-      {:ok, IO.iodata_to_binary(content)}
-    rescue
-      _ -> {:error, :invalid_file_content}
-    end
+    {:ok, IO.iodata_to_binary(content)}
+  rescue
+    _ -> {:error, :invalid_file_content}
   end
 
   def read_file_content(_other), do: {:error, :invalid_file_content}

@@ -1,5 +1,5 @@
 defmodule Tinkex.API.MultipartTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   alias Tinkex.API
 

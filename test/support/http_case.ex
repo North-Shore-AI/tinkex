@@ -7,12 +7,21 @@ defmodule Tinkex.HTTPCase do
 
   use ExUnit.CaseTemplate
 
+  alias Supertester.TelemetryHelpers
+
   using do
     quote do
-      use Supertester.ExUnitFoundation, isolation: :full_isolation
+      use Supertester.ExUnitFoundation,
+        isolation: :full_isolation,
+        telemetry_isolation: true,
+        logger_isolation: true
+
       import Supertester.Assertions
       import Supertester.MessageHarness
       alias Supertester.ConcurrentHarness
+      alias Supertester.LoggerIsolation
+      alias Supertester.TelemetryHelpers
+      require TelemetryHelpers
       import Tinkex.HTTPCase
     end
   end
@@ -35,6 +44,7 @@ defmodule Tinkex.HTTPCase do
         timeout: 1_000,
         max_retries: 2
       )
+      |> maybe_put_telemetry_test_id()
 
     ExUnit.Callbacks.on_exit(fn ->
       try do
@@ -94,6 +104,15 @@ defmodule Tinkex.HTTPCase do
   end
 
   @doc """
+  Respond with a JSON body.
+  """
+  def resp(conn, status, body) do
+    conn
+    |> Plug.Conn.put_resp_content_type("application/json")
+    |> Plug.Conn.resp(status, Jason.encode!(body))
+  end
+
+  @doc """
   Stub multiple responses in sequence.
 
   Returns the counter agent pid. Clean up is registered automatically via on_exit.
@@ -134,7 +153,13 @@ defmodule Tinkex.HTTPCase do
 
   Returns the handler_id. Cleanup is registered automatically via on_exit.
   """
+  @deprecated "Use Supertester.TelemetryHelpers.attach_isolated/1 instead."
   def attach_telemetry(events) do
+    IO.warn(
+      "attach_telemetry/1 is deprecated. Use Supertester.TelemetryHelpers.attach_isolated/1 instead.",
+      Macro.Env.stacktrace(__ENV__)
+    )
+
     handler_id = "test-handler-#{:erlang.unique_integer()}"
     parent = self()
 
@@ -154,5 +179,21 @@ defmodule Tinkex.HTTPCase do
 
   def handle_event(event, measurements, metadata, parent) do
     send(parent, {:telemetry, event, measurements, metadata})
+  end
+
+  defp maybe_put_telemetry_test_id(%Tinkex.Config{} = config) do
+    case TelemetryHelpers.get_test_id() do
+      nil ->
+        config
+
+      test_id ->
+        user_metadata =
+          case config.user_metadata do
+            %{} = metadata -> metadata
+            _ -> %{}
+          end
+
+        %{config | user_metadata: Map.put(user_metadata, :supertester_test_id, test_id)}
+    end
   end
 end

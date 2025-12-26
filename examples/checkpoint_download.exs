@@ -353,7 +353,7 @@ defmodule Tinkex.Examples.CheckpointDownloadExample do
 
   defp await_task(task) do
     try do
-      Task.await(task, 60_000)
+      Task.await(task, :infinity)
     catch
       :exit, reason -> {:error, reason}
     end

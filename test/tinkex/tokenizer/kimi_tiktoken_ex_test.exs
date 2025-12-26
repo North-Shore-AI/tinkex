@@ -1,18 +1,25 @@
 defmodule Tinkex.Tokenizer.KimiTikTokenExTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use Supertester.ExUnitFoundation,
+    isolation: :full_isolation,
+    ets_isolation: [:tinkex_tokenizers]
 
+  alias Supertester.ETSIsolation
   alias TiktokenEx.Encoding, as: TikEncoding
   alias Tinkex.Tokenizer
 
   @kimi_tokenizer "moonshotai/Kimi-K2-Thinking"
 
-  setup do
+  setup %{isolation_context: ctx} do
     {:ok, _} = Application.ensure_all_started(:tinkex)
-    :ets.delete_all_objects(:tinkex_tokenizers)
-    :ok
+    tokenizer_cache = Map.fetch!(ctx.isolated_ets_tables, :tinkex_tokenizers)
+    {:ok, _} = ETSIsolation.inject_table(Tokenizer, :cache_table, tokenizer_cache, create: false)
+
+    {:ok, tokenizer_cache: tokenizer_cache}
   end
 
-  test "uses tiktoken_ex for Kimi encode/decode (no network)" do
+  test "uses tiktoken_ex for Kimi encode/decode (no network)", %{
+    tokenizer_cache: tokenizer_cache
+  } do
     with_tmp_dir(fn dir ->
       model_path = Path.join(dir, "tiktoken.model")
       config_path = Path.join(dir, "tokenizer_config.json")
@@ -27,11 +34,9 @@ defmodule Tinkex.Tokenizer.KimiTikTokenExTest do
       ]
 
       model_contents =
-        ranks
-        |> Enum.map(fn {token, rank} ->
+        Enum.map_join(ranks, "\n", fn {token, rank} ->
           Base.encode64(token) <> " " <> Integer.to_string(rank)
         end)
-        |> Enum.join("\n")
         |> Kernel.<>("\n")
 
       File.write!(model_path, model_contents)
@@ -55,7 +60,7 @@ defmodule Tinkex.Tokenizer.KimiTikTokenExTest do
       assert {:ok, "<|bos|>Say"} = Tokenizer.decode([6, 0, 1, 2], @kimi_tokenizer, opts)
 
       assert [{@kimi_tokenizer, %TikEncoding{}}] =
-               :ets.lookup(:tinkex_tokenizers, @kimi_tokenizer)
+               :ets.lookup(tokenizer_cache, @kimi_tokenizer)
 
       {:ok, _} = Tokenizer.get_or_load_tokenizer(@kimi_tokenizer, opts)
     end)

@@ -45,8 +45,8 @@ defmodule Tinkex.SamplingClient do
     SamplingRegistry
   }
 
-  alias Tinkex.Telemetry.Reporter
   alias Tinkex.Telemetry.Capture, as: TelemetryCapture
+  alias Tinkex.Telemetry.Reporter
   require TelemetryCapture
 
   alias Tinkex.Types.{
@@ -108,6 +108,31 @@ defmodule Tinkex.SamplingClient do
      TelemetryCapture.async_capture reporter: reporter, fatal?: true do
        do_sample(client, prompt, sampling_params, opts)
      end}
+  end
+
+  @doc """
+  Stream a sampling request, yielding tokens incrementally via SSE.
+
+  Returns `{:ok, stream}` where stream is an `Enumerable.t()` of
+  `Tinkex.Types.SampleStreamChunk` structs, or `{:error, %Tinkex.Error{}}`.
+
+  ## Examples
+
+      {:ok, stream} = SamplingClient.sample_stream(client, prompt, params)
+      Enum.each(stream, fn chunk ->
+        IO.write(chunk.token)
+      end)
+  """
+  @spec sample_stream(t(), map(), map(), keyword()) ::
+          {:ok, Enumerable.t()} | {:error, Error.t()}
+  def sample_stream(client, prompt, sampling_params, opts \\ []) do
+    case :ets.lookup(:tinkex_sampling_clients, {:config, client}) do
+      [{{:config, ^client}, entry}] ->
+        do_sample_stream(entry, prompt, sampling_params, opts)
+
+      [] ->
+        {:error, Error.new(:validation, "SamplingClient not initialized")}
+    end
   end
 
   @doc """
@@ -245,11 +270,9 @@ defmodule Tinkex.SamplingClient do
   end
 
   defp telemetry_reporter_for(client) do
-    try do
-      get_telemetry(client)
-    catch
-      _, _ -> nil
-    end
+    get_telemetry(client)
+  catch
+    _, _ -> nil
   end
 
   @impl true
@@ -306,20 +329,29 @@ defmodule Tinkex.SamplingClient do
   defp do_sample(client, prompt, sampling_params, opts) do
     case :ets.lookup(:tinkex_sampling_clients, {:config, client}) do
       [{{:config, ^client}, entry}] ->
-        estimated_bytes = ByteEstimator.estimate_model_input_bytes(prompt)
-
-        dispatch_fun = fn ->
-          if entry.retry_config.enable_retry_logic do
-            do_sample_with_retry(entry, prompt, sampling_params, estimated_bytes, opts)
-          else
-            do_sample_once(entry, prompt, sampling_params, estimated_bytes, opts)
-          end
-        end
-
-        SamplingDispatch.with_rate_limit(entry.dispatch, estimated_bytes, dispatch_fun)
+        execute_sample(entry, prompt, sampling_params, opts)
 
       [] ->
         {:error, Error.new(:validation, "SamplingClient not initialized")}
+    end
+  end
+
+  defp execute_sample(entry, prompt, sampling_params, opts) do
+    estimated_bytes = ByteEstimator.estimate_model_input_bytes(prompt)
+
+    dispatch_fun =
+      build_sample_dispatch_fun(entry, prompt, sampling_params, estimated_bytes, opts)
+
+    SamplingDispatch.with_rate_limit(entry.dispatch, estimated_bytes, dispatch_fun)
+  end
+
+  defp build_sample_dispatch_fun(entry, prompt, sampling_params, estimated_bytes, opts) do
+    fn ->
+      if entry.retry_config.enable_retry_logic do
+        do_sample_with_retry(entry, prompt, sampling_params, estimated_bytes, opts)
+      else
+        do_sample_once(entry, prompt, sampling_params, estimated_bytes, opts)
+      end
     end
   end
 
@@ -420,17 +452,19 @@ defmodule Tinkex.SamplingClient do
     # Users can override with their own observer via opts[:queue_state_observer]
     observer = Keyword.get(opts, :queue_state_observer, __MODULE__)
 
-    poll_task =
-      Future.poll(future,
+    poll_opts =
+      [
         config: entry.config,
         timeout: Keyword.get(opts, :timeout, :infinity),
-        http_timeout: Keyword.get(opts, :http_timeout, entry.config.timeout),
         telemetry_metadata: merge_metadata(entry.telemetry_metadata, opts[:telemetry_metadata]),
         queue_state_observer: observer,
         sleep_fun: opts[:sleep_fun],
         tinker_request_type: "Sample",
         tinker_request_iteration: seq_id
-      )
+      ]
+      |> maybe_put_http_timeout(opts[:http_timeout])
+
+    poll_task = Future.poll(future, poll_opts)
 
     case Future.await(poll_task, Keyword.get(opts, :await_timeout, :infinity)) do
       {:ok, result} -> {:ok, SampleResponse.from_json(result)}
@@ -446,6 +480,12 @@ defmodule Tinkex.SamplingClient do
     |> Map.new()
     |> Map.merge(Map.new(override))
   end
+
+  defp maybe_put_http_timeout(opts, timeout) when is_integer(timeout) and timeout > 0 do
+    Keyword.put(opts, :http_timeout, timeout)
+  end
+
+  defp maybe_put_http_timeout(opts, _timeout), do: opts
 
   defp normalize_dispatch_limit(limit) when is_integer(limit) and limit > 0, do: limit
   defp normalize_dispatch_limit(_), do: @default_dispatch_concurrency
@@ -549,4 +589,28 @@ defmodule Tinkex.SamplingClient do
   end
 
   defp maybe_log_queue_state_from_error(_entry, _), do: :ok
+
+  defp do_sample_stream(entry, prompt, sampling_params, opts) do
+    seq_id = next_seq_id(entry.request_id_counter)
+
+    request = %{
+      sampling_session_id: entry.sampling_session_id,
+      seq_id: seq_id,
+      prompt: prompt,
+      sampling_params: sampling_params,
+      num_samples: Keyword.get(opts, :num_samples, 1)
+    }
+
+    api_opts =
+      opts
+      |> Keyword.put(:config, entry.config)
+      |> Keyword.put(:tinker_request_type, "StreamSample")
+      |> Keyword.put(:tinker_request_iteration, seq_id)
+      |> Keyword.put(
+        :telemetry_metadata,
+        merge_metadata(entry.telemetry_metadata, opts[:telemetry_metadata])
+      )
+
+    Sampling.sample_stream(request, api_opts)
+  end
 end

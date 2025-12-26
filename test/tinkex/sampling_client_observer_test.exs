@@ -1,5 +1,5 @@
 defmodule Tinkex.SamplingClientObserverTest do
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
 
@@ -9,6 +9,7 @@ defmodule Tinkex.SamplingClientObserverTest do
     test "SamplingClient declares the behaviour" do
       # Check that the module has @behaviour Tinkex.QueueStateObserver
       # by verifying the callback is implemented
+      assert Code.ensure_loaded?(SamplingClient)
       assert function_exported?(SamplingClient, :on_queue_state_change, 2)
       assert function_exported?(SamplingClient, :on_queue_state_change, 1)
     end
@@ -67,7 +68,7 @@ defmodule Tinkex.SamplingClientObserverTest do
           SamplingClient.on_queue_state_change(:active, %{sampling_session_id: session_id})
         end)
 
-      assert log == ""
+      refute log =~ session_id
     end
 
     test "respects 60-second debounce interval", %{
@@ -92,7 +93,7 @@ defmodule Tinkex.SamplingClientObserverTest do
           })
         end)
 
-      assert log2 == ""
+      refute log2 =~ session_id
 
       # Simulate time passing by clearing the debounce state
       :persistent_term.erase(debounce_key)

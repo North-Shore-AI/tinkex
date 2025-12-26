@@ -3,14 +3,14 @@ defmodule Tinkex.Types.TelemetryTypesTest do
 
   alias Tinkex.Types.Telemetry.{
     EventType,
-    Severity,
     GenericEvent,
-    SessionStartEvent,
     SessionEndEvent,
-    UnhandledExceptionEvent,
-    TelemetryEvent,
+    SessionStartEvent,
+    Severity,
     TelemetryBatch,
-    TelemetrySendRequest
+    TelemetryEvent,
+    TelemetrySendRequest,
+    UnhandledExceptionEvent
   }
 
   describe "EventType" do

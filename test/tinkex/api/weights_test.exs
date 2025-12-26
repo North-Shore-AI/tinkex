@@ -1,5 +1,5 @@
 defmodule Tinkex.API.WeightsTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   alias Tinkex.API.Weights
 
@@ -33,7 +33,7 @@ defmodule Tinkex.API.WeightsTest do
 
   describe "save_weights_for_sampler/2" do
     test "uses training pool", %{bypass: bypass, config: config} do
-      attach_telemetry([[:tinkex, :http, :request, :start]])
+      {:ok, _} = TelemetryHelpers.attach_isolated([:tinkex, :http, :request, :start])
 
       Bypass.expect_once(bypass, "POST", "/api/v1/save_weights_for_sampler", fn conn ->
         conn
@@ -43,8 +43,10 @@ defmodule Tinkex.API.WeightsTest do
 
       {:ok, _} = Weights.save_weights_for_sampler(%{model_id: "m"}, config: config)
 
-      assert_receive {:telemetry, [:tinkex, :http, :request, :start], _,
-                      %{pool_type: :training, path: "/api/v1/save_weights_for_sampler"}}
+      TelemetryHelpers.assert_telemetry(
+        [:tinkex, :http, :request, :start],
+        %{pool_type: :training, path: "/api/v1/save_weights_for_sampler"}
+      )
     end
   end
 end

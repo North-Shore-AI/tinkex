@@ -6,7 +6,7 @@ defmodule Tinkex.TrainingClientForwardTest do
   returning logprobs that can be converted to Nx tensors via TensorData.to_nx/1.
   """
 
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   alias Tinkex.TrainingClient
   alias Tinkex.Types.{Datum, ImageAssetPointerChunk, ImageChunk, ModelInput, TensorData}

@@ -9,9 +9,15 @@ defmodule Tinkex.Logging do
   def maybe_set_level(level) when level in [:debug, :info, :warn, :error] do
     normalized = normalize_level(level)
 
-    case Logger.level() do
-      ^normalized -> :ok
-      _ -> Logger.configure(level: normalized)
+    cond do
+      Process.get(:supertester_logger_isolated) ->
+        Logger.put_process_level(self(), normalized)
+
+      Logger.level() == normalized ->
+        :ok
+
+      true ->
+        Logger.configure(level: normalized)
     end
   end
 

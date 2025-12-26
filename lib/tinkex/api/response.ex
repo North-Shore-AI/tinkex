@@ -59,9 +59,7 @@ defmodule Tinkex.API.Response do
   def parse(resp, parser \\ nil)
 
   def parse(%__MODULE__{} = resp, nil) do
-    with {:ok, data} <- ensure_data(resp) do
-      {:ok, data}
-    end
+    ensure_data(resp)
   end
 
   def parse(%__MODULE__{} = resp, parser) when is_function(parser, 1) do
@@ -83,15 +81,13 @@ defmodule Tinkex.API.Response do
   end
 
   defp ensure_data(%__MODULE__{data: data, body: body}) do
-    cond do
-      not is_nil(data) ->
-        {:ok, data}
-
-      true ->
-        case Jason.decode(body) do
-          {:ok, decoded} -> {:ok, decoded}
-          {:error, reason} -> {:error, reason}
-        end
+    if data do
+      {:ok, data}
+    else
+      case Jason.decode(body) do
+        {:ok, decoded} -> {:ok, decoded}
+        {:error, reason} -> {:error, reason}
+      end
     end
   end
 

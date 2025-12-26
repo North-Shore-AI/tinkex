@@ -16,17 +16,17 @@ defmodule Tinkex.ServiceClientTest do
     def start_link(opts), do: GenServer.start_link(__MODULE__, opts)
     def init(opts), do: {:ok, Map.new(opts)}
 
-    def load_state(pid, path, _opts \\ []) do
+    def load_state(pid, path, opts \\ []) do
       state = :sys.get_state(pid)
-      if state[:test_pid], do: send(state.test_pid, {:load_state_called, path, state})
+      if state[:test_pid], do: send(state.test_pid, {:load_state_called, path, opts, state})
       {:ok, Task.async(fn -> {:ok, :loaded} end)}
     end
 
-    def load_state_with_optimizer(pid, path, _opts \\ []) do
+    def load_state_with_optimizer(pid, path, opts \\ []) do
       state = :sys.get_state(pid)
 
       if state[:test_pid],
-        do: send(state.test_pid, {:load_state_with_optimizer_called, path, state})
+        do: send(state.test_pid, {:load_state_with_optimizer_called, path, opts, state})
 
       {:ok, Task.async(fn -> {:ok, :loaded_opt} end)}
     end
@@ -275,7 +275,8 @@ defmodule Tinkex.ServiceClientTest do
                test_pid: self()
              )
 
-    assert_receive {:load_state_called, "tinker://run/weights/ckpt-1", state}, 2_000
+    assert_receive {:load_state_called, "tinker://run/weights/ckpt-1", opts, state}, 2_000
+    assert opts == []
     assert state.base_model == "meta/base"
     assert %LoraConfig{rank: 8} = state.lora_config
     assert state.model_seq_id == 0
@@ -313,9 +314,11 @@ defmodule Tinkex.ServiceClientTest do
                test_pid: self()
              )
 
-    assert_receive {:load_state_with_optimizer_called, "tinker://run/weights/ckpt-opt", state},
+    assert_receive {:load_state_with_optimizer_called, "tinker://run/weights/ckpt-opt", opts,
+                    state},
                    2_000
 
+    assert opts == []
     assert state.base_model == "meta/opt-base"
     assert %LoraConfig{rank: 4} = state.lora_config
 
@@ -353,8 +356,11 @@ defmodule Tinkex.ServiceClientTest do
 
     assert {:ok, client} = Task.await(task, 2_000)
 
-    assert_receive {:load_state_with_optimizer_called, "tinker://run/weights/ckpt-async", _state},
+    assert_receive {:load_state_with_optimizer_called, "tinker://run/weights/ckpt-async", opts,
+                    _state},
                    2_000
+
+    assert opts == []
 
     GenServer.stop(client)
     GenServer.stop(svc)

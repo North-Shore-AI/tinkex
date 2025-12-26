@@ -6,6 +6,8 @@ defmodule Tinkex.Telemetry do
 
   require Logger
 
+  alias Tinkex.Telemetry.Reporter
+
   @default_events [
     [:tinkex, :http, :request, :start],
     [:tinkex, :http, :request, :stop],
@@ -105,7 +107,7 @@ defmodule Tinkex.Telemetry do
           |> Keyword.put(:config, config)
           |> Keyword.put(:enabled, true)
 
-        case Tinkex.Telemetry.Reporter.start_link(reporter_opts) do
+        case Reporter.start_link(reporter_opts) do
           {:ok, pid} -> {:ok, pid}
           {:error, {:already_started, pid}} -> {:ok, pid}
           {:error, reason} -> {:error, reason}

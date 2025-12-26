@@ -24,12 +24,10 @@ defmodule Tinkex.Files.Types do
   def file_content?(content) when is_binary(content), do: true
 
   def file_content?(content) when is_list(content) do
-    try do
-      :erlang.iolist_size(content)
-      true
-    rescue
-      _ -> false
-    end
+    :erlang.iolist_size(content)
+    true
+  rescue
+    _ -> false
   end
 
   def file_content?(_), do: false

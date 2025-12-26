@@ -35,7 +35,9 @@ defmodule Tinkex.API.RetryConfig do
           max_delay_ms: pos_integer()
         }
 
-  defstruct max_retries: 2,
+  @default_max_retries 10
+
+  defstruct max_retries: @default_max_retries,
             initial_delay_ms: @initial_retry_delay_ms,
             max_delay_ms: @max_retry_delay_ms
 
@@ -45,7 +47,7 @@ defmodule Tinkex.API.RetryConfig do
   @spec new(keyword()) :: t()
   def new(opts \\ []) do
     %__MODULE__{
-      max_retries: Keyword.get(opts, :max_retries, 2),
+      max_retries: Keyword.get(opts, :max_retries, @default_max_retries),
       initial_delay_ms: Keyword.get(opts, :initial_delay_ms, @initial_retry_delay_ms),
       max_delay_ms: Keyword.get(opts, :max_delay_ms, @max_retry_delay_ms)
     }

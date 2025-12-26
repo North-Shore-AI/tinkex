@@ -2,7 +2,7 @@ defmodule Tinkex.Training.CustomLossTest do
   use ExUnit.Case, async: true
 
   alias Tinkex.Training.CustomLoss
-  alias Tinkex.Types.{Datum, TensorData, ForwardBackwardOutput}
+  alias Tinkex.Types.{Datum, ForwardBackwardOutput, TensorData}
 
   describe "extract_per_datum_logprobs/1" do
     test "preserves per-datum structure from forward output" do

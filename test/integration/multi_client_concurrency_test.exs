@@ -1,5 +1,5 @@
 defmodule Tinkex.Integration.MultiClientConcurrencyTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   alias Tinkex.{
     PoolKey,
@@ -35,6 +35,14 @@ defmodule Tinkex.Integration.MultiClientConcurrencyTest do
         http_pool: finch_b
       )
 
+    test_id = TelemetryHelpers.get_test_id!()
+
+    config_b =
+      Map.update(config_b, :user_metadata, %{supertester_test_id: test_id}, fn
+        %{} = metadata -> Map.put(metadata, :supertester_test_id, test_id)
+        _ -> %{supertester_test_id: test_id}
+      end)
+
     on_exit(fn ->
       Enum.each([bypass_b], fn bp ->
         try do
@@ -45,17 +53,30 @@ defmodule Tinkex.Integration.MultiClientConcurrencyTest do
       end)
     end)
 
-    {:ok, training_log} = Agent.start_link(fn -> %{fw: %{}, future: %{}} end)
-    {:ok, sample_log} = Agent.start_link(fn -> %{a: [], b: []} end)
-    {:ok, sample_counts} = Agent.start_link(fn -> %{a: 0, b: 0} end)
-    {:ok, telemetry_log} = Agent.start_link(fn -> %{counts: %{}, stop_events: 0} end)
+    training_log =
+      start_supervised!(
+        Supervisor.child_spec({Agent, fn -> %{fw: %{}, future: %{}} end},
+          id: {:training_log, self()}
+        )
+      )
 
-    on_exit(fn ->
-      for agent <- [training_log, sample_log, sample_counts, telemetry_log],
-          Process.alive?(agent) do
-        Agent.stop(agent, :normal)
-      end
-    end)
+    sample_log =
+      start_supervised!(
+        Supervisor.child_spec({Agent, fn -> %{a: [], b: []} end}, id: {:sample_log, self()})
+      )
+
+    sample_counts =
+      start_supervised!(
+        Supervisor.child_spec({Agent, fn -> %{a: 0, b: 0} end}, id: {:sample_counts, self()})
+      )
+
+    telemetry_log =
+      start_supervised!(
+        Supervisor.child_spec(
+          {Agent, fn -> %{counts: %{}, stop_events: 0} end},
+          id: {:telemetry_log, self()}
+        )
+      )
 
     increment_call = fn agent, bucket, id ->
       Agent.get_and_update(agent, fn state ->
@@ -87,7 +108,7 @@ defmodule Tinkex.Integration.MultiClientConcurrencyTest do
         telemetry_handler,
         [:tinkex, :http, :request, :stop],
         fn _event, measurements, metadata, _ ->
-          if Process.alive?(telemetry_log) do
+          if Map.get(metadata, :supertester_test_id) == test_id and Process.alive?(telemetry_log) do
             duration_ms = System.convert_time_unit(measurements.duration, :native, :millisecond)
 
             Agent.update(telemetry_log, fn %{counts: counts, stop_events: stop} ->

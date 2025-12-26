@@ -34,17 +34,23 @@ defmodule Tinkex.Types.Checkpoint do
   """
   @spec from_map(map()) :: t()
   def from_map(map) do
+    tinker_path = get_field(map, :tinker_path)
+
     %__MODULE__{
-      checkpoint_id: map["checkpoint_id"] || map[:checkpoint_id],
-      checkpoint_type: map["checkpoint_type"] || map[:checkpoint_type],
-      tinker_path: map["tinker_path"] || map[:tinker_path],
-      training_run_id:
-        map["training_run_id"] || map[:training_run_id] ||
-          training_run_from_path(map["tinker_path"] || map[:tinker_path]),
-      size_bytes: map["size_bytes"] || map[:size_bytes],
-      public: map["public"] || map[:public] || false,
-      time: parse_time(map["time"] || map[:time])
+      checkpoint_id: get_field(map, :checkpoint_id),
+      checkpoint_type: get_field(map, :checkpoint_type),
+      tinker_path: tinker_path,
+      training_run_id: get_field(map, :training_run_id) || training_run_from_path(tinker_path),
+      size_bytes: get_field(map, :size_bytes),
+      public: get_field(map, :public) || false,
+      time: parse_time(get_field(map, :time))
     }
+  end
+
+  defp get_field(map, key) do
+    atom_key = key
+    string_key = Atom.to_string(key)
+    map[string_key] || map[atom_key]
   end
 
   defp parse_time(nil), do: nil

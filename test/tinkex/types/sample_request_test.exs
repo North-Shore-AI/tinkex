@@ -1,7 +1,7 @@
 defmodule Tinkex.Types.SampleRequestTest do
   use Supertester.ExUnitFoundation, isolation: :full_isolation
 
-  alias Tinkex.Types.{SampleRequest, ModelInput, SamplingParams}
+  alias Tinkex.Types.{ModelInput, SampleRequest, SamplingParams}
 
   describe "JSON encoding" do
     test "omits prompt_logprobs when nil" do

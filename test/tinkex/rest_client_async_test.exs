@@ -1,13 +1,13 @@
 defmodule Tinkex.RestClientAsyncTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   alias Tinkex.RestClient
 
   alias Tinkex.Types.{
+    CheckpointArchiveUrlResponse,
+    CheckpointsListResponse,
     GetSessionResponse,
     ListSessionsResponse,
-    CheckpointsListResponse,
-    CheckpointArchiveUrlResponse,
     TrainingRun
   }
 

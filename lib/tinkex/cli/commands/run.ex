@@ -3,6 +3,7 @@ defmodule Tinkex.CLI.Commands.Run do
   Training run management commands: list and info.
   """
 
+  alias Tinkex.CLI.Pagination
   alias Tinkex.Error
   alias Tinkex.Types.{TrainingRun, TrainingRunsResponse}
 
@@ -81,12 +82,12 @@ defmodule Tinkex.CLI.Commands.Run do
            normalize_run_response(
              deps.rest_api_module.list_training_runs(
                config,
-               Tinkex.CLI.Pagination.initial_page_limit(limit, page_size),
+               Pagination.initial_page_limit(limit, page_size),
                offset
              )
            ),
          {:ok, %{items: runs, total: total}} <-
-           Tinkex.CLI.Pagination.paginate_with(
+           Pagination.paginate_with(
              fn req_limit, req_offset ->
                case normalize_run_response(
                       deps.rest_api_module.list_training_runs(config, req_limit, req_offset)
@@ -101,20 +102,19 @@ defmodule Tinkex.CLI.Commands.Run do
              resp.training_runs,
              offset + length(resp.training_runs),
              page_size,
-             Tinkex.CLI.Pagination.pagination_target(
+             Pagination.pagination_target(
                limit,
-               Tinkex.CLI.Pagination.cursor_total(resp.cursor),
+               Pagination.cursor_total(resp.cursor),
                offset
              ),
-             Tinkex.CLI.Pagination.cursor_total(resp.cursor),
+             Pagination.cursor_total(resp.cursor),
              offset,
              "training runs"
            ) do
       render_run_list(
         %{
           runs: runs,
-          total:
-            total || Tinkex.CLI.Pagination.cursor_total(resp.cursor) || offset + length(runs),
+          total: total || Pagination.cursor_total(resp.cursor) || offset + length(runs),
           shown: length(runs)
         },
         format,
@@ -196,40 +196,43 @@ defmodule Tinkex.CLI.Commands.Run do
     alias Tinkex.CLI.Formatting
 
     map = Formatting.run_to_map(run)
-
-    case format do
-      :json ->
-        IO.puts(deps.json_module.encode!(map))
-
-      :table ->
-        IO.puts("#{map["training_run_id"]} (#{map["base_model"]})")
-        IO.puts("Owner: #{map["model_owner"]}")
-        IO.puts("LoRA: #{if(map["is_lora"], do: "Yes", else: "No")}")
-        if map["lora_rank"], do: IO.puts("LoRA rank: #{map["lora_rank"]}")
-        IO.puts("Status: #{Formatting.format_status(map)}")
-        IO.puts("Last update: #{Formatting.format_datetime(map["last_request_time"])}")
-
-        if map["last_checkpoint"] do
-          IO.puts("Last training checkpoint: #{map["last_checkpoint"]["checkpoint_id"]}")
-          IO.puts("  Time: #{Formatting.format_datetime(map["last_checkpoint"]["time"])}")
-          IO.puts("  Path: #{map["last_checkpoint"]["tinker_path"]}")
-        end
-
-        if map["last_sampler_checkpoint"] do
-          IO.puts("Last sampler checkpoint: #{map["last_sampler_checkpoint"]["checkpoint_id"]}")
-          IO.puts("  Time: #{Formatting.format_datetime(map["last_sampler_checkpoint"]["time"])}")
-          IO.puts("  Path: #{map["last_sampler_checkpoint"]["tinker_path"]}")
-        end
-
-        if map["user_metadata"] do
-          IO.puts(
-            "Metadata: " <>
-              Enum.map_join(map["user_metadata"], ", ", fn {k, v} -> "#{k}=#{v}" end)
-          )
-        end
-    end
-
+    render_run_info_format(map, format, deps)
     {:ok, %{command: :run, action: :info, run_id: map["training_run_id"]}}
+  end
+
+  defp render_run_info_format(map, :json, deps) do
+    IO.puts(deps.json_module.encode!(map))
+  end
+
+  defp render_run_info_format(map, :table, _deps) do
+    alias Tinkex.CLI.Formatting
+
+    IO.puts("#{map["training_run_id"]} (#{map["base_model"]})")
+    IO.puts("Owner: #{map["model_owner"]}")
+    IO.puts("LoRA: #{if(map["is_lora"], do: "Yes", else: "No")}")
+    if map["lora_rank"], do: IO.puts("LoRA rank: #{map["lora_rank"]}")
+    IO.puts("Status: #{Formatting.format_status(map)}")
+    IO.puts("Last update: #{Formatting.format_datetime(map["last_request_time"])}")
+
+    maybe_render_checkpoint(map["last_checkpoint"], "Last training checkpoint")
+    maybe_render_checkpoint(map["last_sampler_checkpoint"], "Last sampler checkpoint")
+    maybe_render_metadata(map["user_metadata"])
+  end
+
+  defp maybe_render_checkpoint(nil, _label), do: :ok
+
+  defp maybe_render_checkpoint(checkpoint, label) do
+    alias Tinkex.CLI.Formatting
+
+    IO.puts("#{label}: #{checkpoint["checkpoint_id"]}")
+    IO.puts("  Time: #{Formatting.format_datetime(checkpoint["time"])}")
+    IO.puts("  Path: #{checkpoint["tinker_path"]}")
+  end
+
+  defp maybe_render_metadata(nil), do: :ok
+
+  defp maybe_render_metadata(metadata) do
+    IO.puts("Metadata: " <> Enum.map_join(metadata, ", ", fn {k, v} -> "#{k}=#{v}" end))
   end
 
   defp management_format(options) do

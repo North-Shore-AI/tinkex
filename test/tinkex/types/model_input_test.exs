@@ -1,7 +1,7 @@
 defmodule Tinkex.Types.ModelInputTest do
   use Supertester.ExUnitFoundation, isolation: :full_isolation
 
-  alias Tinkex.Types.{EncodedTextChunk, ImageChunk, ImageAssetPointerChunk, ModelInput}
+  alias Tinkex.Types.{EncodedTextChunk, ImageAssetPointerChunk, ImageChunk, ModelInput}
 
   describe "empty/0" do
     test "creates ModelInput with empty chunks list" do

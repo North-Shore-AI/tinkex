@@ -5,7 +5,7 @@ defmodule Tinkex.TrainingClientCustomLossTest do
   Verifies gradients are sent back as weights and custom metrics are merged.
   """
 
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   alias Tinkex.TrainingClient
   alias Tinkex.Types.{Datum, ForwardBackwardOutput, ModelInput, TensorData}
@@ -21,13 +21,17 @@ defmodule Tinkex.TrainingClientCustomLossTest do
     bypass: bypass,
     config: config
   } do
-    {:ok, weight_store} = Agent.start_link(fn -> nil end)
-    {:ok, seq_store} = Agent.start_link(fn -> %{forward: [], backward: []} end)
+    weight_store =
+      start_supervised!(
+        Supervisor.child_spec({Agent, fn -> nil end}, id: {:weight_store, self()})
+      )
 
-    on_exit(fn ->
-      if Process.alive?(weight_store), do: Agent.stop(weight_store, :normal, 100)
-      if Process.alive?(seq_store), do: Agent.stop(seq_store, :normal, 100)
-    end)
+    seq_store =
+      start_supervised!(
+        Supervisor.child_spec({Agent, fn -> %{forward: [], backward: []} end},
+          id: {:seq_store, self()}
+        )
+      )
 
     forward_result = %{
       "loss_fn_output_type" => "cross_entropy",

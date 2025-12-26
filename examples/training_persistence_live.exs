@@ -5,7 +5,7 @@ defmodule Tinkex.Examples.TrainingPersistenceLive do
 
   @default_base_url "https://tinker.thinkingmachines.dev/services/tinker-prod"
   @default_base_model "meta-llama/Llama-3.1-8B"
-  @await_timeout 60_000
+  @await_timeout :infinity
 
   alias Tinkex.Error
   alias Tinkex.Types.{LoraConfig, LoadWeightsResponse, SaveWeightsResponse}
@@ -39,8 +39,7 @@ defmodule Tinkex.Examples.TrainingPersistenceLive do
            Tinkex.ServiceClient.create_training_client_from_state(
              service,
              path,
-             load_optimizer: true,
-             load_opts: [await_timeout: @await_timeout]
+             load_optimizer: true
            ) do
       IO.puts("Created a fresh training client from checkpoint: #{inspect(restored)}")
       shutdown([restored, training, service])

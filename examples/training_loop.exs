@@ -4,7 +4,7 @@ defmodule Tinkex.Examples.TrainingLoop do
   @default_base_url "https://tinker.thinkingmachines.dev/services/tinker-prod"
   @default_model "meta-llama/Llama-3.1-8B"
   @default_prompt "Fine-tuning sample prompt"
-  @await_timeout 60_000
+  @await_timeout :infinity
 
   alias Tinkex.Error
   alias Tinkex.Types.TensorData

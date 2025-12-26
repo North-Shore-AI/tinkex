@@ -9,7 +9,13 @@ defmodule Tinkex.API.Rest do
   alias Tinkex.API
   alias Tinkex.Config
 
-  alias Tinkex.Types.{ParsedCheckpointTinkerPath, TrainingRun, TrainingRunsResponse}
+  alias Tinkex.Types.{
+    GetSamplerResponse,
+    ParsedCheckpointTinkerPath,
+    TrainingRun,
+    TrainingRunsResponse,
+    WeightsInfoResponse
+  }
 
   @doc """
   Get session information.
@@ -142,7 +148,7 @@ defmodule Tinkex.API.Rest do
 
     case http_client(config).get(path, config: config, pool_type: :sampling) do
       {:ok, json} ->
-        {:ok, Tinkex.Types.GetSamplerResponse.from_json(json)}
+        {:ok, GetSamplerResponse.from_json(json)}
 
       {:error, _} = error ->
         error
@@ -208,7 +214,7 @@ defmodule Tinkex.API.Rest do
            pool_type: :training
          ) do
       {:ok, json} ->
-        {:ok, Tinkex.Types.WeightsInfoResponse.from_json(json)}
+        {:ok, WeightsInfoResponse.from_json(json)}
 
       {:error, _} = error ->
         error

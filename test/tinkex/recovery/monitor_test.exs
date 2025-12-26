@@ -1,9 +1,13 @@
 defmodule Tinkex.Recovery.MonitorTest do
-  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  use Supertester.ExUnitFoundation,
+    isolation: :full_isolation,
+    telemetry_isolation: true
 
+  alias Supertester.TelemetryHelpers
   alias Tinkex.Recovery.{Executor, Monitor, Policy}
-  alias Tinkex.Types.TrainingRun
   alias Tinkex.TestSupport.Recovery.ServiceStub
+  alias Tinkex.Types.TrainingRun
+  require TelemetryHelpers
 
   defmodule RestStub do
     def set_run(run_id, map), do: :persistent_term.put({__MODULE__, run_id}, map)
@@ -61,29 +65,37 @@ defmodule Tinkex.Recovery.MonitorTest do
          rest_module: RestStub}
       )
 
-    handler =
-      Tinkex.HTTPCase.attach_telemetry([
+    {:ok, _} =
+      TelemetryHelpers.attach_isolated([
         [:tinkex, :recovery, :detected],
         [:tinkex, :recovery, :started],
         [:tinkex, :recovery, :client_created]
       ])
 
-    assert :ok = Monitor.monitor_run(monitor, "run-1", service_pid, %{training_pid: :old})
+    assert :ok =
+             Monitor.monitor_run(
+               monitor,
+               "run-1",
+               service_pid,
+               TelemetryHelpers.current_test_metadata(%{training_pid: :old})
+             )
 
     send(monitor, :poll)
 
-    assert_receive {:telemetry, [:tinkex, :recovery, :detected], _m, meta}
+    {:telemetry, _, _m, meta} =
+      TelemetryHelpers.assert_telemetry([:tinkex, :recovery, :detected])
+
     assert meta.run_id == "run-1"
 
-    assert_receive {:telemetry, [:tinkex, :recovery, :client_created], _m, cc_meta}, 500
+    {:telemetry, _, _m, cc_meta} =
+      TelemetryHelpers.assert_telemetry([:tinkex, :recovery, :client_created])
+
     assert cc_meta.checkpoint.tinker_path == "tinker://run-1/weights/0001"
 
     assert_receive {:client_created, ^service_pid, "tinker://run-1/weights/0001", []}, 200
 
     state = :sys.get_state(monitor)
     refute Map.has_key?(state.runs, "run-1")
-
-    :telemetry.detach(handler)
   end
 
   test "does nothing for healthy runs", %{send_after: send_after, service_pid: service_pid} do
@@ -105,7 +117,13 @@ defmodule Tinkex.Recovery.MonitorTest do
          rest_module: RestStub}
       )
 
-    assert :ok = Monitor.monitor_run(monitor, "run-healthy", service_pid)
+    assert :ok =
+             Monitor.monitor_run(
+               monitor,
+               "run-healthy",
+               service_pid,
+               TelemetryHelpers.current_test_metadata()
+             )
 
     send(monitor, :poll)
 

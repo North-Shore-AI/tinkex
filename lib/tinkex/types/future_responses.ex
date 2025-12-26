@@ -46,9 +46,9 @@ defmodule Tinkex.Types.FutureRetrieveResponse do
   """
 
   alias Tinkex.Types.{
-    FuturePendingResponse,
     FutureCompletedResponse,
     FutureFailedResponse,
+    FuturePendingResponse,
     TryAgainResponse
   }
 

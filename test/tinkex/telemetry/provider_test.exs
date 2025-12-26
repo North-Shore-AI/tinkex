@@ -2,6 +2,7 @@ defmodule Tinkex.Telemetry.ProviderTest do
   use ExUnit.Case, async: true
 
   alias Tinkex.Telemetry.Provider
+  alias Tinkex.Telemetry.Reporter
 
   defmodule TestProvider do
     use Provider
@@ -140,7 +141,7 @@ defmodule Tinkex.Telemetry.ProviderTest do
       name = :"test_reporter_#{session_id}"
 
       {:ok, existing_pid} =
-        Tinkex.Telemetry.Reporter.start_link(
+        Reporter.start_link(
           session_id: session_id,
           config: config,
           name: name,

@@ -30,10 +30,10 @@ defmodule Tinkex.RestClient do
   alias Tinkex.Config
 
   alias Tinkex.Types.{
-    CheckpointsListResponse,
     CheckpointArchiveUrlResponse,
-    GetSessionResponse,
+    CheckpointsListResponse,
     GetSamplerResponse,
+    GetSessionResponse,
     ListSessionsResponse,
     TrainingRun,
     TrainingRunsResponse,

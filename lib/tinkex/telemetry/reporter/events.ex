@@ -6,10 +6,12 @@ defmodule Tinkex.Telemetry.Reporter.Events do
   SessionEndEvent, UnhandledExceptionEvent) with proper indexing and timestamps.
   """
 
+  alias Tinkex.Telemetry.Reporter.{ExceptionHandler, Queue, Serializer}
+
   alias Tinkex.Types.Telemetry.{
     GenericEvent,
-    SessionStartEvent,
     SessionEndEvent,
+    SessionStartEvent,
     UnhandledExceptionEvent
   }
 
@@ -29,7 +31,7 @@ defmodule Tinkex.Telemetry.Reporter.Events do
         severity: parse_severity(severity),
         timestamp: iso_timestamp(),
         event_name: name,
-        event_data: Tinkex.Telemetry.Reporter.Serializer.sanitize(data)
+        event_data: Serializer.sanitize(data)
       )
 
     {event, state}
@@ -87,7 +89,7 @@ defmodule Tinkex.Telemetry.Reporter.Events do
   """
   @spec build_exception_event(map(), Exception.t(), atom()) :: {term(), map()}
   def build_exception_event(state, exception, severity) do
-    case Tinkex.Telemetry.Reporter.ExceptionHandler.classify_exception(exception) do
+    case ExceptionHandler.classify_exception(exception) do
       {:user_error, user_error} ->
         build_user_error_event(state, user_error)
 
@@ -147,7 +149,7 @@ defmodule Tinkex.Telemetry.Reporter.Events do
   @spec enqueue_session_start(map()) :: {map(), boolean()}
   def enqueue_session_start(state) do
     {event, state} = build_session_start_event(state)
-    Tinkex.Telemetry.Reporter.Queue.enqueue_event(state, event)
+    Queue.enqueue_event(state, event)
   end
 
   @doc """
@@ -160,7 +162,7 @@ defmodule Tinkex.Telemetry.Reporter.Events do
 
   def maybe_enqueue_session_end(state) do
     {event, state} = build_session_end_event(state)
-    {state, _accepted?} = Tinkex.Telemetry.Reporter.Queue.enqueue_event(state, event)
+    {state, _accepted?} = Queue.enqueue_event(state, event)
     %{state | session_ended?: true}
   end
 
@@ -244,13 +246,11 @@ defmodule Tinkex.Telemetry.Reporter.Events do
 
   # Format stacktrace - try to get the current process stacktrace
   defp format_stacktrace_with_trace(exception) do
-    try do
-      # Try to get the stacktrace from the exception if it has one
-      stacktrace = get_exception_stacktrace(exception)
-      Exception.format(:error, exception, stacktrace)
-    rescue
-      _ -> format_stacktrace_fallback(exception)
-    end
+    # Try to get the stacktrace from the exception if it has one
+    stacktrace = get_exception_stacktrace(exception)
+    Exception.format(:error, exception, stacktrace)
+  rescue
+    _ -> format_stacktrace_fallback(exception)
   end
 
   defp get_exception_stacktrace(%{stacktrace: stacktrace}) when is_list(stacktrace) do
@@ -266,11 +266,9 @@ defmodule Tinkex.Telemetry.Reporter.Events do
   end
 
   defp format_stacktrace_fallback(exception) do
-    try do
-      Exception.format(:error, exception, [])
-    rescue
-      _ -> nil
-    end
+    Exception.format(:error, exception, [])
+  rescue
+    _ -> nil
   end
 
   defp uuid do

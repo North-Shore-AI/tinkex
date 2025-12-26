@@ -125,31 +125,7 @@ defmodule Tinkex.SessionManager do
 
     updated_sessions =
       Enum.reduce(sessions, %{}, fn {session_id, entry}, acc ->
-        case send_heartbeat(session_id, entry.config, state.session_api) do
-          :ok ->
-            updated_entry = %{entry | last_success_ms: now_ms, last_error: nil, failure_count: 0}
-            persist_session(state.sessions_table, session_id, updated_entry)
-            Map.put(acc, session_id, updated_entry)
-
-          {:error, last_error} ->
-            maybe_warn(session_id, entry.last_success_ms, now_ms, last_error, state)
-            updated_entry = %{entry | last_error: last_error}
-
-            case maybe_remove_or_track_failure(
-                   state.sessions_table,
-                   session_id,
-                   updated_entry,
-                   now_ms,
-                   state
-                 ) do
-              :remove ->
-                acc
-
-              tracked ->
-                persist_session(state.sessions_table, session_id, tracked)
-                Map.put(acc, session_id, tracked)
-            end
-        end
+        update_session_after_heartbeat(session_id, entry, acc, now_ms, state)
       end)
 
     timer_ref = schedule_heartbeat(state.heartbeat_interval_ms)
@@ -158,6 +134,42 @@ defmodule Tinkex.SessionManager do
 
   @impl true
   def handle_info(_message, state), do: {:noreply, state}
+
+  defp update_session_after_heartbeat(session_id, entry, acc, now_ms, state) do
+    case send_heartbeat(session_id, entry.config, state.session_api) do
+      :ok ->
+        handle_heartbeat_success(session_id, entry, acc, now_ms, state)
+
+      {:error, last_error} ->
+        handle_heartbeat_failure(session_id, entry, acc, now_ms, last_error, state)
+    end
+  end
+
+  defp handle_heartbeat_success(session_id, entry, acc, now_ms, state) do
+    updated_entry = %{entry | last_success_ms: now_ms, last_error: nil, failure_count: 0}
+    persist_session(state.sessions_table, session_id, updated_entry)
+    Map.put(acc, session_id, updated_entry)
+  end
+
+  defp handle_heartbeat_failure(session_id, entry, acc, now_ms, last_error, state) do
+    maybe_warn(session_id, entry.last_success_ms, now_ms, last_error, state)
+    updated_entry = %{entry | last_error: last_error}
+
+    case maybe_remove_or_track_failure(
+           state.sessions_table,
+           session_id,
+           updated_entry,
+           now_ms,
+           state
+         ) do
+      :remove ->
+        acc
+
+      tracked ->
+        persist_session(state.sessions_table, session_id, tracked)
+        Map.put(acc, session_id, tracked)
+    end
+  end
 
   @impl true
   def terminate(_reason, %{timer_ref: ref}) do
@@ -246,32 +258,28 @@ defmodule Tinkex.SessionManager do
   defp now_ms, do: System.monotonic_time(:millisecond)
 
   defp load_sessions_from_ets(table) do
-    try do
-      case :ets.whereis(table) do
-        :undefined ->
-          %{}
+    case :ets.whereis(table) do
+      :undefined ->
+        %{}
 
-        _ ->
-          :ets.foldl(
-            fn {session_id, entry}, acc ->
-              maybe_warn_about_pool(session_id, entry)
-              Map.put(acc, session_id, normalize_entry(entry))
-            end,
-            %{},
-            table
-          )
-      end
-    rescue
-      ArgumentError -> %{}
+      _ ->
+        :ets.foldl(
+          fn {session_id, entry}, acc ->
+            maybe_warn_about_pool(session_id, entry)
+            Map.put(acc, session_id, normalize_entry(entry))
+          end,
+          %{},
+          table
+        )
     end
+  rescue
+    ArgumentError -> %{}
   end
 
   defp persist_session(table, session_id, entry) do
-    try do
-      :ets.insert(table, {session_id, entry})
-    rescue
-      ArgumentError -> :ok
-    end
+    :ets.insert(table, {session_id, entry})
+  rescue
+    ArgumentError -> :ok
   end
 
   defp maybe_cancel_timer(ref) when is_reference(ref) do
@@ -286,17 +294,15 @@ defmodule Tinkex.SessionManager do
   end
 
   defp ensure_sessions_table(table) do
-    try do
-      :ets.new(table, [
-        :set,
-        :public,
-        :named_table,
-        read_concurrency: true,
-        write_concurrency: true
-      ])
-    rescue
-      ArgumentError -> table
-    end
+    :ets.new(table, [
+      :set,
+      :public,
+      :named_table,
+      read_concurrency: true,
+      write_concurrency: true
+    ])
+  rescue
+    ArgumentError -> table
   end
 
   defp maybe_heartbeat(
@@ -369,10 +375,8 @@ defmodule Tinkex.SessionManager do
   end
 
   defp safe_delete(table, key) do
-    try do
-      :ets.delete(table, key)
-    rescue
-      ArgumentError -> :ok
-    end
+    :ets.delete(table, key)
+  rescue
+    ArgumentError -> :ok
   end
 end

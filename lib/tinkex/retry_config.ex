@@ -68,43 +68,63 @@ defmodule Tinkex.RetryConfig do
   """
   @spec validate!(t()) :: t()
   def validate!(%__MODULE__{} = config) do
-    unless (is_integer(config.max_retries) and config.max_retries >= 0) or
-             config.max_retries == :infinity do
-      raise ArgumentError,
-            "max_retries must be a non-negative integer or :infinity, got: #{inspect(config.max_retries)}"
-    end
-
-    unless is_integer(config.base_delay_ms) and config.base_delay_ms > 0 do
-      raise ArgumentError,
-            "base_delay_ms must be a positive integer, got: #{inspect(config.base_delay_ms)}"
-    end
-
-    unless is_integer(config.max_delay_ms) and config.max_delay_ms >= config.base_delay_ms do
-      raise ArgumentError,
-            "max_delay_ms must be >= base_delay_ms, got: #{inspect(config.max_delay_ms)}"
-    end
-
-    unless is_float(config.jitter_pct) and config.jitter_pct >= 0.0 and config.jitter_pct <= 1.0 do
-      raise ArgumentError,
-            "jitter_pct must be a float between 0.0 and 1.0, got: #{inspect(config.jitter_pct)}"
-    end
-
-    unless is_integer(config.progress_timeout_ms) and config.progress_timeout_ms > 0 do
-      raise ArgumentError,
-            "progress_timeout_ms must be a positive integer, got: #{inspect(config.progress_timeout_ms)}"
-    end
-
-    unless is_integer(config.max_connections) and config.max_connections > 0 do
-      raise ArgumentError,
-            "max_connections must be a positive integer, got: #{inspect(config.max_connections)}"
-    end
-
-    unless is_boolean(config.enable_retry_logic) do
-      raise ArgumentError,
-            "enable_retry_logic must be a boolean, got: #{inspect(config.enable_retry_logic)}"
-    end
-
+    validate_max_retries!(config.max_retries)
+    validate_base_delay_ms!(config.base_delay_ms)
+    validate_max_delay_ms!(config.max_delay_ms, config.base_delay_ms)
+    validate_jitter_pct!(config.jitter_pct)
+    validate_progress_timeout_ms!(config.progress_timeout_ms)
+    validate_max_connections!(config.max_connections)
+    validate_enable_retry_logic!(config.enable_retry_logic)
     config
+  end
+
+  defp validate_max_retries!(max_retries) do
+    unless (is_integer(max_retries) and max_retries >= 0) or max_retries == :infinity do
+      raise ArgumentError,
+            "max_retries must be a non-negative integer or :infinity, got: #{inspect(max_retries)}"
+    end
+  end
+
+  defp validate_base_delay_ms!(base_delay_ms) do
+    unless is_integer(base_delay_ms) and base_delay_ms > 0 do
+      raise ArgumentError,
+            "base_delay_ms must be a positive integer, got: #{inspect(base_delay_ms)}"
+    end
+  end
+
+  defp validate_max_delay_ms!(max_delay_ms, base_delay_ms) do
+    unless is_integer(max_delay_ms) and max_delay_ms >= base_delay_ms do
+      raise ArgumentError,
+            "max_delay_ms must be >= base_delay_ms, got: #{inspect(max_delay_ms)}"
+    end
+  end
+
+  defp validate_jitter_pct!(jitter_pct) do
+    unless is_float(jitter_pct) and jitter_pct >= 0.0 and jitter_pct <= 1.0 do
+      raise ArgumentError,
+            "jitter_pct must be a float between 0.0 and 1.0, got: #{inspect(jitter_pct)}"
+    end
+  end
+
+  defp validate_progress_timeout_ms!(progress_timeout_ms) do
+    unless is_integer(progress_timeout_ms) and progress_timeout_ms > 0 do
+      raise ArgumentError,
+            "progress_timeout_ms must be a positive integer, got: #{inspect(progress_timeout_ms)}"
+    end
+  end
+
+  defp validate_max_connections!(max_connections) do
+    unless is_integer(max_connections) and max_connections > 0 do
+      raise ArgumentError,
+            "max_connections must be a positive integer, got: #{inspect(max_connections)}"
+    end
+  end
+
+  defp validate_enable_retry_logic!(enable_retry_logic) do
+    unless is_boolean(enable_retry_logic) do
+      raise ArgumentError,
+            "enable_retry_logic must be a boolean, got: #{inspect(enable_retry_logic)}"
+    end
   end
 
   @doc """

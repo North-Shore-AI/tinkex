@@ -1,5 +1,5 @@
 defmodule Tinkex.API.ServiceTest do
-  use Tinkex.HTTPCase, async: false
+  use Tinkex.HTTPCase, async: true
 
   alias Tinkex.API.Service
   alias Tinkex.Types.{GetServerCapabilitiesResponse, HealthResponse, SupportedModel}

@@ -91,7 +91,7 @@ defmodule Tinkex.RetryHandler do
 
   defp maybe_to_handler_opts(%mod{} = config) do
     if function_exported?(mod, :to_handler_opts, 1) do
-      apply(mod, :to_handler_opts, [config])
+      mod.to_handler_opts(config)
     else
       raise ArgumentError,
             "retry config struct #{inspect(mod)} must implement to_handler_opts/1"

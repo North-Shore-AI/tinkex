@@ -1,7 +1,7 @@
 defmodule Tinkex.MixProject do
   use Mix.Project
 
-  @version "0.3.2"
+  @version "0.3.3"
   # Tinker backend expects the Python SDK version for feature gating/parity.
   @tinker_sdk_version "0.7.0"
   @source_url "https://github.com/North-Shore-AI/tinkex"
@@ -76,7 +76,7 @@ defmodule Tinkex.MixProject do
       # Testing
       {:mox, "~> 1.0", only: :test},
       {:bypass, "~> 2.1", only: :test},
-      {:supertester, "~> 0.3.1", only: :test}
+      {:supertester, "~> 0.4.0", only: :test}
     ]
   end
 

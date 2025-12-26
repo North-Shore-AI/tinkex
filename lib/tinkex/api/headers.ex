@@ -8,11 +8,13 @@ defmodule Tinkex.API.Headers do
   - Stainless SDK headers
   - Cloudflare Access headers
   - Request-specific headers (idempotency, sampling, retry count)
+  - OpenTelemetry trace context propagation (opt-in)
   - Header deduplication
   """
 
   alias Tinkex.Config
   alias Tinkex.Env
+  alias Tinkex.Telemetry.Otel
 
   @doc """
   Builds complete headers list for a request.
@@ -25,6 +27,7 @@ defmodule Tinkex.API.Headers do
   5. Request-specific headers
   6. Method-specific headers (idempotency, sampling)
   7. User-provided headers from opts
+  8. OpenTelemetry trace context (if enabled)
 
   Lower priority headers are overridden by higher priority ones.
   """
@@ -46,6 +49,7 @@ defmodule Tinkex.API.Headers do
     |> Kernel.++(sampling_headers(opts))
     |> Kernel.++(maybe_raw_response_header(opts))
     |> Kernel.++(Keyword.get(opts, :headers, []))
+    |> Otel.inject_headers(config)
     |> dedupe()
   end
 
