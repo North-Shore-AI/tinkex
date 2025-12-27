@@ -364,13 +364,13 @@ defmodule Tinkex.Tokenizer do
     ensure_table_for(table)
   end
 
-  defp ensure_table_for(table) when is_reference(table) do
-    validate_table_reference!(table)
-    table
-  end
-
   defp ensure_table_for(table) when is_atom(table) do
     ensure_named_table!(table)
+  end
+
+  defp ensure_table_for(table) do
+    validate_table_reference!(table)
+    table
   end
 
   defp validate_table_reference!(table) do
