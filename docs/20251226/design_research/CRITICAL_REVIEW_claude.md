@@ -3,7 +3,8 @@
 **Date:** 2025-12-26
 **Reviewer:** Independent Adversarial Analysis
 **Documents Reviewed:** 7 investigation documents (00-05, 99)
-**Status:** REVISE (Confidence: 70%)
+**Status:** REVISE (Confidence: 72%)
+**Revision:** v2 - Reconciled with peer review
 
 ---
 
@@ -11,60 +12,122 @@
 
 **VERDICT: REVISE**
 
-The investigation correctly identifies ONE real issue (missing backoff in polling loop) but contains **significant errors** that undermine confidence:
+The investigation surfaced real problems but overstates others. After peer review and code verification:
 
-1. **2 issues VERIFIED as real** (polling loop backoff, test infrastructure bugs)
-2. **2 issues DISPUTED** (ETS registration race, RateLimiter TOCTOU - both rely on misunderstanding OTP guarantees)
-3. **1 claim FALSE** (stack overflow risk - Erlang handles this)
-4. **1 major oversight** (Investigation failed to verify "Python SDK parity" claims against project's own documentation)
+1. **4 issues VERIFIED as real** (polling loop backoff, TrainingClient monitoring, circuit breaker race, semaphore busy-loop)
+2. **3 issues DISPUTED** (ETS registration race, RateLimiter TOCTOU, stack overflow - OTP/BEAM guarantees prevent these)
+3. **1 major correction** (Python SDK parity: the polling loop may correctly match Python behavior; HTTP layer docs I cited describe a different layer)
 
-The investigation's central thesis "tests are exposing real production bugs" is PARTIALLY correct but overstated. The polling loop issue is real; the ETS race conditions are not.
+The investigation's thesis is partially correct. Some bugs are real; others rely on misunderstanding OTP guarantees.
 
 ---
 
 ## 2. VERIFIED ISSUES (Confirmed Real)
 
-### 2.1 Future Polling Tight Loop on 408/5xx (VERIFIED - SEVERITY REDUCED)
+### 2.1 Future Polling Tight Loop on 408/5xx (VERIFIED)
 
 **Location:** `lib/tinkex/future.ex:217-229`
 
 **Verification:**
 ```elixir
-# Lines 217-220 - CONFIRMED: No sleep before recursive call
+# Lines 217-220 - No sleep before recursive call
 {:error, %Error{status: 408} = error} ->
-  emit_error_telemetry(@telemetry_api_error, error, iteration, state)
-  poll_loop(%{state | last_failed_error: error}, iteration + 1)  # NO BACKOFF
-
-# Lines 225-229 - CONFIRMED: Same pattern for 5xx
-{:error, %Error{status: status} = error}
-when is_integer(status) and status >= 500 and status < 600 ->
   emit_error_telemetry(@telemetry_api_error, error, iteration, state)
   poll_loop(%{state | last_failed_error: error}, iteration + 1)  # NO BACKOFF
 ```
 
-**Status:** The code does lack backoff. However, severity is REDUCED because:
+**Status:** Real. The code lacks backoff for 408/5xx. However:
 
-1. **60,000 requests/60sec claim is EXAGGERATED**
-   - Assumes 1ms HTTP round-trip (unrealistic)
-   - With realistic local latency (5-10ms): 6,000-12,000 requests max
-   - With remote latency (50-100ms): 600-1,200 requests
-   - Still problematic, but not catastrophic
+1. **60,000 requests/60sec is exaggerated** - Finch pool limits (250 connections) and network latency constrain this. Realistic estimates: 600-3,000 requests/min per task with production RTTs (20-100ms).
 
-2. **Stack overflow claim is FALSE**
-   - Erlang/BEAM properly optimizes tail recursion
-   - `poll_loop → do_poll → poll_loop` is in tail position
-   - Can run millions of iterations without stack growth
+2. **Stack overflow claim is FALSE** - BEAM tail-call optimization keeps stack constant. The recursion is in tail position.
 
-**Recommendation:** FIX - Add backoff, but for correct reasons (resource consumption, not stack overflow).
+**Recommendation:** Add configurable backoff. Consider Python parity implications - may need a feature flag.
 
-### 2.2 Test Infrastructure Bugs (VERIFIED)
+### 2.2 TrainingClient Background Task Monitoring (VERIFIED - I MISSED THIS)
 
-The test infrastructure bugs identified in `01-root-cause-analysis.md` are **all real**:
+**Location:** `lib/tinkex/training_client.ex:979-1012, 782`
+
+**The Bug:**
+```elixir
+# Line 994: Monitor created in TrainingClient process
+ref = Process.monitor(pid)
+
+# Lines 997-1011: NEW task spawned to receive :DOWN
+Task.Supervisor.start_child(Tinkex.TaskSupervisor, fn ->
+  receive do
+    {:DOWN, ^ref, :process, _pid, :normal} -> :ok
+    {:DOWN, ^ref, :process, _pid, reason} -> safe_reply(from, {:error, ...})
+  end
+end)
+
+# Line 782: TrainingClient ignores ALL messages
+def handle_info(_msg, state), do: {:noreply, state}
+```
+
+**Why this is broken:**
+1. `Process.monitor(pid)` is called in TrainingClient process
+2. When monitored process dies, `:DOWN` goes to TrainingClient
+3. TrainingClient ignores it (line 782)
+4. Spawned task waits forever for `:DOWN` that will never arrive
+
+**Impact:** Background task crashes can be silently dropped. Callers may hang waiting for replies.
+
+**Recommendation:** MUST FIX. Move `Process.monitor/1` into the spawned task, or handle `:DOWN` in TrainingClient, or use `Task.await/2` instead.
+
+### 2.3 Circuit Breaker Registry Read-Modify-Write Race (VERIFIED - I MISSED THIS)
+
+**Location:** `lib/tinkex/circuit_breaker/registry.ex:73-80`
+
+```elixir
+def call(name, fun, opts \\ []) do
+  cb = get_or_create(name, opts)                              # READ
+  call_opts = Keyword.take(opts, [:success?])
+  {result, updated_cb} = CircuitBreaker.call(cb, fun, call_opts)  # COMPUTE
+  put(name, updated_cb)                                        # WRITE
+  result
+end
+```
+
+**Classic lost-update race:**
+- Thread A: reads cb (0 failures)
+- Thread B: reads cb (0 failures)
+- Thread A: increments to 1, writes
+- Thread B: increments to 1, writes (overwrites A's value)
+- Result: Should be 2 failures, only 1 recorded
+
+**Impact:** Circuit breaker may never open under high concurrency.
+
+**Recommendation:** Use atomic operations or serialize through GenServer.
+
+### 2.4 Semaphore Busy-Loop (VERIFIED - Performance Issue)
+
+**Location:** `lib/tinkex/sampling_dispatch.ex:136-144`
+
+```elixir
+defp acquire_counting(%{name: name, limit: limit}) do
+  case Semaphore.acquire(name, limit) do
+    true -> :ok
+    false ->
+      Process.sleep(2)  # Fixed 2ms, no backoff
+      acquire_counting(%{name: name, limit: limit})
+  end
+end
+```
+
+**Issue:** Fixed 2ms sleep with no exponential backoff causes:
+- CPU churn under contention
+- Thundering herd on release
+- Test instability from timing sensitivity
+
+**Recommendation:** Add jittered exponential backoff. Make tunable.
+
+### 2.5 Test Infrastructure Bugs (VERIFIED)
 
 | Bug | Status | Evidence |
 |-----|--------|----------|
 | Telemetry cross-talk | VERIFIED | Global handlers, no test-scoped filtering |
-| Agent cleanup race | VERIFIED | Linked process termination order issue |
+| Agent cleanup race | VERIFIED | Linked process termination order |
 | Logger contamination | VERIFIED | Global Logger.configure/1 effects |
 | ETS table clearing | VERIFIED | :ets.delete_all_objects on shared tables |
 
@@ -76,323 +139,226 @@ These are **test bugs**, not production code bugs.
 
 ### 3.1 ETS Registration Race in SamplingClient (DISPUTED)
 
-**Claimed bug:** "GenServer.start_link returns before ETS entry exists → 'not initialized' errors"
+**Claimed bug:** "GenServer.start_link returns before ETS entry exists"
 
-**Location claimed:** `lib/tinkex/sampling_client.ex:233`
-
-**Actual code analysis:**
+**Why this CANNOT occur:**
 
 ```elixir
-# sampling_client.ex:233
-:ok = SamplingRegistry.register(self(), entry)
-
-# sampling_registry.ex:21-22 - Uses GenServer.call (SYNCHRONOUS)
+# sampling_registry.ex:21-22 - GenServer.call is SYNCHRONOUS
 def register(pid, config) when is_pid(pid) do
   GenServer.call(__MODULE__, {:register, pid, config})  # BLOCKING
 end
 
-# sampling_registry.ex:31-35 - handle_call completes ETS insert BEFORE reply
+# sampling_registry.ex:31-35 - ETS insert BEFORE reply
 def handle_call({:register, pid, config}, _from, state) do
   ref = Process.monitor(pid)
-  :ets.insert(:tinkex_sampling_clients, {{:config, pid}, config})  # INSERT HAPPENS HERE
-  {:reply, :ok, %{state | monitors: Map.put(state.monitors, ref, pid)}}  # REPLY AFTER INSERT
+  :ets.insert(:tinkex_sampling_clients, {{:config, pid}, config})  # INSERT
+  {:reply, :ok, %{state | monitors: Map.put(state.monitors, ref, pid)}}  # THEN REPLY
 end
 ```
 
-**Why this race CANNOT occur:**
+**OTP Guarantee:** GenServer.call blocks until handle_call returns. The ETS insert happens BEFORE the reply. When start_link returns, the entry exists.
 
-1. `GenServer.call/2` is **synchronous** - it blocks until `handle_call` returns `{:reply, ...}`
-2. The `:ets.insert` at line 33 happens BEFORE `{:reply, :ok, ...}` at line 35
-3. Therefore, when `register/2` returns `:ok`, the ETS entry **already exists**
-4. `init/1` waits for `register/2` to return before returning `{:ok, state}`
-5. `GenServer.start_link/3` waits for `init/1` to return before returning `{:ok, pid}`
-
-**OTP Guarantee:** This is fundamental OTP semantics. GenServer.call provides synchronous request-response semantics. The investigation missed this.
-
-**Verdict:** DISPUTED - This bug does not exist. The OTP call semantics prevent it.
+**Verdict:** Bug does not exist. OTP call semantics prevent it.
 
 ### 3.2 RateLimiter TOCTOU Race (DISPUTED)
 
-**Claimed bug:** "lookup can return [] after insert_new fails → duplicate atomics refs"
+**Claimed bug:** "lookup can return [] after insert_new fails"
 
-**Location claimed:** `lib/tinkex/rate_limiter.ex:14-33`
+**Why this CANNOT occur in production:**
 
-**Actual code:**
-```elixir
-case :ets.insert_new(:tinkex_rate_limiters, {key, limiter}) do
-  true -> limiter
-  false ->
-    case :ets.lookup(:tinkex_rate_limiters, key) do
-      [{^key, existing}] -> existing
-      [] ->  # FALLBACK CASE
-        :ets.insert(:tinkex_rate_limiters, {key, limiter})
-        limiter
-    end
-end
-```
+1. No production code deletes from `:tinkex_rate_limiters`
+2. Only test cleanup calls `:ets.delete` (verified by grep)
+3. After `insert_new` returns `false`, key MUST exist
+4. The `[]` branch is unreachable dead code
 
-**Why this race CANNOT occur in production:**
-
-1. **No deletion code exists** - Grep confirms no production code calls `:ets.delete` on `:tinkex_rate_limiters`
-2. **Only tests delete entries:** `on_exit(fn -> :ets.delete(:tinkex_rate_limiters, key) end)` in test files
-3. **ETS guarantee:** After `insert_new` returns `false`, the key MUST exist (since nothing deletes it)
-4. **The `[]` case is dead code** - It cannot execute in production
-
-**Test-only scenario:** The race could theoretically occur if tests run concurrently with `on_exit` cleanup. This is a test infrastructure issue, not a production bug.
-
-**Verdict:** DISPUTED - The `[]` fallback is defensive dead code. No production race exists.
+**Verdict:** Speculative. No production race exists. The fallback is defensive programming.
 
 ### 3.3 Stack Overflow Risk (FALSE)
 
-**Claimed bug:** "Each 408/5xx retry adds a stack frame → stack exhaustion after 10,000+ iterations"
+**Claimed bug:** "Stack exhaustion after 10,000+ iterations"
 
 **Why this is FALSE:**
 
-Erlang/BEAM handles tail-call optimization for last-call recursion. The pattern:
+BEAM tail-call optimization handles this. The recursive call to `poll_loop` is in tail position:
 
 ```elixir
-# do_poll returns poll_loop in tail position
 {:error, %Error{status: 408} = error} ->
   emit_error_telemetry(...)  # side effect
   poll_loop(...)  # TAIL POSITION - stack frame reused
 ```
 
-The call to `poll_loop` is the **last expression** in this clause. BEAM rewrites this to reuse the stack frame. This is not C/Java stack behavior.
+GenServers run `loop/1` indefinitely without stack growth. This is fundamental BEAM behavior.
 
-**Evidence:** Erlang is designed for long-running recursive processes. GenServers run `loop/1` indefinitely without stack growth.
+**Verdict:** FALSE. Investigation incorrectly applied C/Java stack semantics to BEAM.
 
-**Verdict:** FALSE - The investigation incorrectly applied non-functional language stack behavior to BEAM.
+### 3.4 Other Disputed Issues (Per Revised Review)
+
+- **SamplingRegistry double monitor leak** - Overstated. Multiple refs are removed on each `:DOWN`.
+- **SessionManager init race** - Unlikely. Only SessionManager writes the sessions table.
+- **SamplingDispatch deadlock** - Incorrect. `fun` executes outside the GenServer process.
+- **Tokenizer cache race** - Mischaracterized. Duplicate loads can happen, but ETS race requires deletion.
 
 ---
 
-## 4. MISSING CONTEXT (What Was Overlooked)
+## 4. MISSING CONTEXT (Corrections)
 
-### 4.1 Python SDK Parity Claims Were Not Verified
+### 4.1 Python SDK Parity - CORRECTION
 
-The investigation accepts code comments at face value:
+**My original claim was wrong.** I cited docs about HTTP layer retry (which uses backoff). The polling loop is separate.
 
-```elixir
-# Python uses `continue` (no backoff) for 408, so we do immediate retry.
-```
+The revised review correctly notes: Python polling loop (`tinker/src/tinker/lib/api_future_impl.py`) may use `continue` with no backoff. The Elixir code may be correctly matching Python behavior.
 
-**But the project's own documentation says otherwise:**
+**Implication:** Adding backoff would be a **conscious parity break**. This should be:
+- Configurable via option
+- Documented as behavioral difference
+- Or verified against actual Python source before claiming parity
 
-From `docs/20251207/impl_audit/queue_and_futures.md:22`:
-> "Python retries pending/5xx/408 responses with **exponential backoff capped at 30s**"
+### 4.2 Request Rate Constraints
 
-From `docs/20251119/prompts/phase2b_http_client.md:160`:
-> "408, 5xx: Exponential backoff"
+Finch pool limits constrain request rates:
+- Default futures pool: size 25, count 10 = 250 max connections
+- Single polling task: ~1/RTT requests per second
+- With 50ms RTT: ~1,200 requests/min per task (not 60,000)
 
-From `docs/20251119/port_research/04_http_layer.md:539`:
-> "Retries 5xx, 408, 429, connection errors with **exponential backoff**"
+### 4.3 Mailbox Bloat (NEW - I MISSED THIS)
 
-**Conclusion:** The code comments claiming "Python SDK parity" for zero backoff are **incorrect**. Python DOES use backoff. The Elixir implementation was built on a misunderstanding.
+`Task.Supervisor.async_nolink/2` sends completion messages to the caller. TrainingClient ignores all `handle_info` messages, so these accumulate. Under load, this can bloat the mailbox.
 
-The investigation failed to verify this critical claim, instead treating the code comments as authoritative.
+### 4.4 External Dependencies
 
-### 4.2 OTP/Erlang Guarantees Not Considered
-
-The investigation treats Elixir/Erlang like a typical language without considering:
-
-1. **GenServer.call semantics** - Synchronous, blocking until handle_call returns
-2. **BEAM tail-call optimization** - No stack growth for tail-recursive calls
-3. **ETS write visibility** - Immediate read-after-write consistency for same key
-
-### 4.3 Actual Test Failure Root Causes
-
-The investigation conflates:
-- **Real test infrastructure bugs** (telemetry cross-talk, logger contamination)
-- **Speculative production bugs** (ETS races that can't occur)
-
-The test instability is more likely caused by the test infrastructure bugs than by the claimed production-code races.
+HuggingFace 403s are unrelated to concurrency bugs. "Tests got worse = real production bugs" is incomplete - external failures also increased.
 
 ---
 
 ## 5. FIX ASSESSMENT (Risk Analysis)
 
-### 5.1 Add Backoff to 408/5xx (RECOMMENDED - LOW RISK)
-
-```elixir
-# Proposed fix
-{:error, %Error{status: 408} = error} ->
-  emit_error_telemetry(@telemetry_api_error, error, iteration, state)
-  sleep_and_continue(
-    %{state | last_failed_error: error},
-    max(100, calc_backoff(iteration)),
-    iteration
-  )
-```
+### 5.1 Add Backoff to 408/5xx (RECOMMENDED WITH CAVEATS)
 
 **Risk Analysis:**
-- **Breaking API contract?** No - backoff on errors is standard behavior
-- **Introduce new bugs?** Low risk - reuses existing `sleep_and_continue` pattern
-- **Performance impact?** Positive - reduces unnecessary requests during errors
+- **Breaks Python parity** - May need feature flag
+- **Increases tail latency** - Backoff delays retries
+- **Safer approach:** Configurable, or only backoff after N immediate retries
 
-**Recommendation:** APPLY
+**Recommendation:** APPLY, but make configurable.
 
-### 5.2 Maximum Iteration Guard (NOT RECOMMENDED)
+### 5.2 Fix TrainingClient Monitoring (CRITICAL - MUST FIX)
 
-```elixir
-# Proposed fix
-defp poll_loop(_state, iteration) when iteration > 1000 do
-  {:error, Error.new(:api_timeout, "Exceeded max iterations")}
-end
-```
+**Options:**
+1. Move `Process.monitor/1` into spawned task
+2. Handle `:DOWN` in TrainingClient's `handle_info`
+3. Use `Task.await/2` in dedicated monitor process
+4. Remove the second task entirely
 
-**Risk Analysis:**
-- **Unnecessary** - Stack overflow cannot occur due to BEAM tail-call optimization
-- **May break valid use cases** - Long polls with many retries are legitimate
-- **poll_timeout already handles this** - The existing timeout mechanism is sufficient
+**Recommendation:** MUST FIX. This is a correctness bug that hides failures.
 
-**Recommendation:** SKIP - Solves a non-existent problem
+### 5.3 Fix Circuit Breaker Race (RECOMMENDED)
 
-### 5.3 RateLimiter Pattern Match Change (NOT RECOMMENDED)
+**Options:**
+1. Use `:atomics` for failure counts
+2. Serialize through GenServer
+3. Accept eventual consistency (document it)
 
-```elixir
-# Proposed: Make [] case fail loudly
-[{^key, existing}] = :ets.lookup(:tinkex_rate_limiters, key)
-```
+**Recommendation:** APPLY. Lost updates defeat circuit breaker purpose.
 
-**Risk Analysis:**
-- **Introduces crash risk** - Pattern match failure = process crash
-- **Dead code removal** - The [] case never executes in production anyway
-- **Test impact** - May cause test crashes during cleanup races
+### 5.4 Maximum Iteration Guard (NOT RECOMMENDED)
 
-**Recommendation:** SKIP - Fixing dead code introduces crash risk
+- Unnecessary (no stack overflow risk)
+- Creates new failure mode unrelated to elapsed time
+- `poll_timeout` already handles runaway loops
+
+**Recommendation:** SKIP.
+
+### 5.5 RateLimiter Pattern Match Change (NOT RECOMMENDED)
+
+- Could crash in test isolation or app restarts
+- Dead code doesn't execute in production
+- If changed, add `:ets.whereis` check first
+
+**Recommendation:** SKIP or add proper error handling.
+
+### 5.6 Semaphore Backoff (RECOMMENDED)
+
+Add jittered exponential backoff. Make tunable. Measure impact on test throughput.
 
 ---
 
 ## 6. ALTERNATIVE HYPOTHESES
 
-### 6.1 Tests Got Worse Due to Test Bug Introduction
-
-The test redesign documentation (`01-root-cause-analysis.md`) shows the changes introduced:
-- Supertester 0.4.0 upgrade
-- async: true on integration tests
-- Agent lifecycle changes
-
-These changes could have introduced NEW bugs while fixing old ones. The increased flakiness may be due to:
-- Incomplete migration to new patterns
-- Race conditions in the new test infrastructure
-- Stricter isolation exposing timing-dependent test logic
-
-### 6.2 Polling Loop Issue is Implementation Bug, Not Hidden Bug
-
-The investigation frames the polling loop as a "hidden bug exposed by better tests."
-
-Alternative: It's an **implementation bug** from incorrect Python SDK parity assumptions. The code was written incorrectly from the start, not a subtle race condition.
-
-Evidence: The project's own research documents (November 2025) clearly state Python uses backoff. The code comments contradict this. Someone implemented the code based on a misreading of Python's `continue` statement.
-
-### 6.3 ETS Races Are Test-Only Phenomena
-
-The claimed ETS races can only occur when:
-1. Tests delete ETS entries during concurrent execution
-2. Test cleanup races with test execution
-
-This makes them **test infrastructure bugs**, not production code bugs. The fix is better test isolation, not production code changes.
+1. **Flakiness from external dependencies** - HuggingFace downloads, not concurrency bugs
+2. **CI resource contention** - Scheduler variability causing tight timeouts
+3. **Supertester isolation** - Reveals test assumptions, not production bugs
+4. **Local Bypass latency** - Sub-millisecond responses exaggerate tight-loop behavior
 
 ---
 
 ## 7. RECOMMENDATIONS
 
-### Should the Team Follow This Investigation?
-
-**PARTIALLY YES, PARTIALLY NO**
-
-#### FOLLOW:
-1. **Fix polling loop backoff** - Add exponential backoff for 408/5xx (correct regardless of Python parity)
-2. **Fix test infrastructure** - Apply Supertester isolation patterns consistently
-3. **Mock network calls** - HuggingFace downloads should be mocked in tests
-
-#### DO NOT FOLLOW:
-1. **ETS registration race fix** - The bug doesn't exist; OTP guarantees prevent it
-2. **RateLimiter TOCTOU fix** - Dead code; production race cannot occur
-3. **Maximum iteration guard** - Unnecessary; BEAM handles tail recursion
-4. **12 bugs claim** - Overstated; only 1-2 are real production bugs
-
-### Additional Investigation Needed
-
-1. **Verify Python SDK behavior** - Read actual Python source code for polling loop
-2. **Reproduce claimed failures** - Attempt to trigger "not initialized" error in tests
-3. **Measure actual request rates** - Profile tight loop with realistic network latency
-4. **Audit test isolation** - Ensure Supertester patterns are consistently applied
-
 ### Priority Ranking
 
 | Priority | Action | Reason |
 |----------|--------|--------|
-| P0 | Fix polling loop backoff | Only confirmed production bug |
-| P1 | Standardize test isolation | Root cause of test flakiness |
-| P2 | Mock HuggingFace downloads | Eliminates network-dependent failures |
-| P3 | Verify Python SDK parity | Correct documentation inconsistency |
-| SKIP | ETS race fixes | Bugs don't exist |
+| P0 | Fix TrainingClient monitoring | Correctness bug, hides failures |
+| P1 | Add polling backoff (configurable) | Load control, with parity flag |
+| P1 | Fix circuit breaker race | Defeats purpose of circuit breaker |
+| P2 | Standardize test isolation | Root cause of test flakiness |
+| P2 | Add semaphore backoff | CPU stability |
+| P3 | Mock HuggingFace downloads | Eliminates external failures |
+| SKIP | ETS race fixes | Bugs don't exist (OTP guarantees) |
 | SKIP | Iteration guard | Solves non-problem |
+
+### Additional Work Needed
+
+1. **Verify Python SDK source** - Confirm polling loop behavior before parity claims
+2. **Decide parity vs. safety** - Gate backoff behind config if parity required
+3. **Add targeted stress tests** - Circuit breaker, polling under load
+4. **Audit network tests** - Isolate behind tags
 
 ---
 
 ## 8. CONCLUSION
 
-The investigation demonstrates thorough code reading but contains significant analytical errors:
+**Reconciled Assessment:**
 
-**Strengths:**
-- Correctly identified missing backoff in polling loop
-- Properly diagnosed test infrastructure issues
-- Comprehensive documentation
+| Category | Count | Issues |
+|----------|-------|--------|
+| VERIFIED | 4 | Polling backoff, TrainingClient monitoring, circuit breaker race, semaphore busy-loop |
+| VERIFIED (test-only) | 4 | Telemetry cross-talk, agent cleanup, logger, ETS clearing |
+| DISPUTED | 3+ | ETS registration race, RateLimiter TOCTOU, stack overflow, others |
+| CORRECTION | 1 | Python parity - I was wrong about docs |
 
-**Weaknesses:**
-- Missed OTP guarantees that prevent claimed races
-- Accepted code comments without verification
-- Applied non-BEAM stack behavior assumptions
-- Overstated bug count and severity
+**Confidence:** 72%
 
-**Final Assessment:**
-- **Verified:** 2 issues (polling backoff, test infrastructure)
-- **Disputed:** 2 issues (ETS registration race, RateLimiter TOCTOU)
-- **False:** 1 claim (stack overflow risk)
-- **Missed:** Python SDK parity contradiction in project docs
-
-**Confidence:** 70%
-
-The investigation is useful but requires revision. The team should apply the polling loop fix and test infrastructure improvements, but should NOT implement the ETS-related "fixes" that address non-existent bugs.
+The investigation found real bugs but overstated severity and included impossible races. The team should:
+1. Fix TrainingClient monitoring immediately
+2. Add configurable polling backoff
+3. Fix circuit breaker race
+4. NOT implement ETS "fixes" that address non-existent bugs
 
 ---
 
-## APPENDIX: Verification Evidence
+## APPENDIX: Reconciliation Notes
 
-### A.1 GenServer.call Guarantees
+### What I Got Wrong (v1 → v2 corrections)
 
-From Erlang/OTP documentation:
-> "gen_server:call/2,3 makes a synchronous call to the gen_server process. The call is blocked until a reply is received or the timeout is hit."
+1. **TrainingClient monitoring** - I dismissed this too quickly. The monitor/receive mismatch is real.
+2. **Circuit breaker race** - I mentioned it from the investigation but didn't include in VERIFIED.
+3. **Python SDK parity** - I conflated HTTP retry docs with polling loop. These are separate layers.
+4. **Semaphore busy-loop** - I should have included as verified performance issue.
 
-The reply is sent AFTER handle_call executes the :ets.insert.
+### What Both Reviews Agree On
 
-### A.2 ETS Read-After-Write Consistency
+1. Stack overflow is FALSE (BEAM handles it)
+2. SamplingClient ETS race is disputed (OTP guarantees)
+3. RateLimiter TOCTOU is speculative (no delete path)
+4. Request rate claims are exaggerated
+5. Test infrastructure bugs are real
 
-From Erlang ETS documentation:
-> "All operations performed by a single process on a single ETS table are guaranteed to be linearizable."
+### Peer Review Improvements
 
-After insert, the key is immediately visible to subsequent lookups.
-
-### A.3 BEAM Tail-Call Optimization
-
-From BEAM documentation:
-> "If the last expression in a function is a function call, the BEAM replaces the current call frame with the new one, avoiding stack growth."
-
-This applies to mutual recursion across function boundaries when calls are in tail position.
-
-### A.4 Rate Limiter Deletion Evidence
-
-```bash
-# Grep for deletion from :tinkex_rate_limiters
-$ grep -r ":ets.delete.*tinkex_rate_limiters" lib/
-(no matches in lib/)
-
-$ grep -r ":ets.delete.*tinkex_rate_limiters" test/
-test/tinkex/rate_limiter_test.exs:17:    on_exit(fn -> :ets.delete(:tinkex_rate_limiters, key) end)
-test/tinkex/rate_limiter_test.exs:19:    :ets.delete(:tinkex_rate_limiters, key)
-test/tinkex/rate_limiter_test.exs:33:    on_exit(fn -> :ets.delete(:tinkex_rate_limiters, key) end)
-...
-```
-
-Deletion only occurs in test cleanup, confirming production code never deletes entries.
+The revised `CRITICAL_REVIEW.md` correctly:
+- Adds TrainingClient monitoring as critical bug
+- Notes circuit breaker race
+- Clarifies Python parity (polling vs HTTP layer)
+- Provides better fix recommendations (configurable, phased)
+- Notes mailbox bloat issue

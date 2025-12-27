@@ -4,7 +4,7 @@
 
 Verdict: REVISE (confidence 72%).
 
-The investigation surfaced some real problems, but several "concurrency bugs" are either impossible under OTP/ETS guarantees or substantially overstated. The tight polling loop is real, but the stack overflow and 60k req/min claims are not supported by the code paths or runtime semantics. The SamplingClient ETS registration race does not hold because `GenServer.call/2` and `GenServer.start_link/3` are synchronous. The analysis should be corrected before fixes are prioritized.
+The investigation surfaced some real problems, but several "concurrency bugs" are either impossible under OTP/ETS guarantees or substantially overstated. The tight polling loop is real, but the stack overflow and 60k req/min claims are not supported by the code paths or runtime semantics. The SamplingClient ETS registration race does not hold because `GenServer.call/2` and `GenServer.start_link/3` are synchronous. There is also a documented conflict on Python parity (internal docs say backoff; Python code shows no backoff), so the parity rationale is unresolved. The analysis should be corrected before fixes are prioritized.
 
 ## VERIFIED ISSUES
 
@@ -25,15 +25,16 @@ The investigation surfaced some real problems, but several "concurrency bugs" ar
 
 ## MISSING CONTEXT
 
-- Python parity was not actually verified. The Python SDK does retry 408/5xx with `continue` and no backoff (`tinker/src/tinker/lib/api_future_impl.py:129-176`). That supports parity, but also means "no backoff" is not unique to Elixir. Any backoff change must be a conscious parity break or a configurable knob.
+- Python parity is internally inconsistent. The Python SDK code shows no backoff for 408/5xx in future polling (`tinker/src/tinker/lib/api_future_impl.py:129-176`), but internal research docs claim exponential backoff. The investigation did not reconcile this contradiction, so parity is not a stable justification either way.
 - Request rate claims ignore HTTP latency and Finch pool limits. With the default futures pool (size 25, count 10) the maximum concurrent connections is 250 (`lib/tinkex/application.ex:159-167`). A single polling task can only issue ~1/RTT requests per second. 60,000 requests per minute requires ~1 ms RTT; realistic production RTTs (20-100 ms) yield ~600-3,000 requests/min per task.
 - Test failures include external network issues (HuggingFace 403s) that are unrelated to concurrency bugs, so "tests got worse = real production bugs" is not a complete explanation.
+- The test-infrastructure failures documented in the overhaul plan (telemetry cross-talk, logger contamination, ETS cleanup races) are plausible root causes of historical flakiness; current tests appear migrated away from those patterns, so any remaining instability is not necessarily a production-code signal.
 - `Task.Supervisor.async_nolink/2` sends completion messages to the caller; these messages are ignored by TrainingClient `handle_info/2`, which can bloat the mailbox under load (not mentioned in the investigation).
 - The redesign assumes Supertester 0.4.0 is bug-free; no validation or fallback testing is documented.
 
 ## FIX ASSESSMENT
 
-- Add backoff for 408/5xx: Technically sound for load control, but breaks Python parity and can increase tail latency. Safer approach: make it configurable (or only backoff after N immediate retries) and respect server-provided retry hints if available.
+- Add backoff for 408/5xx: Technically sound for load control, but parity is ambiguous (Python code vs internal docs conflict). Safer approach: make it configurable (or only backoff after N immediate retries), and respect server-provided retry hints if available.
 - Add max-iteration guard: Risky if `poll_timeout` is `:infinity` or very large; this creates a new failure mode unrelated to elapsed time. A time-based cap aligned to `poll_timeout` is safer.
 - Remove RateLimiter `[]` fallback: This assumes ETS is never deleted; could crash in test isolation or during app restarts. If you remove it, add explicit `:ets.whereis` checks or fail fast with a clearer error.
 - TrainingClient monitoring: Must be fixed, but the suggested approach needs to ensure the monitoring process is the one that actually owns the monitor (move `Process.monitor/1` into the spawned task or use `Task.await/2` in a dedicated monitor process). Also handle `:DOWN` in the TrainingClient or avoid spawning the second task entirely.
@@ -51,6 +52,6 @@ The investigation surfaced some real problems, but several "concurrency bugs" ar
 
 - Revise the investigation: remove the incorrect race claims and incorrect stack overflow analysis, and reclassify the request-rate math as best-case under low latency.
 - Fix the TrainingClient monitoring bug immediately; it is a correctness issue that can hide task failures.
-- Decide explicitly on Python parity vs. operational safety. If parity is required, gate 408/5xx backoff behind a config flag and document the behavior.
+- Resolve Python parity by updating internal docs or the Python implementation; until then, treat 408/5xx backoff as a configurable policy, not a fixed rule.
 - Add targeted stress tests for circuit breaker updates and polling retry behavior; do not add broad ETS "race" tests without evidence.
 - Audit tests that hit the network and remove external dependencies from unit tests; isolate integration tests behind explicit tags.
