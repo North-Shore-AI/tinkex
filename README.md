@@ -13,7 +13,7 @@
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.3.3 Highlights
+## 0.3.4 Highlights
 
 - **Streaming Sampling**: New `SamplingClient.sample_stream/4` function for real-time token streaming via SSE. Process tokens incrementally as they are generated.
 - **OpenTelemetry Integration**: Opt-in W3C Trace Context propagation (`traceparent`/`tracestate` headers). Enable with `otel_propagate: true` or `TINKEX_OTEL_PROPAGATE=true`.
@@ -71,7 +71,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.3.3"}
+    {:tinkex, "~> 0.3.4"}
   ]
 end
 ```

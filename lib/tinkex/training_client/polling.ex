@@ -173,7 +173,8 @@ defmodule Tinkex.TrainingClient.Polling do
     |> Keyword.take([
       :timeout,
       :telemetry_metadata,
-      :sleep_fun
+      :sleep_fun,
+      :poll_backoff
     ])
     |> Keyword.put(:config, state.config)
     |> Keyword.put(:http_timeout, http_timeout)

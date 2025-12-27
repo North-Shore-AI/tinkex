@@ -32,6 +32,7 @@ defmodule Tinkex.Env do
       cf_access_client_id: cf_access_client_id(env),
       cf_access_client_secret: cf_access_client_secret(env),
       dump_headers?: dump_headers?(env),
+      poll_backoff: poll_backoff(env),
       parity_mode: parity_mode(env),
       pool_size: pool_size(env),
       pool_count: pool_count(env),
@@ -84,6 +85,20 @@ defmodule Tinkex.Env do
     |> fetch("TINKEX_DUMP_HEADERS")
     |> normalize()
     |> normalize_bool(default: false)
+  end
+
+  @doc """
+  Get future polling backoff policy from environment.
+
+  Set `TINKEX_POLL_BACKOFF=exponential` (or truthy value) to enable backoff
+  for 408/5xx polling retries. Use `TINKEX_POLL_BACKOFF=0` to disable.
+  """
+  @spec poll_backoff(env_source()) :: :exponential | nil
+  def poll_backoff(env \\ :system) do
+    env
+    |> fetch("TINKEX_POLL_BACKOFF")
+    |> normalize()
+    |> parse_poll_backoff()
   end
 
   @spec log_level(env_source()) :: :debug | :info | :warn | :error | nil
@@ -264,6 +279,20 @@ defmodule Tinkex.Env do
   defp parse_parity_mode("elixir"), do: :beam
   defp parse_parity_mode("ELIXIR"), do: :beam
   defp parse_parity_mode(_), do: nil
+
+  defp parse_poll_backoff(nil), do: nil
+
+  defp parse_poll_backoff(value) when is_binary(value) do
+    downcased = String.downcase(value)
+
+    cond do
+      downcased in @truthy -> :exponential
+      downcased in @falsey -> nil
+      downcased == "exponential" -> :exponential
+      downcased == "none" -> nil
+      true -> nil
+    end
+  end
 
   defp parse_json_map(nil), do: %{}
 

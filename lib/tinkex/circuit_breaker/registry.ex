@@ -2,9 +2,9 @@ defmodule Tinkex.CircuitBreaker.Registry do
   @moduledoc """
   ETS-based registry for circuit breaker state.
 
-  Provides process-safe circuit breaker management using ETS for state storage.
   Circuit breakers are identified by endpoint names and can be shared across
-  processes in the same node.
+  processes in the same node. Updates are versioned to avoid lost-update races
+  under concurrency.
 
   ## Usage
 
@@ -71,13 +71,19 @@ defmodule Tinkex.CircuitBreaker.Registry do
   @spec call(String.t(), (-> result), keyword()) :: result | {:error, :circuit_open}
         when result: term()
   def call(name, fun, opts \\ []) do
-    cb = get_or_create(name, opts)
-    call_opts = Keyword.take(opts, [:success?])
+    {version, cb} = get_or_create(name, opts)
+    success_fn = Keyword.get(opts, :success?, &default_success?/1)
+    current_state = CircuitBreaker.state(cb)
 
-    {result, updated_cb} = CircuitBreaker.call(cb, fun, call_opts)
-    put(name, updated_cb)
-
-    result
+    if allow_request?(cb, current_state) do
+      result = fun.()
+      success? = success_fn.(result)
+      updated_cb = apply_result(cb, success?)
+      update_with_retry(name, version, updated_cb, success?, opts)
+      result
+    else
+      {:error, :circuit_open}
+    end
   end
 
   @doc """
@@ -87,7 +93,7 @@ defmodule Tinkex.CircuitBreaker.Registry do
   """
   @spec state(String.t()) :: CircuitBreaker.state()
   def state(name) do
-    case get(name) do
+    case get_cb(name) do
       nil -> :closed
       cb -> CircuitBreaker.state(cb)
     end
@@ -98,14 +104,12 @@ defmodule Tinkex.CircuitBreaker.Registry do
   """
   @spec reset(String.t()) :: :ok
   def reset(name) do
-    case get(name) do
-      nil ->
-        :ok
-
-      cb ->
-        put(name, CircuitBreaker.reset(cb))
-        :ok
+    case get_entry(name) do
+      nil -> :ok
+      {version, cb} -> update_with_retry_raw(name, version, CircuitBreaker.reset(cb))
     end
+
+    :ok
   end
 
   @doc """
@@ -126,37 +130,114 @@ defmodule Tinkex.CircuitBreaker.Registry do
     ensure_table()
 
     :ets.tab2list(@table_name)
-    |> Enum.map(fn {name, cb} -> {name, CircuitBreaker.state(cb)} end)
+    |> Enum.map(fn
+      {name, cb} -> {name, CircuitBreaker.state(cb)}
+      {name, _version, cb} -> {name, CircuitBreaker.state(cb)}
+    end)
   end
 
   # Private functions
 
-  defp get(name) do
+  defp get_entry(name) do
     ensure_table()
 
     case :ets.lookup(@table_name, name) do
-      [{^name, cb}] -> cb
-      [] -> nil
+      [{^name, version, cb}] ->
+        {version, cb}
+
+      [{^name, cb}] ->
+        :ets.insert(@table_name, {name, 0, cb})
+        {0, cb}
+
+      [] ->
+        nil
     end
   end
 
-  defp put(name, cb) do
-    ensure_table()
-    :ets.insert(@table_name, {name, cb})
-    :ok
+  defp get_cb(name) do
+    case get_entry(name) do
+      nil -> nil
+      {_version, cb} -> cb
+    end
   end
 
   defp get_or_create(name, opts) do
-    case get(name) do
-      nil ->
-        cb = CircuitBreaker.new(name, opts)
-        put(name, cb)
-        cb
+    cb_opts = Keyword.take(opts, [:failure_threshold, :reset_timeout_ms, :half_open_max_calls])
 
-      cb ->
-        cb
+    case get_entry(name) do
+      nil ->
+        cb = CircuitBreaker.new(name, cb_opts)
+
+        case :ets.insert_new(@table_name, {name, 0, cb}) do
+          true -> {0, cb}
+          false -> get_entry(name)
+        end
+
+      {version, cb} ->
+        {version, cb}
     end
   end
+
+  defp allow_request?(cb, current_state) do
+    case current_state do
+      :closed -> true
+      :open -> false
+      :half_open -> cb.half_open_calls < cb.half_open_max_calls
+    end
+  end
+
+  defp apply_result(cb, success?) do
+    current_state = CircuitBreaker.state(cb)
+
+    cb =
+      if current_state == :half_open do
+        %{cb | half_open_calls: cb.half_open_calls + 1}
+      else
+        cb
+      end
+
+    if success? do
+      CircuitBreaker.record_success(cb)
+    else
+      CircuitBreaker.record_failure(cb)
+    end
+  end
+
+  defp update_with_retry(name, version, updated_cb, success?, opts) do
+    if cas_update(name, version, updated_cb) do
+      :ok
+    else
+      case get_entry(name) do
+        {next_version, cb} ->
+          next_cb = apply_result(cb, success?)
+          update_with_retry(name, next_version, next_cb, success?, opts)
+
+        nil ->
+          {next_version, cb} = get_or_create(name, opts)
+          next_cb = apply_result(cb, success?)
+          update_with_retry(name, next_version, next_cb, success?, opts)
+      end
+    end
+  end
+
+  defp update_with_retry_raw(name, version, updated_cb) do
+    if cas_update(name, version, updated_cb) do
+      :ok
+    else
+      case get_entry(name) do
+        {next_version, cb} -> update_with_retry_raw(name, next_version, CircuitBreaker.reset(cb))
+        nil -> :ok
+      end
+    end
+  end
+
+  defp cas_update(name, version, cb) do
+    match_spec = [{{name, version, :"$1"}, [], [{{name, version + 1, cb}}]}]
+    :ets.select_replace(@table_name, match_spec) == 1
+  end
+
+  defp default_success?({:ok, _}), do: true
+  defp default_success?(_), do: false
 
   defp ensure_table do
     case :ets.whereis(@table_name) do

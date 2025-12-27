@@ -54,6 +54,10 @@ defmodule Tinkex.Future do
   @max_backoff 30_000
 
   @type sleep_fun :: (non_neg_integer() -> any())
+  @type poll_backoff_policy ::
+          :none
+          | {:exponential, pos_integer(), pos_integer()}
+          | (non_neg_integer() -> non_neg_integer())
   @type poll_result :: {:ok, map()} | {:error, Error.t()}
   @type poll_task :: Task.t()
 
@@ -71,6 +75,7 @@ defmodule Tinkex.Future do
               sleep_fun: nil,
               http_timeout: nil,
               poll_timeout: :infinity,
+              poll_backoff: :none,
               create_roundtrip_time: nil,
               raw_response?: true,
               start_time_ms: nil,
@@ -88,6 +93,7 @@ defmodule Tinkex.Future do
             sleep_fun: Tinkex.Future.sleep_fun(),
             http_timeout: pos_integer(),
             poll_timeout: pos_integer() | :infinity,
+            poll_backoff: Tinkex.Future.poll_backoff_policy(),
             create_roundtrip_time: number() | nil,
             raw_response?: boolean(),
             start_time_ms: integer(),
@@ -102,6 +108,11 @@ defmodule Tinkex.Future do
   `:request_id`. Per-request HTTP timeouts can be supplied via `:http_timeout`,
   while `:timeout` controls the overall polling deadline (`:infinity` by
   default). Tests can inject a custom `:sleep_fun` (defaults to `&Process.sleep/1`).
+
+  Use `:poll_backoff` to control backoff for 408/5xx polling retries. Supported
+  values: `:exponential`, `{:exponential, initial_ms, max_ms}`, or a 1-arity
+  function that returns a non-negative delay in milliseconds. Defaults to no
+  backoff unless configured.
   """
   @spec poll(String.t() | %{request_id: String.t()} | %{String.t() => String.t()}, keyword()) ::
           poll_task()
@@ -128,6 +139,7 @@ defmodule Tinkex.Future do
       sleep_fun: sleep_fun,
       http_timeout: Keyword.get(opts, :http_timeout, @default_polling_http_timeout),
       poll_timeout: Keyword.get(opts, :timeout, :infinity),
+      poll_backoff: resolve_poll_backoff(opts, config),
       create_roundtrip_time: opts[:tinker_create_roundtrip_time],
       raw_response?: Keyword.get(opts, :raw_response?, true),
       start_time_ms: System.monotonic_time(:millisecond)
@@ -211,22 +223,18 @@ defmodule Tinkex.Future do
       {:error, %Error{status: 410} = error} ->
         handle_expired_error(error, state, iteration)
 
-      # Python SDK parity: Continue polling on 408 (Request Timeout).
-      # The server returns 408 when the request is still being processed.
-      # Python uses `continue` (no backoff) for 408, so we do immediate retry.
+      # Continue polling on 408 (Request Timeout).
+      # Backoff is configurable to avoid tight loops during outages.
       {:error, %Error{status: 408} = error} ->
         emit_error_telemetry(@telemetry_api_error, error, iteration, state)
-        # No sleep - immediate retry like Python SDK
-        poll_loop(%{state | last_failed_error: error}, iteration + 1)
+        retry_with_optional_backoff(%{state | last_failed_error: error}, iteration)
 
-      # Python SDK parity: Continue polling on 5xx (Server Errors).
-      # These are transient and should be retried indefinitely until poll_timeout.
-      # Python uses `continue` (no backoff) for 5xx, so we do immediate retry.
+      # Continue polling on 5xx (Server Errors).
+      # These are transient and should be retried until poll_timeout.
       {:error, %Error{status: status} = error}
       when is_integer(status) and status >= 500 and status < 600 ->
         emit_error_telemetry(@telemetry_api_error, error, iteration, state)
-        # No sleep - immediate retry like Python SDK
-        poll_loop(%{state | last_failed_error: error}, iteration + 1)
+        retry_with_optional_backoff(%{state | last_failed_error: error}, iteration)
 
       # Python SDK parity: Continue polling on connection errors with backoff.
       {:error, %Error{type: :api_connection} = error} ->
@@ -303,6 +311,20 @@ defmodule Tinkex.Future do
     poll_loop(state, iteration + 1)
   end
 
+  defp retry_with_optional_backoff(state, iteration) do
+    case state.poll_backoff do
+      :none ->
+        poll_loop(state, iteration + 1)
+
+      {:exponential, initial_ms, max_ms} ->
+        sleep_and_continue(state, calc_backoff(iteration, initial_ms, max_ms), iteration)
+
+      fun when is_function(fun, 1) ->
+        sleep_ms = fun.(iteration) |> normalize_sleep_ms()
+        sleep_and_continue(state, sleep_ms, iteration)
+    end
+  end
+
   defp ensure_within_timeout(%State{poll_timeout: :infinity}), do: :ok
 
   defp ensure_within_timeout(%State{poll_timeout: timeout} = state)
@@ -326,12 +348,14 @@ defmodule Tinkex.Future do
 
   defp evaluate_timeout(_elapsed, _timeout, _state), do: :ok
 
-  defp calc_backoff(iteration) when is_integer(iteration) and iteration >= 0 do
-    # Cap iteration to prevent math.pow overflow
-    # With @initial_backoff=1000, iteration 5 gives 32000 which exceeds @max_backoff=30000
-    capped_iteration = min(iteration, 5)
-    backoff = trunc(:math.pow(2, capped_iteration)) * @initial_backoff
-    min(backoff, @max_backoff)
+  @max_backoff_exponent 30
+
+  defp calc_backoff(iteration, initial_ms \\ @initial_backoff, max_ms \\ @max_backoff)
+       when is_integer(iteration) and iteration >= 0 do
+    capped_iteration = min(iteration, max_exponent(initial_ms, max_ms))
+    capped_iteration = min(capped_iteration, @max_backoff_exponent)
+    backoff = trunc(:math.pow(2, capped_iteration)) * initial_ms
+    min(backoff, max_ms)
   end
 
   defp try_again_sleep_ms(%TryAgainResponse{retry_after_ms: ms}, _iteration)
@@ -344,6 +368,40 @@ defmodule Tinkex.Future do
   end
 
   defp try_again_sleep_ms(_response, iteration), do: calc_backoff(iteration)
+
+  defp resolve_poll_backoff(opts, %Config{} = config) do
+    opts
+    |> Keyword.get(:poll_backoff, config.poll_backoff)
+    |> normalize_poll_backoff()
+  end
+
+  defp normalize_poll_backoff(nil), do: :none
+  defp normalize_poll_backoff(false), do: :none
+  defp normalize_poll_backoff(:none), do: :none
+  defp normalize_poll_backoff(true), do: {:exponential, @initial_backoff, @max_backoff}
+  defp normalize_poll_backoff(:exponential), do: {:exponential, @initial_backoff, @max_backoff}
+
+  defp normalize_poll_backoff({:exponential, initial_ms, max_ms})
+       when is_integer(initial_ms) and initial_ms > 0 and is_integer(max_ms) and
+              max_ms >= initial_ms do
+    {:exponential, initial_ms, max_ms}
+  end
+
+  defp normalize_poll_backoff(fun) when is_function(fun, 1), do: fun
+  defp normalize_poll_backoff(_), do: :none
+
+  defp normalize_sleep_ms(value) when is_integer(value) and value >= 0, do: value
+  defp normalize_sleep_ms(value) when is_float(value) and value >= 0, do: trunc(value)
+  defp normalize_sleep_ms(_), do: 0
+
+  defp max_exponent(initial_ms, max_ms)
+       when is_integer(initial_ms) and initial_ms > 0 and is_integer(max_ms) and
+              max_ms > initial_ms do
+    ratio = max_ms / initial_ms
+    trunc(:math.log(ratio) / :math.log(2)) + 1
+  end
+
+  defp max_exponent(_initial_ms, _max_ms), do: 0
 
   defp build_failed_error(request_id, category, error_map) do
     message =

@@ -25,7 +25,7 @@ The investigation surfaced some real problems, but several "concurrency bugs" ar
 
 ## MISSING CONTEXT
 
-- Python parity is internally inconsistent. The Python SDK code shows no backoff for 408/5xx in future polling (`tinker/src/tinker/lib/api_future_impl.py:129-176`), but internal research docs claim exponential backoff. The investigation did not reconcile this contradiction, so parity is not a stable justification either way.
+- Python parity is internally inconsistent. The Python SDK code shows no backoff for 408/5xx in future polling (`tinker/src/tinker/lib/api_future_impl.py:129-176`), but internal research docs claim exponential backoff. These may reflect different layers (HTTP retry vs polling loop), or one source is outdated. The investigation did not reconcile this contradiction, so parity is not a stable justification either way.
 - Request rate claims ignore HTTP latency and Finch pool limits. With the default futures pool (size 25, count 10) the maximum concurrent connections is 250 (`lib/tinkex/application.ex:159-167`). A single polling task can only issue ~1/RTT requests per second. 60,000 requests per minute requires ~1 ms RTT; realistic production RTTs (20-100 ms) yield ~600-3,000 requests/min per task.
 - Test failures include external network issues (HuggingFace 403s) that are unrelated to concurrency bugs, so "tests got worse = real production bugs" is not a complete explanation.
 - The test-infrastructure failures documented in the overhaul plan (telemetry cross-talk, logger contamination, ETS cleanup races) are plausible root causes of historical flakiness; current tests appear migrated away from those patterns, so any remaining instability is not necessarily a production-code signal.
@@ -38,6 +38,7 @@ The investigation surfaced some real problems, but several "concurrency bugs" ar
 - Add max-iteration guard: Risky if `poll_timeout` is `:infinity` or very large; this creates a new failure mode unrelated to elapsed time. A time-based cap aligned to `poll_timeout` is safer.
 - Remove RateLimiter `[]` fallback: This assumes ETS is never deleted; could crash in test isolation or during app restarts. If you remove it, add explicit `:ets.whereis` checks or fail fast with a clearer error.
 - TrainingClient monitoring: Must be fixed, but the suggested approach needs to ensure the monitoring process is the one that actually owns the monitor (move `Process.monitor/1` into the spawned task or use `Task.await/2` in a dedicated monitor process). Also handle `:DOWN` in the TrainingClient or avoid spawning the second task entirely.
+- Circuit breaker race: Fix by serializing updates through a GenServer or by storing only counters in ETS/atomics and recomputing state deterministically on read. Document any eventual-consistency tradeoff if you keep ETS as-is.
 - Persistent term replacement: Replacing with Agent/ETS adds supervision and overhead. If the goal is to avoid unbounded growth, a bounded ETS table or periodic cleanup may be simpler.
 - Semaphore backoff: Adding jitter/backoff is sensible for CPU stability, but test throughput may decrease. Make it tunable and measure.
 
@@ -55,3 +56,14 @@ The investigation surfaced some real problems, but several "concurrency bugs" ar
 - Resolve Python parity by updating internal docs or the Python implementation; until then, treat 408/5xx backoff as a configurable policy, not a fixed rule.
 - Add targeted stress tests for circuit breaker updates and polling retry behavior; do not add broad ETS "race" tests without evidence.
 - Audit tests that hit the network and remove external dependencies from unit tests; isolate integration tests behind explicit tags.
+
+Priority ranking:
+- P0: Fix TrainingClient monitoring and mailbox bloat (correctness and stability).
+- P1: Add configurable polling backoff; fix circuit breaker lost updates.
+- P2: Add semaphore backoff and tighten test isolation/mocking.
+- Skip: ETS registration race and RateLimiter TOCTOU "fixes" unless new evidence appears.
+
+What NOT to do:
+- Do not add a max-iteration guard to solve "stack overflow" in polling; BEAM tail-call optimization makes this a non-issue and `poll_timeout` already bounds time.
+- Do not remove the RateLimiter `[]` fallback without guarding for ETS lifecycle in tests/startup.
+- Do not add broad ETS "race" tests for conditions that OTP guarantees prevent.

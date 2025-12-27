@@ -988,29 +988,53 @@ defmodule Tinkex.TrainingClient do
         fun
       end
 
-    try do
-      case Task.Supervisor.async_nolink(Tinkex.TaskSupervisor, wrapped_fun) do
-        %Task{pid: pid} ->
-          ref = Process.monitor(pid)
-
-          # Monitor abnormal exits so callers get an explicit error instead of hanging.
-          Task.Supervisor.start_child(Tinkex.TaskSupervisor, fn ->
-            receive do
-              {:DOWN, ^ref, :process, _pid, :normal} ->
-                :ok
-
-              {:DOWN, ^ref, :process, _pid, reason} ->
-                safe_reply(
-                  from,
-                  {:error,
-                   Error.new(:request_failed, "Background task crashed",
-                     data: %{exit_reason: reason}
-                   )}
-                )
-            end
-          end)
-
+    task_fun = fn ->
+      try do
+        wrapped_fun.()
+      rescue
+        exception ->
+          safe_reply(
+            from,
+            {:error,
+             Error.new(:request_failed, "Background task crashed",
+               data: %{exception: exception, stacktrace: __STACKTRACE__}
+             )}
+          )
+      catch
+        :exit, :normal ->
           :ok
+
+        :exit, reason ->
+          safe_reply(
+            from,
+            {:error,
+             Error.new(:request_failed, "Background task crashed", data: %{exit_reason: reason})}
+          )
+
+        reason ->
+          safe_reply(
+            from,
+            {:error,
+             Error.new(:request_failed, "Background task crashed", data: %{throw_reason: reason})}
+          )
+      end
+    end
+
+    try do
+      case Task.Supervisor.start_child(Tinkex.TaskSupervisor, task_fun) do
+        {:ok, pid} ->
+          Process.unlink(pid)
+          :ok
+
+        {:error, reason} ->
+          Logger.error("Failed to start training background task: #{inspect(reason)}")
+
+          safe_reply(
+            from,
+            {:error, Error.new(:request_failed, "Background task failed to start")}
+          )
+
+          :error
       end
     rescue
       exception ->

@@ -19,6 +19,7 @@ defmodule Tinkex.ConfigTest do
       assert config.base_url =~ "tinker.thinkingmachines.dev"
       assert config.timeout == 60_000
       assert config.max_retries == 10
+      assert config.poll_backoff == nil
       assert config.http_pool == Tinkex.HTTP.Pool
       assert config.http_client == Tinkex.API
       assert config.tags == ["tinkex-elixir"]
@@ -79,7 +80,7 @@ defmodule Tinkex.ConfigTest do
     test "applies opts > app config > env > defaults for shared fields" do
       env_snapshot =
         snapshot_env(
-          ~w[TINKER_API_KEY TINKER_BASE_URL TINKER_TELEMETRY TINKER_LOG TINKEX_DUMP_HEADERS TINKEX_DEFAULT_HEADERS TINKEX_DEFAULT_QUERY TINKEX_HTTP_CLIENT TINKEX_HTTP_POOL]
+          ~w[TINKER_API_KEY TINKER_BASE_URL TINKER_TELEMETRY TINKER_LOG TINKEX_DUMP_HEADERS TINKEX_DEFAULT_HEADERS TINKEX_DEFAULT_QUERY TINKEX_HTTP_CLIENT TINKEX_HTTP_POOL TINKEX_POLL_BACKOFF]
         )
 
       app_snapshot =
@@ -92,7 +93,8 @@ defmodule Tinkex.ConfigTest do
           :default_headers,
           :default_query,
           :http_client,
-          :http_pool
+          :http_pool,
+          :poll_backoff
         ])
 
       on_exit(fn ->
@@ -109,6 +111,7 @@ defmodule Tinkex.ConfigTest do
       System.put_env("TINKEX_DEFAULT_QUERY", ~s({"env":"1"}))
       System.put_env("TINKEX_HTTP_CLIENT", "Tinkex.API")
       System.put_env("TINKEX_HTTP_POOL", "env_pool")
+      System.put_env("TINKEX_POLL_BACKOFF", "exponential")
 
       Application.put_env(:tinkex, :api_key, "tml-app-key")
       Application.put_env(:tinkex, :base_url, "https://app.example.com/base")
@@ -119,6 +122,7 @@ defmodule Tinkex.ConfigTest do
       Application.put_env(:tinkex, :default_query, %{"app" => "1"})
       Application.put_env(:tinkex, :http_client, StubHTTPClient)
       Application.put_env(:tinkex, :http_pool, :app_pool)
+      Application.put_env(:tinkex, :poll_backoff, :none)
 
       config = Config.new()
       assert config.api_key == "tml-app-key"
@@ -130,6 +134,7 @@ defmodule Tinkex.ConfigTest do
       assert config.default_query == %{"app" => "1"}
       assert config.http_client == StubHTTPClient
       assert config.http_pool == :app_pool
+      assert config.poll_backoff == :none
 
       config =
         Config.new(
@@ -141,7 +146,8 @@ defmodule Tinkex.ConfigTest do
           default_headers: %{"x-opt" => "1"},
           default_query: %{"opt" => "1"},
           http_client: Tinkex.API,
-          http_pool: :opt_pool
+          http_pool: :opt_pool,
+          poll_backoff: :exponential
         )
 
       assert config.api_key == "tml-opt-key"
@@ -153,6 +159,7 @@ defmodule Tinkex.ConfigTest do
       assert config.default_query == %{"opt" => "1"}
       assert config.http_client == Tinkex.API
       assert config.http_pool == :opt_pool
+      assert config.poll_backoff == :exponential
 
       Application.delete_env(:tinkex, :api_key)
       Application.delete_env(:tinkex, :base_url)
@@ -163,6 +170,7 @@ defmodule Tinkex.ConfigTest do
       Application.delete_env(:tinkex, :default_query)
       Application.delete_env(:tinkex, :http_client)
       Application.delete_env(:tinkex, :http_pool)
+      Application.delete_env(:tinkex, :poll_backoff)
 
       config = Config.new()
       assert config.api_key == "tml-env-key"
@@ -174,6 +182,7 @@ defmodule Tinkex.ConfigTest do
       assert config.default_query == %{"env" => "1"}
       assert config.http_client == Tinkex.API
       assert config.http_pool == :env_pool
+      assert config.poll_backoff == :exponential
     end
 
     test "feature_gates default to async_sampling with precedence" do

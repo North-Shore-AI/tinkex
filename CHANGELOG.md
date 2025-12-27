@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.3.4] - 2025-12-26
+
+### Fixed
+
+- Configurable polling backoff for 408/5xx in Future polling (opt-in).
+- TrainingClient background task monitoring fix to surface crashes and avoid mailbox bloat.
+- Circuit breaker registry concurrency fix to prevent lost updates under concurrent failures.
+- Jittered exponential backoff for SamplingDispatch/RetrySemaphore busy loops (tunable).
+
 ## [0.3.3] - 2025-12-26
 
 ### Added

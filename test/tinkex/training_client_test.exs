@@ -52,6 +52,29 @@ defmodule Tinkex.TrainingClientTest do
     end
   end
 
+  test "returns error when background task crashes", %{config: config} do
+    :persistent_term.put({WeightsStub, :response}, %{"path" => "tinker://stub/sampler"})
+
+    on_exit(fn ->
+      :persistent_term.erase({WeightsStub, :response})
+    end)
+
+    {:ok, client} =
+      TrainingClient.start_link(
+        session_id: "sess-crash-task",
+        model_seq_id: 0,
+        base_model: "base",
+        config: config,
+        service_api: ServiceStub,
+        weights_api: WeightsStub,
+        client_supervisor: :missing_supervisor
+      )
+
+    {:ok, task} = TrainingClient.save_weights_and_get_sampling_client(client)
+    assert {:error, %Tinkex.Error{type: :request_failed} = error} = Task.await(task, 1_000)
+    assert error.message =~ "Background task"
+  end
+
   test "forward_backward sends chunks sequentially and combines results", %{
     bypass: bypass,
     config: config

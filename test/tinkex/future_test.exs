@@ -98,6 +98,44 @@ defmodule Tinkex.FutureTest do
     end
   end
 
+  describe "poll_loop configurable backoff for 408/5xx" do
+    test "backs off on 408 when poll_backoff is configured", %{bypass: bypass, config: config} do
+      parent = self()
+      sleep_fun = fn ms -> send(parent, {:slept, ms}) end
+      backoff_fun = fn iteration -> 25 + iteration end
+
+      config = %{config | poll_backoff: backoff_fun}
+
+      stub_sequence(bypass, [
+        {408, %{"message" => "Request timeout"}, []},
+        {200, %{"status" => "completed", "result" => %{"data" => "success"}}, []}
+      ])
+
+      task = Future.poll("test-request-id", config: config, sleep_fun: sleep_fun)
+      assert {:ok, %{"data" => "success"}} = Task.await(task, 5_000)
+      assert_receive {:slept, 25}
+      refute_receive {:slept, _}
+    end
+
+    test "backs off on 5xx when poll_backoff is configured", %{bypass: bypass, config: config} do
+      parent = self()
+      sleep_fun = fn ms -> send(parent, {:slept, ms}) end
+      backoff_fun = fn iteration -> 40 + iteration end
+
+      config = %{config | poll_backoff: backoff_fun}
+
+      stub_sequence(bypass, [
+        {503, %{"message" => "Service unavailable"}, []},
+        {200, %{"status" => "completed", "result" => %{"data" => "success"}}, []}
+      ])
+
+      task = Future.poll("test-request-id", config: config, sleep_fun: sleep_fun)
+      assert {:ok, %{"data" => "success"}} = Task.await(task, 5_000)
+      assert_receive {:slept, 40}
+      refute_receive {:slept, _}
+    end
+  end
+
   describe "poll_loop terminal errors" do
     test "stops on 410 (expired promise)", %{bypass: bypass, config: config} do
       Bypass.expect_once(bypass, "POST", "/api/v1/retrieve_future", fn conn ->

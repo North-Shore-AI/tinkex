@@ -106,4 +106,39 @@ defmodule Tinkex.RetrySemaphoreTest do
     Task.await(t1, 1_000)
     Task.await(t2, 1_000)
   end
+
+  test "backs off with jittered exponential delay when busy" do
+    parent = self()
+    attempts = :atomics.new(1, [])
+
+    acquire_fun = fn _name, _max ->
+      attempt = :atomics.add_get(attempts, 1, 1)
+      attempt > 3
+    end
+
+    sleep_fun = fn ms -> send(parent, {:slept, ms}) end
+
+    result =
+      RetrySemaphore.with_semaphore(
+        1,
+        [
+          backoff: [
+            base_ms: 5,
+            max_ms: 20,
+            jitter: 0.0,
+            sleep_fun: sleep_fun,
+            acquire_fun: acquire_fun,
+            release_fun: fn _name -> :ok end,
+            rand_fun: fn -> 0.0 end
+          ]
+        ],
+        fn -> :ok end
+      )
+
+    assert result == :ok
+    assert_receive {:slept, 5}
+    assert_receive {:slept, 10}
+    assert_receive {:slept, 20}
+    refute_receive {:slept, _}
+  end
 end

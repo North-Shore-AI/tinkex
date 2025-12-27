@@ -14,6 +14,7 @@ defmodule Tinkex.EnvTest do
       "CLOUDFLARE_ACCESS_CLIENT_ID" => "cf-id",
       "CLOUDFLARE_ACCESS_CLIENT_SECRET" => "cf-secret",
       "TINKEX_DUMP_HEADERS" => "1",
+      "TINKEX_POLL_BACKOFF" => "exponential",
       "TINKEX_DEFAULT_HEADERS" => ~s({"Authorization":"Bearer token","x-extra":"1"}),
       "TINKEX_DEFAULT_QUERY" => ~s({"mode":"fast","flag":true}),
       "TINKEX_HTTP_CLIENT" => "Tinkex.API",
@@ -31,6 +32,7 @@ defmodule Tinkex.EnvTest do
     assert snapshot.cf_access_client_id == "cf-id"
     assert snapshot.cf_access_client_secret == "cf-secret"
     assert snapshot.dump_headers?
+    assert snapshot.poll_backoff == :exponential
     assert snapshot.default_headers == %{"Authorization" => "Bearer token", "x-extra" => "1"}
     assert snapshot.default_query == %{"flag" => "true", "mode" => "fast"}
     assert snapshot.http_client == Tinkex.API
@@ -42,7 +44,8 @@ defmodule Tinkex.EnvTest do
       "TINKER_API_KEY" => " ",
       "TINKER_TELEMETRY" => "maybe",
       "TINKEX_DUMP_HEADERS" => "",
-      "TINKER_FEATURE_GATES" => " "
+      "TINKER_FEATURE_GATES" => " ",
+      "TINKEX_POLL_BACKOFF" => "0"
     }
 
     assert Env.api_key(env) == nil
@@ -51,6 +54,7 @@ defmodule Tinkex.EnvTest do
     assert Env.feature_gates(env) == ["async_sampling"]
     assert Env.telemetry_enabled?(env)
     refute Env.dump_headers?(env)
+    assert Env.poll_backoff(env) == nil
   end
 
   test "boolean parsing accepts common truthy/falsey values" do

@@ -4,7 +4,7 @@
 **Reviewer:** Independent Adversarial Analysis
 **Documents Reviewed:** 7 investigation documents (00-05, 99)
 **Status:** REVISE (Confidence: 72%)
-**Revision:** v2 - Reconciled with peer review
+**Revision:** v3 - Final reconciliation with CRITICAL_REVIEW.md
 
 ---
 
@@ -16,9 +16,9 @@ The investigation surfaced real problems but overstates others. After peer revie
 
 1. **4 issues VERIFIED as real** (polling loop backoff, TrainingClient monitoring, circuit breaker race, semaphore busy-loop)
 2. **3 issues DISPUTED** (ETS registration race, RateLimiter TOCTOU, stack overflow - OTP/BEAM guarantees prevent these)
-3. **1 major correction** (Python SDK parity: the polling loop may correctly match Python behavior; HTTP layer docs I cited describe a different layer)
+3. **1 unresolved contradiction** (Python SDK parity: internal docs claim backoff, Python source reportedly shows none - neither justifies a fixed position)
 
-The investigation's thesis is partially correct. Some bugs are real; others rely on misunderstanding OTP guarantees.
+The investigation's thesis is partially correct. Some bugs are real; others rely on misunderstanding OTP guarantees. Python parity is not a stable justification until the internal contradiction is resolved.
 
 ---
 
@@ -122,7 +122,7 @@ end
 
 **Recommendation:** Add jittered exponential backoff. Make tunable.
 
-### 2.5 Test Infrastructure Bugs (VERIFIED)
+### 2.5 Test Infrastructure Bugs (VERIFIED - Possibly Already Migrated)
 
 | Bug | Status | Evidence |
 |-----|--------|----------|
@@ -132,6 +132,8 @@ end
 | ETS table clearing | VERIFIED | :ets.delete_all_objects on shared tables |
 
 These are **test bugs**, not production code bugs.
+
+**Important caveat:** The test infrastructure overhaul documentation shows these patterns were identified and migration was planned. Current tests may have already been migrated away from these patterns. If so, any remaining instability is not necessarily caused by these issues and may point to other factors (external dependencies, CI resource contention, etc.).
 
 ---
 
@@ -203,16 +205,20 @@ GenServers run `loop/1` indefinitely without stack growth. This is fundamental B
 
 ## 4. MISSING CONTEXT (Corrections)
 
-### 4.1 Python SDK Parity - CORRECTION
+### 4.1 Python SDK Parity - UNRESOLVED CONTRADICTION
 
-**My original claim was wrong.** I cited docs about HTTP layer retry (which uses backoff). The polling loop is separate.
+**My original claim was wrong, but the situation is more complex than I initially thought.**
 
-The revised review correctly notes: Python polling loop (`tinker/src/tinker/lib/api_future_impl.py`) may use `continue` with no backoff. The Elixir code may be correctly matching Python behavior.
+There is an **unresolved contradiction** in the project:
+- **Internal research docs** (`docs/20251207/impl_audit/queue_and_futures.md`, etc.) claim Python uses "exponential backoff capped at 30s" for 408/5xx
+- **Python source code** (`tinker/src/tinker/lib/api_future_impl.py:129-176`) reportedly uses `continue` with no backoff
 
-**Implication:** Adding backoff would be a **conscious parity break**. This should be:
-- Configurable via option
-- Documented as behavioral difference
-- Or verified against actual Python source before claiming parity
+These describe different layers (HTTP retry vs polling loop), OR one source is outdated/incorrect.
+
+**Implication:** "Python parity" is not a stable justification either way until this is resolved. Backoff should be:
+- Configurable via option (default can match current behavior)
+- Documented as a policy decision, not a parity claim
+- The contradiction should be resolved by updating internal docs OR the Python implementation
 
 ### 4.2 Request Rate Constraints
 
@@ -228,6 +234,18 @@ Finch pool limits constrain request rates:
 ### 4.4 External Dependencies
 
 HuggingFace 403s are unrelated to concurrency bugs. "Tests got worse = real production bugs" is incomplete - external failures also increased.
+
+### 4.5 Supertester 0.4.0 Assumption
+
+The test redesign assumes Supertester 0.4.0 is bug-free; no validation or fallback testing is documented. If Supertester itself has bugs, the test isolation may not work as expected.
+
+**Note:** Supertester source is available at `~/p/g/n/supertester`. If bugs are found, switch to a path dependency for faster iteration:
+```elixir
+# In mix.exs, change from:
+{:supertester, "~> 0.4.0"}
+# To:
+{:supertester, path: "../supertester"}
+```
 
 ---
 
@@ -256,18 +274,22 @@ HuggingFace 403s are unrelated to concurrency bugs. "Tests got worse = real prod
 
 **Options:**
 1. Use `:atomics` for failure counts
-2. Serialize through GenServer
-3. Accept eventual consistency (document it)
+2. Serialize updates through a GenServer
+3. Store only counters in ETS/atomics and recompute state deterministically on read
+4. Accept eventual consistency (document the tradeoff)
 
-**Recommendation:** APPLY. Lost updates defeat circuit breaker purpose.
+**Recommendation:** APPLY. Lost updates defeat circuit breaker purpose. Option 3 (counters + deterministic recompute) is cleanest - avoids serialization bottleneck while ensuring consistency.
 
 ### 5.4 Maximum Iteration Guard (NOT RECOMMENDED)
 
 - Unnecessary (no stack overflow risk)
 - Creates new failure mode unrelated to elapsed time
 - `poll_timeout` already handles runaway loops
+- Risky if `poll_timeout` is `:infinity` or very large
 
-**Recommendation:** SKIP.
+**Recommendation:** SKIP the iteration-based guard.
+
+**If a guard is truly needed:** A time-based cap aligned to `poll_timeout` would be safer than an arbitrary iteration count. But `poll_timeout` already serves this purpose.
 
 ### 5.5 RateLimiter Pattern Match Change (NOT RECOMMENDED)
 
@@ -280,6 +302,21 @@ HuggingFace 403s are unrelated to concurrency bugs. "Tests got worse = real prod
 ### 5.6 Semaphore Backoff (RECOMMENDED)
 
 Add jittered exponential backoff. Make tunable. Measure impact on test throughput.
+
+### 5.7 Persistent Term Replacement (LOW PRIORITY)
+
+The investigation suggests replacing persistent_term debouncing with Agent/ETS.
+
+**Risk Analysis:**
+- Replacing with Agent adds supervision and overhead
+- May be over-engineering for the actual problem
+
+**Better alternatives:**
+- Bounded ETS table with max entries
+- Periodic cleanup (e.g., in a scheduled task)
+- Accept current behavior if leak rate is low in practice
+
+**Recommendation:** LOW PRIORITY. If addressed, prefer bounded ETS or periodic cleanup over Agent replacement.
 
 ---
 
@@ -298,7 +335,7 @@ Add jittered exponential backoff. Make tunable. Measure impact on test throughpu
 
 | Priority | Action | Reason |
 |----------|--------|--------|
-| P0 | Fix TrainingClient monitoring | Correctness bug, hides failures |
+| P0 | Fix TrainingClient monitoring and mailbox bloat | Correctness bug, hides failures, mailbox grows unbounded |
 | P1 | Add polling backoff (configurable) | Load control, with parity flag |
 | P1 | Fix circuit breaker race | Defeats purpose of circuit breaker |
 | P2 | Standardize test isolation | Root cause of test flakiness |
@@ -309,10 +346,16 @@ Add jittered exponential backoff. Make tunable. Measure impact on test throughpu
 
 ### Additional Work Needed
 
-1. **Verify Python SDK source** - Confirm polling loop behavior before parity claims
+1. **Resolve Python parity contradiction** - Update internal docs OR Python implementation; until then, treat backoff as configurable policy
 2. **Decide parity vs. safety** - Gate backoff behind config if parity required
-3. **Add targeted stress tests** - Circuit breaker, polling under load
-4. **Audit network tests** - Isolate behind tags
+3. **Add targeted stress tests** - Circuit breaker updates, polling retry behavior under load
+4. **Audit network tests** - Isolate behind tags, mock external dependencies
+
+### What NOT To Do
+
+1. **Do not add broad ETS "race" tests** - The claimed races (SamplingClient registration, RateLimiter TOCTOU) cannot occur due to OTP guarantees. Adding tests for impossible conditions wastes effort and creates false confidence.
+2. **Do not add iteration guard for stack overflow** - BEAM handles tail recursion. This solves a non-problem.
+3. **Do not remove RateLimiter `[]` fallback without checks** - Could crash during test isolation or app restarts.
 
 ---
 
@@ -323,9 +366,9 @@ Add jittered exponential backoff. Make tunable. Measure impact on test throughpu
 | Category | Count | Issues |
 |----------|-------|--------|
 | VERIFIED | 4 | Polling backoff, TrainingClient monitoring, circuit breaker race, semaphore busy-loop |
-| VERIFIED (test-only) | 4 | Telemetry cross-talk, agent cleanup, logger, ETS clearing |
+| VERIFIED (test-only) | 4 | Telemetry cross-talk, agent cleanup, logger, ETS clearing (possibly already migrated) |
 | DISPUTED | 3+ | ETS registration race, RateLimiter TOCTOU, stack overflow, others |
-| CORRECTION | 1 | Python parity - I was wrong about docs |
+| UNRESOLVED | 1 | Python parity - internal docs vs Python source contradiction |
 
 **Confidence:** 72%
 
@@ -339,12 +382,13 @@ The investigation found real bugs but overstated severity and included impossibl
 
 ## APPENDIX: Reconciliation Notes
 
-### What I Got Wrong (v1 → v2 corrections)
+### What I Got Wrong (v1 → v2 → v3 corrections)
 
 1. **TrainingClient monitoring** - I dismissed this too quickly. The monitor/receive mismatch is real.
 2. **Circuit breaker race** - I mentioned it from the investigation but didn't include in VERIFIED.
-3. **Python SDK parity** - I conflated HTTP retry docs with polling loop. These are separate layers.
+3. **Python SDK parity** - v1: I wrongly said Python uses backoff. v2: I accepted Python has no backoff. v3: Correctly framed as UNRESOLVED CONTRADICTION between internal docs and Python source.
 4. **Semaphore busy-loop** - I should have included as verified performance issue.
+5. **Test infra migration** - I didn't note tests may already be migrated.
 
 ### What Both Reviews Agree On
 
@@ -352,13 +396,17 @@ The investigation found real bugs but overstated severity and included impossibl
 2. SamplingClient ETS race is disputed (OTP guarantees)
 3. RateLimiter TOCTOU is speculative (no delete path)
 4. Request rate claims are exaggerated
-5. Test infrastructure bugs are real
+5. Test infrastructure bugs are real (though possibly already addressed)
+6. TrainingClient monitoring is a critical correctness bug
+7. Circuit breaker race is real
+8. Backoff should be configurable
 
-### Peer Review Improvements
+### Merged Improvements (v3)
 
-The revised `CRITICAL_REVIEW.md` correctly:
-- Adds TrainingClient monitoring as critical bug
-- Notes circuit breaker race
-- Clarifies Python parity (polling vs HTTP layer)
-- Provides better fix recommendations (configurable, phased)
-- Notes mailbox bloat issue
+This version incorporates from the revised `CRITICAL_REVIEW.md`:
+- Python parity framed as unresolved contradiction (not assumed either way)
+- Test infra migration caveat added
+- Persistent term fix guidance added
+- Time-based cap alternative for iteration guard
+- Explicit "What NOT To Do" section
+- More actionable recommendations

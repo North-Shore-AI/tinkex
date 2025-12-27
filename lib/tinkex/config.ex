@@ -20,6 +20,7 @@ defmodule Tinkex.Config do
             http_client: Tinkex.API,
             timeout: nil,
             max_retries: nil,
+            poll_backoff: nil,
             user_metadata: nil,
             tags: nil,
             feature_gates: nil,
@@ -45,6 +46,7 @@ defmodule Tinkex.Config do
           http_client: module(),
           timeout: pos_integer(),
           max_retries: non_neg_integer(),
+          poll_backoff: poll_backoff_policy(),
           user_metadata: map() | nil,
           tags: [String.t()] | nil,
           feature_gates: [String.t()] | nil,
@@ -60,6 +62,14 @@ defmodule Tinkex.Config do
           recovery: RecoveryPolicy.t() | nil,
           otel_propagate: boolean()
         }
+
+  @type poll_backoff_policy ::
+          nil
+          | :none
+          | :exponential
+          | boolean()
+          | {:exponential, pos_integer(), pos_integer()}
+          | (non_neg_integer() -> non_neg_integer())
 
   @default_base_url "https://tinker.thinkingmachines.dev/services/tinker-prod"
 
@@ -137,6 +147,12 @@ defmodule Tinkex.Config do
 
     max_retries =
       pick([opts[:max_retries], Application.get_env(:tinkex, :max_retries)], default_max_retries)
+
+    poll_backoff =
+      pick(
+        [opts[:poll_backoff], Application.get_env(:tinkex, :poll_backoff)],
+        env.poll_backoff
+      )
 
     tags =
       pick(
@@ -243,6 +259,7 @@ defmodule Tinkex.Config do
       http_client: http_client,
       timeout: timeout,
       max_retries: max_retries,
+      poll_backoff: poll_backoff,
       user_metadata: opts[:user_metadata],
       tags: tags,
       feature_gates: feature_gates,
@@ -302,6 +319,7 @@ defmodule Tinkex.Config do
     validate_http_client!(config.http_client)
     validate_timeout!(config.timeout)
     validate_max_retries!(config.max_retries)
+    validate_poll_backoff!(config.poll_backoff)
     validate_tags!(config.tags)
     validate_feature_gates!(config.feature_gates)
     validate_telemetry_enabled!(config.telemetry_enabled?)
@@ -333,6 +351,25 @@ defmodule Tinkex.Config do
       raise ArgumentError,
             "max_retries must be a non-negative integer, got: #{inspect(max_retries)}"
     end
+  end
+
+  defp validate_poll_backoff!(nil), do: :ok
+  defp validate_poll_backoff!(false), do: :ok
+  defp validate_poll_backoff!(true), do: :ok
+  defp validate_poll_backoff!(:none), do: :ok
+  defp validate_poll_backoff!(:exponential), do: :ok
+
+  defp validate_poll_backoff!({:exponential, initial_ms, max_ms})
+       when is_integer(initial_ms) and initial_ms > 0 and is_integer(max_ms) and
+              max_ms >= initial_ms do
+    :ok
+  end
+
+  defp validate_poll_backoff!(fun) when is_function(fun, 1), do: :ok
+
+  defp validate_poll_backoff!(other) do
+    raise ArgumentError,
+          "poll_backoff must be :exponential, :none, a 1-arity function, or {:exponential, initial_ms, max_ms}, got: #{inspect(other)}"
   end
 
   defp validate_tags!(tags) do
