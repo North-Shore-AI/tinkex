@@ -31,6 +31,7 @@ defmodule Tinkex.Telemetry.Reporter do
   use GenServer
   require Logger
 
+  alias Foundation.Backoff
   alias Tinkex.API.Telemetry, as: TelemetryAPI
 
   alias Tinkex.Types.Telemetry.{
@@ -73,6 +74,8 @@ defmodule Tinkex.Telemetry.Reporter do
     * `:http_timeout_ms` - HTTP request timeout (default: 5s)
     * `:max_retries` - max retries per batch (default: 3)
     * `:retry_base_delay_ms` - base delay for exponential backoff (default: 1s)
+    * `:retry_sleep_fun` - override retry sleep function (default: `&Process.sleep/1`)
+    * `:retry_rand_fun` - override retry jitter RNG (default: `&:rand.uniform/1`)
     * `:max_queue_size` - drop events beyond this size (default: 10_000)
     * `:max_batch_size` - events per POST (default: 100)
     * `:enabled` - override env flag; when false returns `:ignore`
@@ -185,6 +188,13 @@ defmodule Tinkex.Telemetry.Reporter do
         retry_base_delay_ms =
           Keyword.get(opts, :retry_base_delay_ms, @default_retry_base_delay_ms)
 
+        retry_sleep_fun =
+          opts
+          |> Keyword.get(:retry_sleep_fun, &Process.sleep/1)
+          |> normalize_sleep_fun()
+
+        retry_rand_fun = Keyword.get(opts, :retry_rand_fun, &:rand.uniform/1)
+
         max_queue_size = Keyword.get(opts, :max_queue_size, @max_queue_size)
         max_batch_size = Keyword.get(opts, :max_batch_size, @max_batch_size)
 
@@ -206,6 +216,8 @@ defmodule Tinkex.Telemetry.Reporter do
           http_timeout_ms: http_timeout_ms,
           max_retries: max_retries,
           retry_base_delay_ms: retry_base_delay_ms,
+          retry_sleep_fun: retry_sleep_fun,
+          retry_rand_fun: retry_rand_fun,
           max_queue_size: max_queue_size,
           max_batch_size: max_batch_size,
           session_index: 0,
@@ -431,13 +443,13 @@ defmodule Tinkex.Telemetry.Reporter do
         :ok
 
       {:error, reason} when attempt < state.max_retries ->
-        delay = calculate_backoff_delay(attempt, state.retry_base_delay_ms)
+        delay = retry_backoff_delay(state, attempt)
 
         Logger.warning(
           "Telemetry send failed (attempt #{attempt + 1}), retrying in #{delay}ms: #{inspect(reason)}"
         )
 
-        Process.sleep(delay)
+        state.retry_sleep_fun.(delay)
         send_batch_with_retry(request, state, mode, attempt + 1)
 
       {:error, reason} ->
@@ -449,12 +461,22 @@ defmodule Tinkex.Telemetry.Reporter do
     end
   end
 
-  defp calculate_backoff_delay(attempt, base_delay_ms) do
-    # Exponential backoff: base * 2^attempt with some jitter
-    base = base_delay_ms * :math.pow(2, attempt)
-    jitter = :rand.uniform(round(base * 0.1))
-    round(base + jitter)
+  defp retry_backoff_delay(state, attempt) do
+    backoff =
+      Backoff.Policy.new(
+        strategy: :exponential,
+        base_ms: state.retry_base_delay_ms,
+        max_ms: nil,
+        jitter_strategy: :additive,
+        jitter: 0.1,
+        rand_fun: state.retry_rand_fun
+      )
+
+    Backoff.delay(backoff, attempt)
   end
+
+  defp normalize_sleep_fun(fun) when is_function(fun, 1), do: fun
+  defp normalize_sleep_fun(_fun), do: &Process.sleep/1
 
   defp build_request(events, state) do
     # Convert typed structs to wire format maps

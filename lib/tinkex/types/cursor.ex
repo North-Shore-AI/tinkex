@@ -3,8 +3,23 @@ defmodule Tinkex.Types.Cursor do
   Pagination cursor for paged responses.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   @enforce_keys [:offset, :limit, :total_count]
   defstruct [:offset, :limit, :total_count]
+
+  @schema Schema.define([
+            {:offset, :integer, [optional: true, default: 0]},
+            {:limit, :integer, [optional: true, default: 0]},
+            {:total_count, :integer, [optional: true, default: 0]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           offset: non_neg_integer(),
@@ -20,26 +35,12 @@ defmodule Tinkex.Types.Cursor do
   def from_map(map) when not is_map(map), do: nil
 
   def from_map(map) when is_map(map) do
-    %__MODULE__{
-      offset: fetch_int(map, "offset"),
-      limit: fetch_int(map, "limit"),
-      total_count: fetch_int(map, "total_count")
-    }
-  end
+    case SchemaCodec.validate(schema(), map, coerce: true) do
+      {:ok, validated} ->
+        SchemaCodec.to_struct(struct(__MODULE__), validated)
 
-  defp fetch_int(map, key) do
-    case map[key] || map[String.to_atom(key)] do
-      value when is_integer(value) ->
-        value
-
-      value when is_binary(value) ->
-        case Integer.parse(value) do
-          {int, _} -> int
-          :error -> 0
-        end
-
-      _ ->
-        0
+      {:error, _} ->
+        %__MODULE__{offset: 0, limit: 0, total_count: 0}
     end
   end
 end

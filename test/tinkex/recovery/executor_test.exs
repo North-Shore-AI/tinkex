@@ -122,4 +122,50 @@ defmodule Tinkex.Recovery.ExecutorTest do
     GenServer.stop(executor)
     assert_receive {:DOWN, ^monitor, :process, ^executor, _}
   end
+
+  test "schedules capped exponential backoff delays", %{service_pid: service_pid} do
+    ServiceStub.set_failures(4, service_pid)
+    test_pid = self()
+
+    send_after = fn msg, delay ->
+      send(test_pid, {:retry_scheduled, delay})
+      send(self(), msg)
+      make_ref()
+    end
+
+    policy =
+      %Policy{
+        enabled: true,
+        checkpoint_strategy: :latest,
+        restore_optimizer: false,
+        max_attempts: 4,
+        backoff_ms: 10,
+        max_backoff_ms: 25
+      }
+      |> Map.put(:on_failure, fn run_id, reason ->
+        send(test_pid, {:failure_callback, run_id, reason})
+        :ok
+      end)
+
+    {:ok, executor} =
+      start_supervised(
+        {Executor,
+         service_client_module: ServiceStub, rest_module: Tinkex.API.Rest, send_after: send_after}
+      )
+
+    assert :ok =
+             Executor.recover(executor, "run-backoff", service_pid, policy,
+               last_checkpoint: "tinker://run/checkpoint",
+               metadata: TelemetryHelpers.current_test_metadata()
+             )
+
+    assert_receive {:retry_scheduled, 10}
+    assert_receive {:retry_scheduled, 20}
+    assert_receive {:retry_scheduled, 25}
+    assert_receive {:failure_callback, "run-backoff", :not_ready}
+
+    monitor = Process.monitor(executor)
+    GenServer.stop(executor)
+    assert_receive {:DOWN, ^monitor, :process, ^executor, _}
+  end
 end

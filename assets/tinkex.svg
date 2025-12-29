@@ -42,9 +42,45 @@
       <stop offset="100%" stop-color="#FFCE6B" stop-opacity="0.2"/>
     </radialGradient>
 
+    <!-- Sparse matrix gradient for LoRA representation -->
+    <linearGradient id="sparseGradient" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#0EF3C5" stop-opacity="0.8"/>
+      <stop offset="50%" stop-color="#7E4AE8" stop-opacity="0.5"/>
+      <stop offset="100%" stop-color="#FF9A3C" stop-opacity="0.3"/>
+    </linearGradient>
+
+    <!-- Fractal branch gradient -->
+    <linearGradient id="fractalBranch" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1AF2D0"/>
+      <stop offset="50%" stop-color="#9B4DFF"/>
+      <stop offset="100%" stop-color="#FFB25A"/>
+    </linearGradient>
+
+    <!-- Low-rank decomposition gradient -->
+    <linearGradient id="lowRankGrad" x1="0%" y1="50%" x2="100%" y2="50%">
+      <stop offset="0%" stop-color="#FF6F3C" stop-opacity="0.7"/>
+      <stop offset="100%" stop-color="#0EF3C5" stop-opacity="0.7"/>
+    </linearGradient>
+
+    <!-- Data flow gradient -->
+    <linearGradient id="dataFlow" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#9FF0FF" stop-opacity="0"/>
+      <stop offset="50%" stop-color="#FFE07D"/>
+      <stop offset="100%" stop-color="#9FF0FF" stop-opacity="0"/>
+    </linearGradient>
+
     <filter id="softGlow">
       <feGaussianBlur stdDeviation="3" result="blur"/>
       <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <filter id="fractalGlow">
+      <feGaussianBlur stdDeviation="2" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
         <feMergeNode in="blur"/>
         <feMergeNode in="SourceGraphic"/>
       </feMerge>
@@ -63,9 +99,34 @@
       <feDropShadow dx="0" dy="6" stdDeviation="8" flood-color="#0EF3C5" flood-opacity="0.25"/>
     </filter>
 
+    <!-- Pattern for sparse matrix visualization -->
+    <pattern id="sparsePattern" x="0" y="0" width="20" height="20" patternUnits="userSpaceOnUse">
+      <rect width="20" height="20" fill="none"/>
+      <circle cx="2" cy="2" r="1" fill="#0EF3C5" opacity="0.6"/>
+      <circle cx="10" cy="18" r="0.8" fill="#7E4AE8" opacity="0.5"/>
+      <circle cx="18" cy="8" r="0.8" fill="#FF9A3C" opacity="0.4"/>
+    </pattern>
+
+    <!-- Micro pattern for fractal detail -->
+    <pattern id="microGrid" x="0" y="0" width="8" height="8" patternUnits="userSpaceOnUse">
+      <rect width="8" height="8" fill="none"/>
+      <path d="M0 4 L8 4 M4 0 L4 8" stroke="#0EF3C5" stroke-width="0.15" opacity="0.3"/>
+    </pattern>
+
     <clipPath id="hexClip">
       <polygon points="300 30 530 180 530 420 300 570 70 420 70 180"/>
     </clipPath>
+
+    <!-- Symbols for recursive fractal use -->
+    <symbol id="smallBranch">
+      <path d="M0 0 Q3 -5 8 -8 M0 0 Q-3 -5 -8 -8 M0 0 L0 -10" stroke-width="0.8" fill="none"/>
+    </symbol>
+
+    <symbol id="loraNode">
+      <circle r="3" fill="url(#nodeHalo)"/>
+      <circle r="1.5" fill="url(#nodeCore)"/>
+      <circle r="0.5" fill="#0EF3C5"/>
+    </symbol>
   </defs>
 
   <g clip-path="url(#hexClip)">
@@ -73,14 +134,196 @@
     <rect width="600" height="600" fill="url(#nebula)"/>
     <polygon points="300 30 530 180 530 420 300 570 70 420 70 180" fill="url(#innerLumen)"/>
 
-    <!-- Concentric glow rings hinting at energy flow -->
-    <g opacity="0.35">
-      <circle cx="300" cy="300" r="190" fill="none" stroke="url(#auroraEdge)" stroke-width="3" filter="url(#softGlow)"/>
-      <circle cx="300" cy="300" r="120" fill="none" stroke="#0EF3C5" stroke-width="2" stroke-dasharray="6 10" opacity="0.5"/>
-      <circle cx="300" cy="300" r="70" fill="none" stroke="#FF9A3C" stroke-width="1.5" stroke-dasharray="3 5" opacity="0.6"/>
+    <!-- Sparse matrix background pattern -->
+    <rect width="600" height="600" fill="url(#sparsePattern)" opacity="0.4"/>
+    <rect width="600" height="600" fill="url(#microGrid)" opacity="0.3"/>
+
+    <!-- === SPARSE MATRIX REPRESENTATION === -->
+    <!-- These dots represent the sparse, non-zero elements in LoRA weight matrices -->
+    <g opacity="0.5">
+      <!-- Layer 1 - Outer sparse elements -->
+      <g fill="#0EF3C5">
+        <circle cx="120" cy="200" r="2"/>
+        <circle cx="145" cy="185" r="1.5"/>
+        <circle cx="480" cy="200" r="2"/>
+        <circle cx="455" cy="185" r="1.5"/>
+        <circle cx="120" cy="400" r="2"/>
+        <circle cx="145" cy="415" r="1.5"/>
+        <circle cx="480" cy="400" r="2"/>
+        <circle cx="455" cy="415" r="1.5"/>
+      </g>
+      <!-- Layer 2 - Mid sparse elements -->
+      <g fill="#7E4AE8">
+        <circle cx="160" cy="240" r="1.8"/>
+        <circle cx="175" cy="260" r="1.2"/>
+        <circle cx="440" cy="240" r="1.8"/>
+        <circle cx="425" cy="260" r="1.2"/>
+        <circle cx="160" cy="360" r="1.8"/>
+        <circle cx="175" cy="340" r="1.2"/>
+        <circle cx="440" cy="360" r="1.8"/>
+        <circle cx="425" cy="340" r="1.2"/>
+      </g>
+      <!-- Layer 3 - Inner sparse elements -->
+      <g fill="#FF9A3C">
+        <circle cx="200" cy="270" r="1.5"/>
+        <circle cx="400" cy="270" r="1.5"/>
+        <circle cx="200" cy="330" r="1.5"/>
+        <circle cx="400" cy="330" r="1.5"/>
+        <circle cx="250" cy="175" r="1.2"/>
+        <circle cx="350" cy="175" r="1.2"/>
+        <circle cx="250" cy="425" r="1.2"/>
+        <circle cx="350" cy="425" r="1.2"/>
+      </g>
     </g>
 
-    <!-- Axon-like rods and tinker toy struts -->
+    <!-- === FRACTAL TREE STRUCTURES (representing hierarchical adapters) === -->
+    <!-- Top-left fractal tree -->
+    <g stroke="url(#fractalBranch)" fill="none" filter="url(#fractalGlow)" opacity="0.7">
+      <g transform="translate(160 250)">
+        <!-- Main trunk -->
+        <path d="M0 0 L0 -40" stroke-width="2"/>
+        <!-- Level 1 branches -->
+        <g transform="translate(0 -40)">
+          <path d="M0 0 L-20 -25" stroke-width="1.5"/>
+          <path d="M0 0 L20 -25" stroke-width="1.5"/>
+          <path d="M0 0 L0 -30" stroke-width="1.2"/>
+          <!-- Level 2 sub-branches (left) -->
+          <g transform="translate(-20 -25)">
+            <path d="M0 0 L-10 -12" stroke-width="0.8"/>
+            <path d="M0 0 L5 -15" stroke-width="0.8"/>
+            <path d="M0 0 L-15 -8" stroke-width="0.6"/>
+            <!-- Level 3 micro-branches -->
+            <g transform="translate(-10 -12)">
+              <path d="M0 0 L-5 -6" stroke-width="0.4"/>
+              <path d="M0 0 L3 -7" stroke-width="0.4"/>
+              <path d="M0 0 L-2 -8" stroke-width="0.3"/>
+            </g>
+          </g>
+          <!-- Level 2 sub-branches (right) -->
+          <g transform="translate(20 -25)">
+            <path d="M0 0 L10 -12" stroke-width="0.8"/>
+            <path d="M0 0 L-5 -15" stroke-width="0.8"/>
+            <path d="M0 0 L15 -8" stroke-width="0.6"/>
+            <!-- Level 3 micro-branches -->
+            <g transform="translate(10 -12)">
+              <path d="M0 0 L5 -6" stroke-width="0.4"/>
+              <path d="M0 0 L-3 -7" stroke-width="0.4"/>
+              <path d="M0 0 L2 -8" stroke-width="0.3"/>
+            </g>
+          </g>
+          <!-- Level 2 sub-branches (center) -->
+          <g transform="translate(0 -30)">
+            <path d="M0 0 L-8 -10" stroke-width="0.6"/>
+            <path d="M0 0 L8 -10" stroke-width="0.6"/>
+            <path d="M0 0 L0 -12" stroke-width="0.5"/>
+          </g>
+        </g>
+      </g>
+
+      <!-- Top-right fractal tree -->
+      <g transform="translate(440 250)">
+        <path d="M0 0 L0 -40" stroke-width="2"/>
+        <g transform="translate(0 -40)">
+          <path d="M0 0 L-20 -25" stroke-width="1.5"/>
+          <path d="M0 0 L20 -25" stroke-width="1.5"/>
+          <path d="M0 0 L0 -30" stroke-width="1.2"/>
+          <g transform="translate(-20 -25)">
+            <path d="M0 0 L-10 -12" stroke-width="0.8"/>
+            <path d="M0 0 L5 -15" stroke-width="0.8"/>
+            <g transform="translate(-10 -12)">
+              <path d="M0 0 L-5 -6" stroke-width="0.4"/>
+              <path d="M0 0 L3 -7" stroke-width="0.4"/>
+            </g>
+          </g>
+          <g transform="translate(20 -25)">
+            <path d="M0 0 L10 -12" stroke-width="0.8"/>
+            <path d="M0 0 L-5 -15" stroke-width="0.8"/>
+            <g transform="translate(10 -12)">
+              <path d="M0 0 L5 -6" stroke-width="0.4"/>
+              <path d="M0 0 L-3 -7" stroke-width="0.4"/>
+            </g>
+          </g>
+        </g>
+      </g>
+
+      <!-- Bottom-left fractal tree (inverted) -->
+      <g transform="translate(160 350) scale(1,-1)">
+        <path d="M0 0 L0 -35" stroke-width="1.8"/>
+        <g transform="translate(0 -35)">
+          <path d="M0 0 L-18 -22" stroke-width="1.3"/>
+          <path d="M0 0 L18 -22" stroke-width="1.3"/>
+          <g transform="translate(-18 -22)">
+            <path d="M0 0 L-8 -10" stroke-width="0.7"/>
+            <path d="M0 0 L4 -12" stroke-width="0.7"/>
+          </g>
+          <g transform="translate(18 -22)">
+            <path d="M0 0 L8 -10" stroke-width="0.7"/>
+            <path d="M0 0 L-4 -12" stroke-width="0.7"/>
+          </g>
+        </g>
+      </g>
+
+      <!-- Bottom-right fractal tree (inverted) -->
+      <g transform="translate(440 350) scale(1,-1)">
+        <path d="M0 0 L0 -35" stroke-width="1.8"/>
+        <g transform="translate(0 -35)">
+          <path d="M0 0 L-18 -22" stroke-width="1.3"/>
+          <path d="M0 0 L18 -22" stroke-width="1.3"/>
+          <g transform="translate(-18 -22)">
+            <path d="M0 0 L-8 -10" stroke-width="0.7"/>
+            <path d="M0 0 L4 -12" stroke-width="0.7"/>
+          </g>
+          <g transform="translate(18 -22)">
+            <path d="M0 0 L8 -10" stroke-width="0.7"/>
+            <path d="M0 0 L-4 -12" stroke-width="0.7"/>
+          </g>
+        </g>
+      </g>
+    </g>
+
+    <!-- === LOW-RANK DECOMPOSITION VISUALIZATION === -->
+    <!-- Concentric hexagons representing rank reduction -->
+    <g fill="none" opacity="0.4">
+      <polygon points="300 80 460 160 460 340 300 420 140 340 140 160" 
+               stroke="#0EF3C5" stroke-width="1" stroke-dasharray="4 8"/>
+      <polygon points="300 110 430 175 430 325 300 390 170 325 170 175" 
+               stroke="#7E4AE8" stroke-width="0.8" stroke-dasharray="3 6"/>
+      <polygon points="300 140 400 190 400 310 300 360 200 310 200 190" 
+               stroke="#FF9A3C" stroke-width="0.6" stroke-dasharray="2 4"/>
+      <polygon points="300 170 370 205 370 295 300 330 230 295 230 205" 
+               stroke="#9FF0FF" stroke-width="0.5" stroke-dasharray="1.5 3"/>
+    </g>
+
+    <!-- === MATRIX DECOMPOSITION LINES (A × B representation) === -->
+    <g stroke="url(#lowRankGrad)" stroke-width="0.5" opacity="0.35">
+      <!-- Horizontal rank lines (Matrix A) -->
+      <line x1="200" y1="220" x2="400" y2="220"/>
+      <line x1="210" y1="240" x2="390" y2="240"/>
+      <line x1="220" y1="260" x2="380" y2="260"/>
+      <line x1="225" y1="280" x2="375" y2="280"/>
+      <line x1="225" y1="300" x2="375" y2="300"/>
+      <line x1="220" y1="320" x2="380" y2="320"/>
+      <line x1="210" y1="340" x2="390" y2="340"/>
+      <line x1="200" y1="360" x2="400" y2="360"/>
+      <!-- Vertical rank lines (Matrix B) -->
+      <line x1="260" y1="200" x2="260" y2="380"/>
+      <line x1="280" y1="190" x2="280" y2="390"/>
+      <line x1="300" y1="185" x2="300" y2="395"/>
+      <line x1="320" y1="190" x2="320" y2="390"/>
+      <line x1="340" y1="200" x2="340" y2="380"/>
+    </g>
+
+    <!-- === CONCENTRIC GLOW RINGS (enhanced) === -->
+    <g opacity="0.35">
+      <circle cx="300" cy="300" r="190" fill="none" stroke="url(#auroraEdge)" stroke-width="3" filter="url(#softGlow)"/>
+      <circle cx="300" cy="300" r="160" fill="none" stroke="#1AF2D0" stroke-width="1" stroke-dasharray="2 6" opacity="0.4"/>
+      <circle cx="300" cy="300" r="120" fill="none" stroke="#0EF3C5" stroke-width="2" stroke-dasharray="6 10" opacity="0.5"/>
+      <circle cx="300" cy="300" r="90" fill="none" stroke="#7E4AE8" stroke-width="1" stroke-dasharray="4 8" opacity="0.4"/>
+      <circle cx="300" cy="300" r="70" fill="none" stroke="#FF9A3C" stroke-width="1.5" stroke-dasharray="3 5" opacity="0.6"/>
+      <circle cx="300" cy="300" r="45" fill="none" stroke="#9FF0FF" stroke-width="0.8" stroke-dasharray="2 4" opacity="0.5"/>
+    </g>
+
+    <!-- === AXON-LIKE RODS AND TINKER TOY STRUTS (enhanced with curves) === -->
     <g stroke="url(#rodGradient)" stroke-width="4" stroke-linecap="round" stroke-linejoin="round" filter="url(#softGlow)" opacity="0.9">
       <path d="M180 220 C210 200 255 200 285 215" />
       <path d="M230 200 C260 230 280 260 300 300" />
@@ -99,119 +342,206 @@
       <path d="M300 235 C280 255 260 280 230 320" />
     </g>
 
-    <!-- Dense neural lattice lines for a sense of efficiency -->
-    <g stroke="#9FF0FF" stroke-width="1.5" stroke-linecap="round" opacity="0.35">
-      <line x1="300" y1="300" x2="230" y2="200"/>
-      <line x1="300" y1="300" x2="370" y2="210"/>
-      <line x1="300" y1="300" x2="180" y2="300"/>
-      <line x1="300" y1="300" x2="410" y2="350"/>
-      <line x1="300" y1="300" x2="320" y2="380"/>
-      <line x1="300" y1="300" x2="230" y2="360"/>
-      <line x1="230" y1="200" x2="285" y2="160"/>
-      <line x1="285" y1="160" x2="350" y2="150"/>
-      <line x1="350" y1="150" x2="370" y2="210"/>
-      <line x1="370" y1="210" x2="440" y2="270"/>
-      <line x1="440" y1="270" x2="410" y2="350"/>
-      <line x1="410" y1="350" x2="475" y2="330"/>
-      <line x1="410" y1="350" x2="320" y2="380"/>
-      <line x1="180" y1="220" x2="180" y2="300"/>
-      <line x1="180" y1="300" x2="130" y2="340"/>
-      <line x1="230" y1="360" x2="265" y2="440"/>
-      <line x1="230" y1="360" x2="335" y2="440"/>
-      <line x1="320" y1="380" x2="335" y2="440"/>
-      <line x1="320" y1="380" x2="265" y2="440"/>
-      <line x1="285" y1="160" x2="300" y2="235"/>
-      <line x1="350" y1="150" x2="300" y2="235"/>
-      <line x1="230" y1="200" x2="180" y2="220"/>
-      <line x1="285" y1="160" x2="180" y2="220"/>
-      <line x1="475" y1="330" x2="440" y2="270"/>
+    <!-- === DENSE NEURAL LATTICE WITH FRACTAL SUBDIVISIONS === -->
+    <g stroke="#9FF0FF" stroke-linecap="round" opacity="0.35">
+      <!-- Main lattice lines -->
+      <g stroke-width="1.5">
+        <line x1="300" y1="300" x2="230" y2="200"/>
+        <line x1="300" y1="300" x2="370" y2="210"/>
+        <line x1="300" y1="300" x2="180" y2="300"/>
+        <line x1="300" y1="300" x2="410" y2="350"/>
+        <line x1="300" y1="300" x2="320" y2="380"/>
+        <line x1="300" y1="300" x2="230" y2="360"/>
+        <line x1="230" y1="200" x2="285" y2="160"/>
+        <line x1="285" y1="160" x2="350" y2="150"/>
+        <line x1="350" y1="150" x2="370" y2="210"/>
+        <line x1="370" y1="210" x2="440" y2="270"/>
+        <line x1="440" y1="270" x2="410" y2="350"/>
+        <line x1="410" y1="350" x2="475" y2="330"/>
+        <line x1="410" y1="350" x2="320" y2="380"/>
+        <line x1="180" y1="220" x2="180" y2="300"/>
+        <line x1="180" y1="300" x2="130" y2="340"/>
+        <line x1="230" y1="360" x2="265" y2="440"/>
+        <line x1="230" y1="360" x2="335" y2="440"/>
+        <line x1="320" y1="380" x2="335" y2="440"/>
+        <line x1="320" y1="380" x2="265" y2="440"/>
+        <line x1="285" y1="160" x2="300" y2="235"/>
+        <line x1="350" y1="150" x2="300" y2="235"/>
+        <line x1="230" y1="200" x2="180" y2="220"/>
+        <line x1="285" y1="160" x2="180" y2="220"/>
+        <line x1="475" y1="330" x2="440" y2="270"/>
+      </g>
+      <!-- Fractal subdivision lines -->
+      <g stroke-width="0.6" opacity="0.6">
+        <!-- Subdivisions on main connections -->
+        <line x1="265" y1="250" x2="300" y2="235"/>
+        <line x1="335" y1="255" x2="300" y2="235"/>
+        <line x1="265" y1="250" x2="240" y2="300"/>
+        <line x1="335" y1="255" x2="360" y2="300"/>
+        <line x1="240" y1="300" x2="265" y2="340"/>
+        <line x1="360" y1="300" x2="340" y2="340"/>
+        <!-- Cross connections -->
+        <line x1="265" y1="250" x2="335" y2="255"/>
+        <line x1="240" y1="300" x2="360" y2="300"/>
+        <line x1="265" y1="340" x2="340" y2="340"/>
+      </g>
+      <!-- Micro subdivision lines -->
+      <g stroke-width="0.3" opacity="0.4">
+        <line x1="282" y1="242" x2="300" y2="267"/>
+        <line x1="318" y1="245" x2="300" y2="267"/>
+        <line x1="282" y1="320" x2="300" y2="340"/>
+        <line x1="318" y1="320" x2="300" y2="340"/>
+        <line x1="252" y1="275" x2="280" y2="285"/>
+        <line x1="348" y1="278" x2="320" y2="285"/>
+      </g>
     </g>
 
-    <!-- Node glyphs (tinker toy discs + neuron glows) -->
+    <!-- === CLOUD/DATA FLOW VISUALIZATION === -->
+    <g opacity="0.25">
+      <!-- Data streams flowing through the network -->
+      <path d="M100 150 Q150 130 200 150 T300 130 T400 150 T500 130" 
+            stroke="url(#dataFlow)" stroke-width="2" fill="none"/>
+      <path d="M100 180 Q150 160 200 180 T300 160 T400 180 T500 160" 
+            stroke="url(#dataFlow)" stroke-width="1.5" fill="none"/>
+      <path d="M100 450 Q150 470 200 450 T300 470 T400 450 T500 470" 
+            stroke="url(#dataFlow)" stroke-width="2" fill="none"/>
+      <path d="M100 420 Q150 440 200 420 T300 440 T400 420 T500 440" 
+            stroke="url(#dataFlow)" stroke-width="1.5" fill="none"/>
+    </g>
+
+    <!-- === NODE GLYPHS (enhanced with inner structure) === -->
     <g filter="url(#softGlow)">
+      <!-- Central node (main attention/transformer block) -->
       <g transform="translate(300 300)">
-        <circle r="18" fill="url(#nodeHalo)" />
-        <circle r="10" fill="url(#nodeCore)" />
-        <circle r="4" fill="#0EF3C5"/>
+        <circle r="22" fill="url(#nodeHalo)" />
+        <circle r="14" fill="url(#nodeCore)" />
+        <!-- Inner ring detail -->
+        <circle r="8" fill="none" stroke="#0EF3C5" stroke-width="0.5" opacity="0.6"/>
+        <circle r="5" fill="#0EF3C5"/>
+        <!-- Micro detail -->
+        <circle r="2" fill="#FFE07D"/>
+        <!-- Radiating lines -->
+        <g stroke="#0EF3C5" stroke-width="0.3" opacity="0.5">
+          <line x1="0" y1="-6" x2="0" y2="-10"/>
+          <line x1="6" y1="0" x2="10" y2="0"/>
+          <line x1="0" y1="6" x2="0" y2="10"/>
+          <line x1="-6" y1="0" x2="-10" y2="0"/>
+          <line x1="4.2" y1="-4.2" x2="7" y2="-7"/>
+          <line x1="4.2" y1="4.2" x2="7" y2="7"/>
+          <line x1="-4.2" y1="4.2" x2="-7" y2="7"/>
+          <line x1="-4.2" y1="-4.2" x2="-7" y2="-7"/>
+        </g>
       </g>
+
+      <!-- Secondary nodes with enhanced detail -->
       <g transform="translate(230 200)">
         <circle r="16" fill="url(#nodeHalo)" />
         <circle r="9" fill="url(#nodeCore)" />
+        <circle r="4.5" fill="none" stroke="#FF9A3C" stroke-width="0.4" opacity="0.6"/>
         <circle r="3.5" fill="#FF9A3C"/>
+        <circle r="1.2" fill="#FFE07D"/>
       </g>
       <g transform="translate(370 210)">
         <circle r="16" fill="url(#nodeHalo)" />
         <circle r="9" fill="url(#nodeCore)" />
+        <circle r="4.5" fill="none" stroke="#9FF0FF" stroke-width="0.4" opacity="0.6"/>
         <circle r="3.5" fill="#9FF0FF"/>
+        <circle r="1.2" fill="#FFE07D"/>
       </g>
       <g transform="translate(440 270)">
         <circle r="13" fill="url(#nodeHalo)" />
         <circle r="8" fill="url(#nodeCore)" />
+        <circle r="4" fill="none" stroke="#FF9A3C" stroke-width="0.3" opacity="0.6"/>
         <circle r="3" fill="#FF9A3C"/>
+        <circle r="1" fill="#FFE07D"/>
       </g>
       <g transform="translate(410 350)">
         <circle r="15" fill="url(#nodeHalo)" />
         <circle r="9" fill="url(#nodeCore)" />
+        <circle r="4.5" fill="none" stroke="#7E4AE8" stroke-width="0.4" opacity="0.6"/>
         <circle r="3" fill="#7E4AE8"/>
+        <circle r="1" fill="#FFE07D"/>
       </g>
       <g transform="translate(320 380)">
         <circle r="14" fill="url(#nodeHalo)" />
         <circle r="8" fill="url(#nodeCore)" />
+        <circle r="4" fill="none" stroke="#0EF3C5" stroke-width="0.3" opacity="0.6"/>
         <circle r="3" fill="#0EF3C5"/>
+        <circle r="1" fill="#FFE07D"/>
       </g>
       <g transform="translate(230 360)">
         <circle r="14" fill="url(#nodeHalo)" />
         <circle r="8" fill="url(#nodeCore)" />
+        <circle r="4" fill="none" stroke="#FF9A3C" stroke-width="0.3" opacity="0.6"/>
         <circle r="3" fill="#FF9A3C"/>
+        <circle r="1" fill="#FFE07D"/>
       </g>
       <g transform="translate(180 300)">
         <circle r="13" fill="url(#nodeHalo)" />
         <circle r="8" fill="url(#nodeCore)" />
+        <circle r="4" fill="none" stroke="#7E4AE8" stroke-width="0.3" opacity="0.6"/>
         <circle r="3" fill="#7E4AE8"/>
+        <circle r="1" fill="#FFE07D"/>
       </g>
       <g transform="translate(180 220)">
         <circle r="12" fill="url(#nodeHalo)" />
         <circle r="7" fill="url(#nodeCore)" />
+        <circle r="3.5" fill="none" stroke="#9FF0FF" stroke-width="0.3" opacity="0.6"/>
         <circle r="2.5" fill="#9FF0FF"/>
+        <circle r="0.8" fill="#FFE07D"/>
       </g>
       <g transform="translate(285 160)">
         <circle r="12" fill="url(#nodeHalo)" />
         <circle r="7" fill="url(#nodeCore)" />
+        <circle r="3.5" fill="none" stroke="#FF9A3C" stroke-width="0.3" opacity="0.6"/>
         <circle r="2.5" fill="#FF9A3C"/>
+        <circle r="0.8" fill="#FFE07D"/>
       </g>
       <g transform="translate(350 150)">
         <circle r="12" fill="url(#nodeHalo)" />
         <circle r="7" fill="url(#nodeCore)" />
+        <circle r="3.5" fill="none" stroke="#0EF3C5" stroke-width="0.3" opacity="0.6"/>
         <circle r="2.5" fill="#0EF3C5"/>
+        <circle r="0.8" fill="#FFE07D"/>
       </g>
       <g transform="translate(475 330)">
         <circle r="13" fill="url(#nodeHalo)" />
         <circle r="8" fill="url(#nodeCore)" />
+        <circle r="4" fill="none" stroke="#9FF0FF" stroke-width="0.3" opacity="0.6"/>
         <circle r="3" fill="#9FF0FF"/>
+        <circle r="1" fill="#FFE07D"/>
       </g>
       <g transform="translate(130 340)">
         <circle r="12" fill="url(#nodeHalo)" />
         <circle r="7" fill="url(#nodeCore)" />
+        <circle r="3.5" fill="none" stroke="#FF9A3C" stroke-width="0.3" opacity="0.6"/>
         <circle r="2.5" fill="#FF9A3C"/>
+        <circle r="0.8" fill="#FFE07D"/>
       </g>
       <g transform="translate(265 440)">
         <circle r="12" fill="url(#nodeHalo)" />
         <circle r="7" fill="url(#nodeCore)" />
+        <circle r="3.5" fill="none" stroke="#9FF0FF" stroke-width="0.3" opacity="0.6"/>
         <circle r="2.5" fill="#9FF0FF"/>
+        <circle r="0.8" fill="#FFE07D"/>
       </g>
       <g transform="translate(335 440)">
         <circle r="12" fill="url(#nodeHalo)" />
         <circle r="7" fill="url(#nodeCore)" />
+        <circle r="3.5" fill="none" stroke="#7E4AE8" stroke-width="0.3" opacity="0.6"/>
         <circle r="2.5" fill="#7E4AE8"/>
+        <circle r="0.8" fill="#FFE07D"/>
       </g>
       <g transform="translate(300 235)">
         <circle r="13" fill="url(#nodeHalo)" />
         <circle r="8" fill="url(#nodeCore)" />
+        <circle r="4" fill="none" stroke="#FFE07D" stroke-width="0.3" opacity="0.6"/>
         <circle r="3" fill="#FFE07D"/>
+        <circle r="1" fill="#0EF3C5"/>
       </g>
     </g>
 
-    <!-- Mid-rod beads to evoke tinker toy connectors -->
+    <!-- === MID-ROD BEADS (enhanced) === -->
     <g fill="url(#sparkGradient)" filter="url(#lift)">
       <circle cx="257" cy="207" r="5"/>
       <circle cx="340" cy="208" r="5"/>
@@ -223,30 +553,96 @@
       <circle cx="430" cy="310" r="4.5"/>
       <circle cx="285" cy="395" r="4.5"/>
       <circle cx="312" cy="430" r="4.5"/>
+      <!-- Additional micro beads -->
+      <circle cx="265" cy="270" r="2.5"/>
+      <circle cx="335" cy="270" r="2.5"/>
+      <circle cx="300" cy="350" r="2.5"/>
+      <circle cx="250" cy="310" r="2"/>
+      <circle cx="350" cy="310" r="2"/>
     </g>
 
-    <!-- Faint circuitry overlay -->
-    <g stroke="#6A1FAF" stroke-width="1" opacity="0.15">
-      <path d="M150 250 L120 260 L110 300" />
-      <path d="M470 200 L500 230 L520 280" />
-      <path d="M260 120 L300 90 L340 120" />
-      <path d="M260 500 L300 530 L340 500" />
+    <!-- === CIRCUITRY OVERLAY (enhanced with more detail) === -->
+    <g stroke="#6A1FAF" stroke-width="1" opacity="0.2">
+      <path d="M150 250 L120 260 L110 300 L90 310" />
+      <path d="M470 200 L500 230 L520 280 L510 310" />
+      <path d="M260 120 L300 90 L340 120 L360 100" />
+      <path d="M260 500 L300 530 L340 500 L320 520" />
+      <!-- Additional circuit paths -->
+      <path d="M110 300 L95 350" stroke-width="0.5"/>
+      <path d="M520 280 L530 330" stroke-width="0.5"/>
+      <path d="M260 120 L240 100" stroke-width="0.5"/>
+      <path d="M260 500 L240 520" stroke-width="0.5"/>
     </g>
 
-    <!-- Subtle spark points -->
+    <!-- === ADAPTER WEIGHT INDICATORS (LoRA specific) === -->
+    <g opacity="0.3">
+      <!-- Small triangular markers representing adapter injection points -->
+      <polygon points="255,195 260,205 250,205" fill="#0EF3C5"/>
+      <polygon points="345,195 350,205 340,205" fill="#7E4AE8"/>
+      <polygon points="225,355 230,365 220,365" fill="#FF9A3C"/>
+      <polygon points="315,375 320,385 310,385" fill="#0EF3C5"/>
+      <polygon points="400,265 405,275 395,275" fill="#9FF0FF"/>
+      <!-- Delta weight symbols -->
+      <g font-family="monospace" font-size="6" fill="#9FF0FF" opacity="0.5">
+        <text x="245" y="250">Δ</text>
+        <text x="345" y="250">Δ</text>
+        <text x="295" y="365">Δ</text>
+        <text x="195" y="305">Δ</text>
+        <text x="395" y="305">Δ</text>
+      </g>
+    </g>
+
+    <!-- === SUBTLE SPARK POINTS (enhanced) === -->
     <g>
       <circle cx="210" cy="150" r="2.5" fill="#9FF0FF" opacity="0.9"/>
       <circle cx="390" cy="185" r="2.5" fill="#FFE07D" opacity="0.9"/>
       <circle cx="430" cy="385" r="2" fill="#FF9A3C" opacity="0.9"/>
       <circle cx="180" cy="380" r="2" fill="#7E4AE8" opacity="0.9"/>
       <circle cx="320" cy="265" r="2" fill="#0EF3C5" opacity="0.9"/>
+      <!-- Additional sparks -->
+      <circle cx="260" cy="140" r="1.5" fill="#1AF2D0" opacity="0.8"/>
+      <circle cx="340" cy="140" r="1.5" fill="#FFB25A" opacity="0.8"/>
+      <circle cx="420" cy="300" r="1.5" fill="#9B4DFF" opacity="0.8"/>
+      <circle cx="180" cy="340" r="1.5" fill="#FF6F3C" opacity="0.8"/>
+      <circle cx="300" cy="400" r="1.5" fill="#0EF3C5" opacity="0.8"/>
+      <!-- Micro sparks -->
+      <circle cx="315" cy="205" r="1" fill="#9FF0FF" opacity="0.7"/>
+      <circle cx="285" cy="205" r="1" fill="#FFE07D" opacity="0.7"/>
+      <circle cx="240" cy="280" r="1" fill="#7E4AE8" opacity="0.7"/>
+      <circle cx="360" cy="280" r="1" fill="#0EF3C5" opacity="0.7"/>
+      <circle cx="275" cy="335" r="1" fill="#FF9A3C" opacity="0.7"/>
+      <circle cx="325" cy="335" r="1" fill="#9B4DFF" opacity="0.7"/>
+    </g>
+
+    <!-- === RECURSIVE PATTERN ELEMENTS === -->
+    <g opacity="0.2">
+      <!-- Sierpinski-like triangular subdivisions in corners -->
+      <g stroke="#0EF3C5" stroke-width="0.3" fill="none">
+        <!-- Top corner -->
+        <polygon points="300,70 340,120 260,120"/>
+        <polygon points="300,95 320,120 280,120"/>
+        <polygon points="300,82 310,95 290,95"/>
+        <!-- Left corner -->
+        <polygon points="115,270 145,220 145,320"/>
+        <polygon points="130,270 145,245 145,295"/>
+        <!-- Right corner -->
+        <polygon points="485,270 455,220 455,320"/>
+        <polygon points="470,270 455,245 455,295"/>
+      </g>
     </g>
   </g>
 
-  <!-- Outer hex frame -->
+  <!-- === OUTER HEX FRAME (enhanced) === -->
   <polygon points="300 30 530 180 530 420 300 570 70 420 70 180"
            fill="none"
            stroke="url(#auroraEdge)"
            stroke-width="6"
            filter="url(#innerShadow)"/>
+  
+  <!-- Inner accent frame -->
+  <polygon points="300 40 520 185 520 415 300 560 80 415 80 185"
+           fill="none"
+           stroke="#0EF3C5"
+           stroke-width="0.5"
+           opacity="0.3"/>
 </svg>

@@ -17,6 +17,7 @@ defmodule Tinkex.Recovery.Executor do
 
   use GenServer
 
+  alias Foundation.Backoff
   alias Tinkex.Config
   alias Tinkex.Recovery.Policy
   alias Tinkex.Types.{Checkpoint, TrainingRun}
@@ -349,8 +350,19 @@ defmodule Tinkex.Recovery.Executor do
 
   defp backoff_delay(%Policy{} = policy, attempt) do
     exponent = max(attempt - 1, 0)
-    delay = policy.backoff_ms * :math.pow(2, exponent)
-    min(trunc(delay), policy.max_backoff_ms)
+    max_ms = max(policy.max_backoff_ms, policy.backoff_ms)
+
+    backoff =
+      Backoff.Policy.new(
+        strategy: :exponential,
+        base_ms: policy.backoff_ms,
+        max_ms: max_ms,
+        jitter_strategy: :none
+      )
+
+    backoff
+    |> Backoff.delay(exponent)
+    |> min(policy.max_backoff_ms)
   end
 
   defp known_run?(state, run_id) do

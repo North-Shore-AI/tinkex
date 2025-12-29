@@ -5,9 +5,21 @@ defmodule Tinkex.Types.EncodedTextChunk do
   Mirrors Python tinker.types.EncodedTextChunk.
   """
 
+  alias Sinter.Schema
+
   @enforce_keys [:tokens]
-  @derive {Jason.Encoder, only: [:tokens, :type]}
   defstruct [:tokens, type: "encoded_text"]
+
+  @schema Schema.define([
+            {:tokens, {:array, :integer}, [required: true]},
+            {:type, :string, [optional: true, default: "encoded_text"]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           tokens: [integer()],
@@ -19,4 +31,12 @@ defmodule Tinkex.Types.EncodedTextChunk do
   """
   @spec length(t()) :: non_neg_integer()
   def length(%__MODULE__{tokens: tokens}), do: Kernel.length(tokens)
+end
+
+defimpl Jason.Encoder, for: Tinkex.Types.EncodedTextChunk do
+  def encode(chunk, opts) do
+    chunk
+    |> Tinkex.SchemaCodec.encode_map()
+    |> Jason.Encode.map(opts)
+  end
 end

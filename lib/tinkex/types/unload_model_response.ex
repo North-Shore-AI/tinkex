@@ -3,8 +3,22 @@ defmodule Tinkex.Types.UnloadModelResponse do
   Response confirming a model unload request.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   @enforce_keys [:model_id]
   defstruct [:model_id, :type]
+
+  @schema Schema.define([
+            {:model_id, :string, [required: true]},
+            {:type, :string, [optional: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           model_id: String.t(),
@@ -16,9 +30,6 @@ defmodule Tinkex.Types.UnloadModelResponse do
   """
   @spec from_json(map()) :: t()
   def from_json(%{} = json) do
-    %__MODULE__{
-      model_id: json["model_id"] || json[:model_id],
-      type: json["type"] || json[:type]
-    }
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__), coerce: true)
   end
 end

@@ -307,7 +307,10 @@ defmodule Tinkex.Tokenizer do
     info_fun = Keyword.get(opts, :info_fun, &TrainingClient.get_info/1)
 
     case safe_call_info(info_fun, training_client) do
+      # Handle struct with atom keys
       {:ok, %{model_data: %{tokenizer_id: id}}} when is_binary(id) -> {:ok, id}
+      # Handle map with string keys (API response)
+      {:ok, %{model_data: %{"tokenizer_id" => id}}} when is_binary(id) -> {:ok, id}
       _ -> :no_id
     end
   end

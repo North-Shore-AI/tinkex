@@ -1,8 +1,8 @@
 defmodule Tinkex.TransformTest do
   use ExUnit.Case, async: true
 
-  alias Tinkex.NotGiven
-  alias Tinkex.Transform
+  alias Sinter.NotGiven
+  alias Sinter.Transform
 
   test "drops NotGiven/omit sentinels but preserves nil" do
     input = %{

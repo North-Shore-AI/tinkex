@@ -3,9 +3,22 @@ defmodule Tinkex.Types.UnloadModelRequest do
   Request payload to unload model weights and end the session.
   """
 
+  alias Sinter.Schema
+
   @enforce_keys [:model_id]
   @derive {Jason.Encoder, only: [:model_id, :type]}
   defstruct [:model_id, type: "unload_model"]
+
+  @schema Schema.define([
+            {:model_id, :string, [required: true]},
+            {:type, :string, [optional: true, default: "unload_model"]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           model_id: String.t(),

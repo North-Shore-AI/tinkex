@@ -3,9 +3,12 @@ defmodule Tinkex.RateLimiter do
   Shared backoff state per `{base_url, api_key}` combination.
   """
 
+  alias Foundation.RateLimit.BackoffWindow
   alias Tinkex.PoolKey
 
-  @type limiter :: :atomics.atomics_ref()
+  @registry_name :tinkex_rate_limiters
+
+  @type limiter :: BackoffWindow.limiter()
 
   @doc """
   Get or create the limiter for a `{base_url, api_key}` tuple.
@@ -14,23 +17,7 @@ defmodule Tinkex.RateLimiter do
   def for_key({base_url, api_key}) do
     normalized_base = PoolKey.normalize_base_url(base_url)
     key = {:limiter, {normalized_base, api_key}}
-
-    limiter = :atomics.new(1, signed: true)
-
-    case :ets.insert_new(:tinkex_rate_limiters, {key, limiter}) do
-      true ->
-        limiter
-
-      false ->
-        case :ets.lookup(:tinkex_rate_limiters, key) do
-          [{^key, existing}] ->
-            existing
-
-          [] ->
-            :ets.insert(:tinkex_rate_limiters, {key, limiter})
-            limiter
-        end
-    end
+    BackoffWindow.for_key(registry(), key)
   end
 
   @doc """
@@ -38,9 +25,7 @@ defmodule Tinkex.RateLimiter do
   """
   @spec should_backoff?(limiter()) :: boolean()
   def should_backoff?(limiter) do
-    backoff_until = :atomics.get(limiter, 1)
-
-    backoff_until != 0 and System.monotonic_time(:millisecond) < backoff_until
+    BackoffWindow.should_backoff?(limiter)
   end
 
   @doc """
@@ -48,9 +33,7 @@ defmodule Tinkex.RateLimiter do
   """
   @spec set_backoff(limiter(), non_neg_integer()) :: :ok
   def set_backoff(limiter, duration_ms) do
-    backoff_until = System.monotonic_time(:millisecond) + duration_ms
-    :atomics.put(limiter, 1, backoff_until)
-    :ok
+    BackoffWindow.set(limiter, duration_ms)
   end
 
   @doc """
@@ -58,8 +41,7 @@ defmodule Tinkex.RateLimiter do
   """
   @spec clear_backoff(limiter()) :: :ok
   def clear_backoff(limiter) do
-    :atomics.put(limiter, 1, 0)
-    :ok
+    BackoffWindow.clear(limiter)
   end
 
   @doc """
@@ -67,18 +49,10 @@ defmodule Tinkex.RateLimiter do
   """
   @spec wait_for_backoff(limiter()) :: :ok
   def wait_for_backoff(limiter) do
-    backoff_until = :atomics.get(limiter, 1)
+    BackoffWindow.wait(limiter)
+  end
 
-    if backoff_until != 0 do
-      now = System.monotonic_time(:millisecond)
-
-      wait_ms = backoff_until - now
-
-      if wait_ms > 0 do
-        Process.sleep(wait_ms)
-      end
-    end
-
-    :ok
+  defp registry do
+    BackoffWindow.new_registry(name: @registry_name)
   end
 end

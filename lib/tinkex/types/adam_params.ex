@@ -13,6 +13,8 @@ defmodule Tinkex.Types.AdamParams do
   - grad_clip_norm: 0.0 (0 = no clipping)
   """
 
+  alias Sinter.Schema
+
   @derive {Jason.Encoder,
            only: [:learning_rate, :beta1, :beta2, :eps, :weight_decay, :grad_clip_norm]}
   defstruct learning_rate: 0.0001,
@@ -21,6 +23,21 @@ defmodule Tinkex.Types.AdamParams do
             eps: 1.0e-12,
             weight_decay: 0.0,
             grad_clip_norm: 0.0
+
+  @schema Schema.define([
+            {:learning_rate, :float, [optional: true, default: 0.0001]},
+            {:beta1, :float, [optional: true, default: 0.9]},
+            {:beta2, :float, [optional: true, default: 0.95]},
+            {:eps, :float, [optional: true, default: 1.0e-12]},
+            {:weight_decay, :float, [optional: true, default: 0.0]},
+            {:grad_clip_norm, :float, [optional: true, default: 0.0]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           learning_rate: float(),

@@ -10,16 +10,27 @@ defmodule Tinkex.Types.GetSessionResponse do
           sampler_ids: [String.t()]
         }
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   defstruct [:training_run_ids, :sampler_ids]
+
+  @schema Schema.define([
+            {:training_run_ids, {:array, :string}, [optional: true, default: []]},
+            {:sampler_ids, {:array, :string}, [optional: true, default: []]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @doc """
   Convert a map (from JSON) to a GetSessionResponse struct.
   """
   @spec from_map(map()) :: t()
   def from_map(map) do
-    %__MODULE__{
-      training_run_ids: map["training_run_ids"] || map[:training_run_ids] || [],
-      sampler_ids: map["sampler_ids"] || map[:sampler_ids] || []
-    }
+    SchemaCodec.decode_struct(schema(), map, struct(__MODULE__), coerce: true)
   end
 end

@@ -46,6 +46,7 @@ defmodule Tinkex.MixProject do
 
       # JSON encoding/decoding
       {:jason, "~> 1.4"},
+      {:sinter, "~> 0.1.0"},
 
       # Numerical computing (tensor operations)
       {:nx, "~> 0.9"},
@@ -58,12 +59,15 @@ defmodule Tinkex.MixProject do
       # Tokenization (HuggingFace models)
       {:tokenizers, "~> 0.5"},
 
-      # Tokenization (TikToken-style byte BPE, Kimi K2 compatible)
-      {:tiktoken_ex, "~> 0.1.0"},
-
       # Telemetry
       {:telemetry, "~> 1.2"},
       {:semaphore, "~> 1.3"},
+
+      # Local path deps
+      {:foundation, path: "../../n/foundation"},
+      {:multipart_ex, path: "../../n/multipart_ex"},
+      {:telemetry_reporter, path: "../../n/telemetry_reporter"},
+      {:tiktoken_ex, path: "../tiktoken_ex"},
 
       # Development
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},

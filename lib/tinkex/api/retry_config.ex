@@ -21,6 +21,9 @@ defmodule Tinkex.API.RetryConfig do
   - No wall-clock timeout; governed by `max_retries` only
   """
 
+  alias Foundation.Backoff
+  alias Foundation.Backoff.Policy
+
   # Python SDK constants from _constants.py
   @initial_retry_delay_ms 500
   @max_retry_delay_ms 10_000
@@ -78,14 +81,16 @@ defmodule Tinkex.API.RetryConfig do
   """
   @spec retry_delay(non_neg_integer(), pos_integer(), pos_integer()) :: non_neg_integer()
   def retry_delay(attempt, initial_delay_ms, max_delay_ms) do
-    # Python: sleep_seconds = min(INITIAL_RETRY_DELAY * pow(2.0, nb_retries), MAX_RETRY_DELAY)
-    base_delay = initial_delay_ms * :math.pow(2, attempt)
-    capped_delay = min(base_delay, max_delay_ms)
+    policy =
+      Policy.new(
+        strategy: :exponential,
+        base_ms: initial_delay_ms,
+        max_ms: max_delay_ms,
+        jitter_strategy: :range,
+        jitter: {@jitter_min, @jitter_max}
+      )
 
-    # Python: jitter = 1 - 0.25 * random() -> range [0.75, 1.0]
-    jitter = @jitter_min + :rand.uniform() * (@jitter_max - @jitter_min)
-
-    round(capped_delay * jitter)
+    Backoff.delay(policy, attempt)
   end
 
   @doc """

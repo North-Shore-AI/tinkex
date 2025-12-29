@@ -31,8 +31,23 @@ defmodule Tinkex.Types.GetSamplerResponse do
   - `Tinkex.API.Rest.get_sampler/2`
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   @enforce_keys [:sampler_id, :base_model]
   defstruct [:sampler_id, :base_model, :model_path]
+
+  @schema Schema.define([
+            {:sampler_id, :string, [required: true]},
+            {:base_model, :string, [required: true]},
+            {:model_path, :string, [optional: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           sampler_id: String.t(),
@@ -59,37 +74,16 @@ defmodule Tinkex.Types.GetSamplerResponse do
       %GetSamplerResponse{sampler_id: "s1", base_model: "Qwen", model_path: nil}
   """
   @spec from_json(map()) :: t()
-  def from_json(%{"sampler_id" => sampler_id, "base_model" => base_model} = json) do
-    %__MODULE__{
-      sampler_id: sampler_id,
-      base_model: base_model,
-      model_path: json["model_path"]
-    }
-  end
-
-  def from_json(%{sampler_id: sampler_id, base_model: base_model} = json) do
-    %__MODULE__{
-      sampler_id: sampler_id,
-      base_model: base_model,
-      model_path: json[:model_path]
-    }
+  def from_json(json) do
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__), coerce: true)
   end
 end
 
 defimpl Jason.Encoder, for: Tinkex.Types.GetSamplerResponse do
   def encode(resp, opts) do
-    map = %{
-      sampler_id: resp.sampler_id,
-      base_model: resp.base_model
-    }
-
-    map =
-      if resp.model_path do
-        Map.put(map, :model_path, resp.model_path)
-      else
-        map
-      end
-
-    Jason.Encode.map(map, opts)
+    resp
+    |> Tinkex.SchemaCodec.omit_nil_fields([:model_path])
+    |> Tinkex.SchemaCodec.encode_map()
+    |> Jason.Encode.map(opts)
   end
 end

@@ -12,10 +12,24 @@ defmodule Tinkex.Types.GetServerCapabilitiesResponse do
   parsing responses.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
   alias Tinkex.Types.SupportedModel
 
   @enforce_keys [:supported_models]
   defstruct [:supported_models]
+
+  @schema Schema.define([
+            {:supported_models,
+             {:array, {:union, [:null, :string, {:object, SupportedModel.schema()}]}},
+             [optional: true, default: []]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           supported_models: [SupportedModel.t()]
@@ -31,14 +45,10 @@ defmodule Tinkex.Types.GetServerCapabilitiesResponse do
   """
   @spec from_json(map()) :: t()
   def from_json(map) when is_map(map) do
-    models = map["supported_models"] || map[:supported_models] || []
-
-    parsed_models =
-      models
-      |> Enum.reject(&is_nil/1)
-      |> Enum.map(&SupportedModel.from_json/1)
-
-    %__MODULE__{supported_models: parsed_models}
+    SchemaCodec.decode_struct(schema(), map, struct(__MODULE__),
+      coerce: true,
+      converters: %{supported_models: &parse_supported_models/1}
+    )
   end
 
   @doc """
@@ -60,5 +70,11 @@ defmodule Tinkex.Types.GetServerCapabilitiesResponse do
   @spec model_names(t()) :: [String.t() | nil]
   def model_names(%__MODULE__{supported_models: models}) do
     Enum.map(models, & &1.model_name)
+  end
+
+  defp parse_supported_models(models) when is_list(models) do
+    models
+    |> Enum.reject(&is_nil/1)
+    |> Enum.map(&SupportedModel.from_json/1)
   end
 end

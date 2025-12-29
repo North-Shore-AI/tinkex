@@ -22,7 +22,22 @@ defmodule Tinkex.Types.SupportedModel do
       "llama"
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   defstruct [:model_id, :model_name, :arch]
+
+  @schema Schema.define([
+            {:model_id, :string, [optional: true]},
+            {:model_name, :string, [optional: true]},
+            {:arch, :string, [optional: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           model_id: String.t() | nil,
@@ -38,11 +53,7 @@ defmodule Tinkex.Types.SupportedModel do
   """
   @spec from_json(map() | String.t()) :: t()
   def from_json(json) when is_map(json) do
-    %__MODULE__{
-      model_id: json["model_id"] || json[:model_id],
-      model_name: json["model_name"] || json[:model_name],
-      arch: json["arch"] || json[:arch]
-    }
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__), coerce: true)
   end
 
   def from_json(name) when is_binary(name) do

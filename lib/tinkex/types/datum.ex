@@ -5,11 +5,24 @@ defmodule Tinkex.Types.Datum do
   Mirrors Python tinker.types.Datum.
   """
 
+  alias Sinter.Schema
   alias Tinkex.Types.{ModelInput, TensorData}
 
   @enforce_keys [:model_input]
   @derive {Jason.Encoder, only: [:model_input, :loss_fn_inputs]}
   defstruct [:model_input, loss_fn_inputs: %{}]
+
+  @schema Schema.define([
+            {:model_input, {:object, ModelInput.schema()}, [required: true]},
+            {:loss_fn_inputs, {:map, :string, {:object, TensorData.schema()}},
+             [optional: true, default: %{}]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @key_dtype_map %{
     "target_tokens" => :int64,

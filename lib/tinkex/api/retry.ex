@@ -12,7 +12,7 @@ defmodule Tinkex.API.Retry do
 
   require Logger
 
-  alias Tinkex.API.{Headers, ResponseHandler}
+  alias Tinkex.API.{Headers, ResponseHandler, RetryConfig}
   alias Tinkex.Config
 
   # Python SDK parity constants from _constants.py
@@ -80,11 +80,7 @@ defmodule Tinkex.API.Retry do
   """
   @spec calculate_delay(non_neg_integer()) :: non_neg_integer()
   def calculate_delay(attempt) do
-    base_delay = @initial_retry_delay * :math.pow(2, attempt)
-    capped_delay = min(base_delay, @max_retry_delay)
-    # Python jitter: 1 - 0.25 * random() gives [0.75, 1.0]
-    jitter = 0.75 + :rand.uniform() * 0.25
-    round(capped_delay * jitter)
+    RetryConfig.retry_delay(attempt, @initial_retry_delay, @max_retry_delay)
   end
 
   # Private functions

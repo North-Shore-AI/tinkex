@@ -5,7 +5,20 @@ defmodule Tinkex.Types.OptimStepResponse do
   Mirrors Python tinker.types.OptimStepResponse.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   defstruct [:metrics]
+
+  @schema Schema.define([
+            {:metrics, {:nullable, :map}, [optional: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           metrics: %{String.t() => float()} | nil
@@ -16,9 +29,7 @@ defmodule Tinkex.Types.OptimStepResponse do
   """
   @spec from_json(map()) :: t()
   def from_json(json) do
-    %__MODULE__{
-      metrics: json["metrics"]
-    }
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__), coerce: true)
   end
 
   @doc """

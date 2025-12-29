@@ -1,6 +1,8 @@
 defmodule Tinkex.RetryHandler do
   @moduledoc false
 
+  alias Foundation.Backoff
+  alias Foundation.Backoff.Policy
   alias Tinkex.Error
 
   @default_max_retries :infinity
@@ -61,21 +63,16 @@ defmodule Tinkex.RetryHandler do
 
   @spec next_delay(t()) :: non_neg_integer()
   def next_delay(%__MODULE__{} = handler) do
-    base = handler.base_delay_ms * :math.pow(2, handler.attempt)
-    capped = min(base, handler.max_delay_ms)
+    policy =
+      Policy.new(
+        strategy: :exponential,
+        base_ms: handler.base_delay_ms,
+        max_ms: handler.max_delay_ms,
+        jitter_strategy: :range,
+        jitter: {1.0 - handler.jitter_pct, 1.0 + handler.jitter_pct}
+      )
 
-    if handler.jitter_pct > 0 do
-      # Jitter in the range [-jitter_pct, +jitter_pct] of the capped delay
-      jitter = capped * handler.jitter_pct * (2 * :rand.uniform() - 1)
-
-      capped
-      |> Kernel.+(jitter)
-      |> max(0)
-      |> min(handler.max_delay_ms)
-      |> round()
-    else
-      round(capped)
-    end
+    Backoff.delay(policy, handler.attempt)
   end
 
   @doc """

@@ -5,10 +5,23 @@ defmodule Tinkex.Types.RequestFailedResponse do
   Mirrors Python `tinker.types.RequestFailedResponse`.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
   alias Tinkex.Types.RequestErrorCategory
 
   @enforce_keys [:error, :category]
   defstruct [:error, :category]
+
+  @schema Schema.define([
+            {:error, :string, [required: true]},
+            {:category, :string, [required: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           error: String.t(),
@@ -27,17 +40,10 @@ defmodule Tinkex.Types.RequestFailedResponse do
   Parse from JSON map.
   """
   @spec from_json(map()) :: t()
-  def from_json(%{"error" => error, "category" => category}) do
-    %__MODULE__{
-      error: error,
-      category: RequestErrorCategory.parse(category)
-    }
-  end
-
-  def from_json(%{error: error, category: category}) do
-    %__MODULE__{
-      error: error,
-      category: RequestErrorCategory.parse(category)
-    }
+  def from_json(json) do
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__),
+      coerce: true,
+      converters: %{category: &RequestErrorCategory.parse/1}
+    )
   end
 end

@@ -12,6 +12,8 @@ defmodule Tinkex.Types.SampleRequest do
   This is a tri-state field where nil means "not set" and must be omitted from JSON.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
   alias Tinkex.Types.{ModelInput, SamplingParams}
 
   @enforce_keys [:prompt, :sampling_params]
@@ -28,6 +30,25 @@ defmodule Tinkex.Types.SampleRequest do
     type: "sample"
   ]
 
+  @schema Schema.define([
+            {:sampling_session_id, :string, [optional: true]},
+            {:seq_id, :integer, [optional: true]},
+            {:base_model, :string, [optional: true]},
+            {:model_path, :string, [optional: true]},
+            {:prompt, {:object, ModelInput.schema()}, [required: true]},
+            {:sampling_params, {:object, SamplingParams.schema()}, [required: true]},
+            {:num_samples, :integer, [optional: true, default: 1]},
+            {:prompt_logprobs, {:nullable, :boolean}, [optional: true]},
+            {:topk_prompt_logprobs, :integer, [optional: true, default: 0]},
+            {:type, :string, [optional: true, default: "sample"]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
+
   @type t :: %__MODULE__{
           sampling_session_id: String.t() | nil,
           seq_id: integer() | nil,
@@ -43,32 +64,18 @@ defmodule Tinkex.Types.SampleRequest do
 end
 
 defimpl Jason.Encoder, for: Tinkex.Types.SampleRequest do
+  alias Tinkex.SchemaCodec
+
   def encode(request, opts) do
-    # Start with required fields
-    map = %{
-      prompt: request.prompt,
-      sampling_params: request.sampling_params,
-      num_samples: request.num_samples,
-      topk_prompt_logprobs: request.topk_prompt_logprobs,
-      type: request.type
-    }
-
-    # Add optional fields only if non-nil
-    map =
-      if request.sampling_session_id,
-        do: Map.put(map, :sampling_session_id, request.sampling_session_id),
-        else: map
-
-    map = if request.seq_id, do: Map.put(map, :seq_id, request.seq_id), else: map
-    map = if request.base_model, do: Map.put(map, :base_model, request.base_model), else: map
-    map = if request.model_path, do: Map.put(map, :model_path, request.model_path), else: map
-
-    # prompt_logprobs is tri-state: true, false, or nil (omitted)
-    map =
-      if is_boolean(request.prompt_logprobs),
-        do: Map.put(map, :prompt_logprobs, request.prompt_logprobs),
-        else: map
-
-    Jason.Encode.map(map, opts)
+    request
+    |> SchemaCodec.omit_nil_fields([
+      :sampling_session_id,
+      :seq_id,
+      :base_model,
+      :model_path,
+      :prompt_logprobs
+    ])
+    |> SchemaCodec.encode_map()
+    |> Jason.Encode.map(opts)
   end
 end

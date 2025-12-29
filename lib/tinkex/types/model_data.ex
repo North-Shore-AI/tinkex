@@ -3,7 +3,22 @@ defmodule Tinkex.Types.ModelData do
   Model metadata including architecture, display name, and tokenizer id.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   defstruct [:arch, :model_name, :tokenizer_id]
+
+  @schema Schema.define([
+            {:arch, :string, [optional: true]},
+            {:model_name, :string, [optional: true]},
+            {:tokenizer_id, :string, [optional: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           arch: String.t() | nil,
@@ -16,10 +31,6 @@ defmodule Tinkex.Types.ModelData do
   """
   @spec from_json(map()) :: t()
   def from_json(%{} = json) do
-    %__MODULE__{
-      arch: json["arch"] || json[:arch],
-      model_name: json["model_name"] || json[:model_name],
-      tokenizer_id: json["tokenizer_id"] || json[:tokenizer_id]
-    }
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__), coerce: true)
   end
 end

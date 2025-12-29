@@ -5,7 +5,20 @@ defmodule Tinkex.Types.SessionHeartbeatResponse do
   Mirrors Python `tinker.types.SessionHeartbeatResponse`.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   defstruct type: "session_heartbeat"
+
+  @schema Schema.define([
+            {:type, :string, [optional: true, default: "session_heartbeat"]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           type: String.t()
@@ -23,7 +36,10 @@ defmodule Tinkex.Types.SessionHeartbeatResponse do
   Parse from JSON map.
   """
   @spec from_json(map()) :: t()
-  def from_json(%{"type" => "session_heartbeat"}), do: new()
-  def from_json(%{type: "session_heartbeat"}), do: new()
-  def from_json(_), do: new()
+  def from_json(json) do
+    case SchemaCodec.validate(schema(), json, coerce: true) do
+      {:ok, validated} -> SchemaCodec.to_struct(struct(__MODULE__), validated)
+      {:error, _} -> new()
+    end
+  end
 end

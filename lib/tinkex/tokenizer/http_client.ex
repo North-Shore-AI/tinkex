@@ -21,6 +21,9 @@ defmodule Tinkex.Tokenizer.HTTPClient do
     headers = Keyword.get(opts, :headers, [])
     timeout_ms = Keyword.get(opts, :timeout_ms, 120_000)
 
+    # Add HuggingFace auth token if available
+    headers = add_hf_auth_header(headers)
+
     url =
       [base_url, path]
       |> Path.join()
@@ -80,6 +83,16 @@ defmodule Tinkex.Tokenizer.HTTPClient do
   defp normalize_headers(headers) do
     for {key, value} <- headers do
       {List.to_string(key), List.to_string(value)}
+    end
+  end
+
+  defp add_hf_auth_header(headers) do
+    token = System.get_env("HUGGING_FACE_HUB_TOKEN") || System.get_env("HF_TOKEN")
+
+    if token do
+      [{"Authorization", "Bearer #{token}"} | headers]
+    else
+      headers
     end
   end
 end

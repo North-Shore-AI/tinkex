@@ -60,7 +60,7 @@ Training clients are stateful per model (`model_seq_id`) and reuse the HTTP pool
 
 - `Tinkex.Tokenizer.encode/3` / `decode/3` wrap the HuggingFace `tokenizers` NIF and cache handles in ETS. `encode_text/3` is an alias that matches Python naming.
 - `Tinkex.Types.ModelInput.from_text/2` and `from_text!/2` turn formatted strings into model inputs; chat templates are intentionally out of scope.
-- Common request/response structs (`SamplingParams`, `Datum`, `ForwardBackwardRequest`, etc.) are JSON-encodable to match the Python SDK wire format.
+- Common request/response structs (`SamplingParams`, `Datum`, `ForwardBackwardRequest`, etc.) are JSON-encodable via `Sinter`, preserving `nil` by default; use `Sinter.NotGiven`/`omit` when a field must be omitted.
 
 ## Config and Telemetry
 

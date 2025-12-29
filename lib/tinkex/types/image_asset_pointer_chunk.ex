@@ -11,8 +11,23 @@ defmodule Tinkex.Types.ImageAssetPointerChunk do
   `expected_tokens` is `nil`.
   """
 
+  alias Sinter.Schema
+
   @enforce_keys [:location, :format]
   defstruct [:location, :format, :expected_tokens, type: "image_asset_pointer"]
+
+  @schema Schema.define([
+            {:location, :string, [required: true]},
+            {:format, :string, [required: true, choices: ["png", "jpeg"]]},
+            {:expected_tokens, {:nullable, :integer}, [optional: true]},
+            {:type, :string, [optional: true, default: "image_asset_pointer"]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type format :: :png | :jpeg
   @type t :: %__MODULE__{
@@ -35,16 +50,9 @@ end
 
 defimpl Jason.Encoder, for: Tinkex.Types.ImageAssetPointerChunk do
   def encode(chunk, opts) do
-    format_str = Atom.to_string(chunk.format)
-
-    %{
-      location: chunk.location,
-      format: format_str,
-      expected_tokens: chunk.expected_tokens,
-      type: chunk.type
-    }
-    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-    |> Map.new()
+    chunk
+    |> Tinkex.SchemaCodec.omit_nil_fields([:expected_tokens])
+    |> Tinkex.SchemaCodec.encode_map()
     |> Jason.Encode.map(opts)
   end
 end

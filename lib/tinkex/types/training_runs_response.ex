@@ -3,10 +3,24 @@ defmodule Tinkex.Types.TrainingRunsResponse do
   Paginated training run response.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
   alias Tinkex.Types.{Cursor, TrainingRun}
 
   @enforce_keys [:training_runs]
   defstruct [:training_runs, :cursor]
+
+  @schema Schema.define([
+            {:training_runs, {:array, {:object, TrainingRun.schema()}},
+             [optional: true, default: []]},
+            {:cursor, {:nullable, {:object, Cursor.schema()}}, [optional: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           training_runs: [TrainingRun.t()],
@@ -18,19 +32,9 @@ defmodule Tinkex.Types.TrainingRunsResponse do
   """
   @spec from_map(map()) :: t()
   def from_map(map) when is_map(map) do
-    runs =
-      map
-      |> fetch("training_runs")
-      |> List.wrap()
-      |> Enum.map(&TrainingRun.from_map/1)
-
-    %__MODULE__{
-      training_runs: runs,
-      cursor: map |> fetch("cursor") |> Cursor.from_map()
-    }
-  end
-
-  defp fetch(map, key) do
-    map[key] || map[String.to_atom(key)] || []
+    SchemaCodec.decode_struct(schema(), map, struct(__MODULE__),
+      coerce: true,
+      converters: %{training_runs: {:list, TrainingRun}, cursor: Cursor}
+    )
   end
 end

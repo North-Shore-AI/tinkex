@@ -1,6 +1,8 @@
 defmodule Tinkex.Retry do
   @moduledoc false
 
+  alias Foundation.Backoff
+  alias Foundation.Retry, as: FoundationRetry
   alias Tinkex.Error
   alias Tinkex.RetryHandler
 
@@ -15,19 +17,27 @@ defmodule Tinkex.Retry do
     handler = Keyword.get(opts, :handler, RetryHandler.new())
     metadata = Keyword.get(opts, :telemetry_metadata, %{})
 
-    do_retry(fun, handler, metadata)
+    policy = build_policy(handler)
+    state = build_state(handler)
+
+    do_retry(fun, policy, state, metadata)
   end
 
-  defp do_retry(fun, handler, metadata) do
-    if RetryHandler.progress_timeout?(handler) do
-      {:error, Error.new(:api_timeout, "Progress timeout exceeded")}
-    else
-      execute_attempt(fun, handler, metadata)
+  defp do_retry(fun, policy, state, metadata) do
+    case FoundationRetry.check_timeouts(state, policy) do
+      {:error, :progress_timeout} ->
+        {:error, Error.new(:api_timeout, "Progress timeout exceeded")}
+
+      {:error, :max_elapsed} ->
+        {:error, Error.new(:api_timeout, "Retry deadline exceeded")}
+
+      :ok ->
+        execute_attempt(fun, policy, state, metadata)
     end
   end
 
-  defp execute_attempt(fun, handler, metadata) do
-    attempt_metadata = Map.put(metadata, :attempt, handler.attempt)
+  defp execute_attempt(fun, policy, state, metadata) do
+    attempt_metadata = Map.put(metadata, :attempt, state.attempt)
 
     :telemetry.execute(
       @telemetry_start,
@@ -47,8 +57,21 @@ defmodule Tinkex.Retry do
 
     duration = System.monotonic_time() - start_time
 
-    case result do
-      {:ok, value} ->
+    case FoundationRetry.step(state, policy, result) do
+      {:retry, delay, next_state} ->
+        emit_retry_event(result, duration, delay, attempt_metadata)
+        Process.sleep(delay)
+        do_retry(fun, policy, next_state, metadata)
+
+      {:halt, {:error, :progress_timeout}, _state} ->
+        emit_timeout_event(duration, attempt_metadata)
+        {:error, Error.new(:api_timeout, "Progress timeout exceeded")}
+
+      {:halt, {:error, :max_elapsed}, _state} ->
+        emit_timeout_event(duration, attempt_metadata)
+        {:error, Error.new(:api_timeout, "Retry deadline exceeded")}
+
+      {:halt, {:ok, value}, _state} ->
         :telemetry.execute(
           @telemetry_stop,
           %{duration: duration},
@@ -57,67 +80,86 @@ defmodule Tinkex.Retry do
 
         {:ok, value}
 
-      {:error, error} ->
-        handle_error(fun, error, handler, metadata, attempt_metadata, duration)
+      {:halt, {:error, error}, _state} ->
+        :telemetry.execute(
+          @telemetry_failed,
+          %{duration: duration},
+          Map.merge(attempt_metadata, %{result: :failed, error: error})
+        )
 
-      {:exception, exception, _stacktrace} ->
-        handle_exception(fun, exception, handler, metadata, attempt_metadata, duration)
+        {:error, error}
+
+      {:halt, {:exception, exception, _stacktrace}, _state} ->
+        :telemetry.execute(
+          @telemetry_failed,
+          %{duration: duration},
+          Map.merge(attempt_metadata, %{result: :exception, exception: exception})
+        )
+
+        {:error, Error.new(:request_failed, Exception.message(exception))}
     end
   end
 
-  defp handle_error(fun, error, handler, metadata, attempt_metadata, duration) do
-    if RetryHandler.retry?(handler, error) do
-      delay = RetryHandler.next_delay(handler)
-
-      :telemetry.execute(
-        @telemetry_retry,
-        %{duration: duration, delay_ms: delay},
-        Map.merge(attempt_metadata, %{error: error})
-      )
-
-      Process.sleep(delay)
-
-      handler =
-        handler
-        |> RetryHandler.increment_attempt()
-
-      do_retry(fun, handler, metadata)
-    else
-      :telemetry.execute(
-        @telemetry_failed,
-        %{duration: duration},
-        Map.merge(attempt_metadata, %{result: :failed, error: error})
-      )
-
-      {:error, error}
-    end
+  defp emit_retry_event({:error, error}, duration, delay, attempt_metadata) do
+    :telemetry.execute(
+      @telemetry_retry,
+      %{duration: duration, delay_ms: delay},
+      Map.merge(attempt_metadata, %{error: error})
+    )
   end
 
-  defp handle_exception(fun, exception, handler, metadata, attempt_metadata, duration) do
-    if RetryHandler.retry?(handler, exception) do
-      delay = RetryHandler.next_delay(handler)
-
-      :telemetry.execute(
-        @telemetry_retry,
-        %{duration: duration, delay_ms: delay},
-        Map.merge(attempt_metadata, %{exception: exception})
-      )
-
-      Process.sleep(delay)
-
-      handler =
-        handler
-        |> RetryHandler.increment_attempt()
-
-      do_retry(fun, handler, metadata)
-    else
-      :telemetry.execute(
-        @telemetry_failed,
-        %{duration: duration},
-        Map.merge(attempt_metadata, %{result: :exception, exception: exception})
-      )
-
-      {:error, Error.new(:request_failed, Exception.message(exception))}
-    end
+  defp emit_retry_event({:exception, exception, _stacktrace}, duration, delay, attempt_metadata) do
+    :telemetry.execute(
+      @telemetry_retry,
+      %{duration: duration, delay_ms: delay},
+      Map.merge(attempt_metadata, %{exception: exception})
+    )
   end
+
+  defp emit_retry_event(_result, duration, delay, attempt_metadata) do
+    :telemetry.execute(
+      @telemetry_retry,
+      %{duration: duration, delay_ms: delay},
+      attempt_metadata
+    )
+  end
+
+  defp emit_timeout_event(duration, attempt_metadata) do
+    :telemetry.execute(
+      @telemetry_failed,
+      %{duration: duration},
+      Map.merge(attempt_metadata, %{result: :failed})
+    )
+  end
+
+  defp build_policy(%RetryHandler{} = handler) do
+    backoff =
+      Backoff.Policy.new(
+        strategy: :exponential,
+        base_ms: handler.base_delay_ms,
+        max_ms: handler.max_delay_ms,
+        jitter_strategy: :range,
+        jitter: {1.0 - handler.jitter_pct, 1.0 + handler.jitter_pct}
+      )
+
+    FoundationRetry.Policy.new(
+      max_attempts: handler.max_retries,
+      progress_timeout_ms: handler.progress_timeout_ms,
+      backoff: backoff,
+      retry_on: &retryable_result?/1
+    )
+  end
+
+  defp build_state(%RetryHandler{} = handler) do
+    FoundationRetry.State.new(
+      attempt: handler.attempt,
+      start_time_ms: handler.start_time,
+      last_progress_ms: handler.last_progress_at
+    )
+  end
+
+  defp retryable_result?({:error, %Error{} = error}), do: Error.retryable?(error)
+  defp retryable_result?({:error, _}), do: true
+  defp retryable_result?({:exception, _exception, _stacktrace}), do: true
+  defp retryable_result?(_), do: false
 end

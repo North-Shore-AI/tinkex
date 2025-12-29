@@ -36,6 +36,7 @@ Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-
 - **CheckpointDownload**: Memory-efficient streaming downloads with O(1) memory usage and optional progress reporting
 - **Async/Concurrent**: Built on Elixir's actor model for efficient concurrent operations
 - **Type Safety**: Leverages Elixir typespecs and pattern matching
+- **Schema-driven serialization**: Request/response structs validate/encode via `Sinter`, preserving `nil` values by default; use `Sinter.NotGiven`/`omit` to drop fields when required
 - **HTTP/2**: Modern HTTP client with connection pooling and streaming support
 - **Retry Logic**: Configurable retry strategies with exponential backoff
 - **Telemetry**: Comprehensive observability through Elixir's telemetry ecosystem

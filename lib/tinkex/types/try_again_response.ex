@@ -6,10 +6,26 @@ defmodule Tinkex.Types.TryAgainResponse do
   atoms via `Tinkex.Types.QueueState`.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
   alias Tinkex.Types.QueueState
 
   @enforce_keys [:type, :request_id, :queue_state]
   defstruct [:type, :request_id, :queue_state, :retry_after_ms, :queue_state_reason]
+
+  @schema Schema.define([
+            {:type, :string, [required: true]},
+            {:request_id, :string, [required: true]},
+            {:queue_state, :string, [required: true]},
+            {:retry_after_ms, {:nullable, :integer}, [optional: true, gteq: 0]},
+            {:queue_state_reason, {:nullable, :string}, [optional: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           type: String.t(),
@@ -29,25 +45,22 @@ defmodule Tinkex.Types.TryAgainResponse do
   """
   @spec from_map(map()) :: t()
   def from_map(map) when is_map(map) do
-    type = fetch_binary!(map, :type)
+    type = fetch_type(map)
+    validate_type!(type)
+    validate_queue_state_reason!(map)
 
-    unless String.downcase(type) == "try_again" do
-      raise ArgumentError,
-            "TryAgainResponse.from_map/1 only accepts type \"try_again\", got: #{inspect(type)}"
+    case SchemaCodec.validate(schema(), map, coerce: true) do
+      {:ok, validated} ->
+        struct =
+          SchemaCodec.to_struct(struct(__MODULE__), validated,
+            converters: %{queue_state: &QueueState.parse/1}
+          )
+
+        %__MODULE__{struct | type: type}
+
+      {:error, errors} ->
+        raise ArgumentError, "invalid TryAgainResponse map: #{inspect(errors)}"
     end
-
-    request_id = fetch_binary!(map, :request_id)
-    queue_state = fetch_binary!(map, :queue_state)
-    queue_state_reason = normalize_optional_string(get_optional(map, :queue_state_reason))
-    retry_after_ms = normalize_retry_after(get_optional(map, :retry_after_ms))
-
-    %__MODULE__{
-      type: type,
-      request_id: request_id,
-      queue_state: QueueState.parse(queue_state),
-      retry_after_ms: retry_after_ms,
-      queue_state_reason: queue_state_reason
-    }
   end
 
   def from_map(other) do
@@ -55,49 +68,28 @@ defmodule Tinkex.Types.TryAgainResponse do
           "TryAgainResponse.from_map/1 expects a map, got: #{inspect(other)}"
   end
 
-  defp fetch_binary!(map, key) do
-    case get_optional(map, key) do
-      value when is_binary(value) ->
-        value
+  defp fetch_type(map) do
+    Map.get(map, "type") || Map.get(map, :type)
+  end
 
-      nil ->
-        raise ArgumentError, "missing required field #{inspect(key)} in TryAgainResponse map"
-
-      other ->
-        raise ArgumentError,
-              "expected #{inspect(key)} to be a binary, got: #{inspect(other)}"
+  defp validate_type!(type) when is_binary(type) do
+    if String.downcase(type) == "try_again" do
+      :ok
+    else
+      raise ArgumentError, "TryAgainResponse.type must be \"try_again\", got: #{inspect(type)}"
     end
   end
 
-  defp get_optional(map, key) do
-    case Map.fetch(map, key) do
-      {:ok, value} ->
-        value
+  defp validate_type!(other) do
+    raise ArgumentError, "TryAgainResponse.type must be a string, got: #{inspect(other)}"
+  end
 
-      :error ->
-        Map.get(map, key_to_string(key))
+  defp validate_queue_state_reason!(map) do
+    reason = Map.get(map, "queue_state_reason") || Map.get(map, :queue_state_reason)
+
+    if not is_nil(reason) and not is_binary(reason) do
+      raise ArgumentError,
+            "TryAgainResponse.queue_state_reason must be a string, got: #{inspect(reason)}"
     end
-  end
-
-  defp key_to_string(key) when is_atom(key), do: Atom.to_string(key)
-
-  defp normalize_retry_after(nil), do: nil
-
-  defp normalize_retry_after(value) when is_integer(value) and value >= 0 do
-    value
-  end
-
-  defp normalize_retry_after(value) do
-    raise ArgumentError,
-          "expected retry_after_ms to be nil or non-negative integer, got: #{inspect(value)}"
-  end
-
-  defp normalize_optional_string(nil), do: nil
-
-  defp normalize_optional_string(value) when is_binary(value), do: value
-
-  defp normalize_optional_string(value) do
-    raise ArgumentError,
-          "expected queue_state_reason to be nil or binary, got: #{inspect(value)}"
   end
 end

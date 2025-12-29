@@ -31,8 +31,23 @@ defmodule Tinkex.Types.WeightsInfoResponse do
   - `Tinkex.API.Rest.get_weights_info_by_tinker_path/2`
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   @enforce_keys [:base_model, :is_lora]
   defstruct [:base_model, :is_lora, :lora_rank]
+
+  @schema Schema.define([
+            {:base_model, :string, [required: true]},
+            {:is_lora, :boolean, [required: true]},
+            {:lora_rank, :integer, [optional: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           base_model: String.t(),
@@ -59,37 +74,16 @@ defmodule Tinkex.Types.WeightsInfoResponse do
       %WeightsInfoResponse{base_model: "Qwen", is_lora: false, lora_rank: nil}
   """
   @spec from_json(map()) :: t()
-  def from_json(%{"base_model" => base_model, "is_lora" => is_lora} = json) do
-    %__MODULE__{
-      base_model: base_model,
-      is_lora: is_lora,
-      lora_rank: json["lora_rank"]
-    }
-  end
-
-  def from_json(%{base_model: base_model, is_lora: is_lora} = json) do
-    %__MODULE__{
-      base_model: base_model,
-      is_lora: is_lora,
-      lora_rank: json[:lora_rank]
-    }
+  def from_json(json) do
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__), coerce: true)
   end
 end
 
 defimpl Jason.Encoder, for: Tinkex.Types.WeightsInfoResponse do
   def encode(resp, opts) do
-    map = %{
-      base_model: resp.base_model,
-      is_lora: resp.is_lora
-    }
-
-    map =
-      if resp.lora_rank do
-        Map.put(map, :lora_rank, resp.lora_rank)
-      else
-        map
-      end
-
-    Jason.Encode.map(map, opts)
+    resp
+    |> Tinkex.SchemaCodec.omit_nil_fields([:lora_rank])
+    |> Tinkex.SchemaCodec.encode_map()
+    |> Jason.Encode.map(opts)
   end
 end

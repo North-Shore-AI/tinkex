@@ -8,9 +8,22 @@ defmodule Tinkex.Types.TensorData do
   This module performs aggressive casting to match Python SDK behavior.
   """
 
+  alias Sinter.Schema
   alias Tinkex.Types.TensorDtype
 
   defstruct [:data, :dtype, :shape]
+
+  @schema Schema.define([
+            {:data, {:array, {:union, [:integer, :float]}}, [required: true]},
+            {:dtype, :string, [required: true]},
+            {:shape, {:nullable, {:array, :integer}}, [optional: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           data: [number()],
@@ -97,13 +110,8 @@ end
 
 defimpl Jason.Encoder, for: Tinkex.Types.TensorData do
   def encode(tensor_data, opts) do
-    dtype_str = Tinkex.Types.TensorDtype.to_string(tensor_data.dtype)
-
-    %{
-      data: tensor_data.data,
-      dtype: dtype_str,
-      shape: tensor_data.shape
-    }
+    tensor_data
+    |> Tinkex.SchemaCodec.encode_map()
     |> Jason.Encode.map(opts)
   end
 end

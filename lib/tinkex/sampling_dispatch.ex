@@ -14,6 +14,8 @@ defmodule Tinkex.SamplingDispatch do
 
   use GenServer
 
+  alias Foundation.Backoff
+  alias Foundation.Semaphore.Counting
   alias Tinkex.{BytesSemaphore, PoolKey, RateLimiter}
 
   @default_concurrency 400
@@ -67,7 +69,7 @@ defmodule Tinkex.SamplingDispatch do
     byte_budget = Keyword.get(opts, :byte_budget, @default_byte_budget)
     acquire_backoff = build_acquire_backoff(Keyword.get(opts, :acquire_backoff, []))
 
-    ensure_semaphore_started()
+    _ = Counting.default_registry()
 
     concurrency = %{
       name: concurrency_name(base_url, api_key, concurrency_limit),
@@ -165,17 +167,6 @@ defmodule Tinkex.SamplingDispatch do
   defp maybe_release_throttled(_semaphore, false, _backoff), do: :ok
   defp maybe_release_throttled(%{name: name}, true, backoff), do: backoff.release_fun.(name)
 
-  defp ensure_semaphore_started do
-    case Process.whereis(Semaphore) do
-      nil ->
-        {:ok, _pid} = Semaphore.start_link()
-        :ok
-
-      _pid ->
-        :ok
-    end
-  end
-
   defp concurrency_name(base_url, api_key, limit) do
     {:tinkex_sampling_dispatch, PoolKey.normalize_base_url(base_url), api_key, :concurrency,
      limit}
@@ -198,19 +189,26 @@ defmodule Tinkex.SamplingDispatch do
         jitter: @default_acquire_backoff_jitter,
         sleep_fun: &Process.sleep/1,
         rand_fun: &:rand.uniform/0,
-        acquire_fun: &Semaphore.acquire/2,
-        release_fun: &Semaphore.release/1
+        acquire_fun: &Counting.acquire/2,
+        release_fun: &Counting.release/1
       }
       |> Map.merge(Map.new(opts))
 
+    policy =
+      Backoff.Policy.new(
+        strategy: :exponential,
+        base_ms: positive_or_default(backoff.base_ms, @default_acquire_backoff_base_ms),
+        max_ms:
+          positive_or_default(backoff.max_ms, @default_acquire_backoff_max_ms)
+          |> max(positive_or_default(backoff.base_ms, @default_acquire_backoff_base_ms)),
+        jitter_strategy: :factor,
+        jitter: normalize_jitter(backoff.jitter),
+        rand_fun: normalize_rand_fun(backoff.rand_fun)
+      )
+
     %{
-      base_ms: positive_or_default(backoff.base_ms, @default_acquire_backoff_base_ms),
-      max_ms:
-        positive_or_default(backoff.max_ms, @default_acquire_backoff_max_ms)
-        |> max(positive_or_default(backoff.base_ms, @default_acquire_backoff_base_ms)),
-      jitter: normalize_jitter(backoff.jitter),
+      policy: policy,
       sleep_fun: normalize_sleep_fun(backoff.sleep_fun),
-      rand_fun: normalize_rand_fun(backoff.rand_fun),
       acquire_fun: normalize_acquire_fun(backoff.acquire_fun),
       release_fun: normalize_release_fun(backoff.release_fun)
     }
@@ -220,19 +218,10 @@ defmodule Tinkex.SamplingDispatch do
 
   defp backoff_delay(backoff, attempt) when is_integer(attempt) and attempt >= 0 do
     capped_attempt = min(attempt, @max_backoff_exponent)
-    base_delay = trunc(backoff.base_ms * :math.pow(2, capped_attempt))
-    capped_delay = min(base_delay, backoff.max_ms)
-    apply_jitter(capped_delay, backoff.jitter, backoff.rand_fun)
+    Backoff.delay(backoff.policy, capped_attempt)
   end
 
-  defp backoff_delay(backoff, _attempt), do: backoff.base_ms
-
-  defp apply_jitter(delay, jitter, _rand_fun) when jitter <= 0, do: delay
-
-  defp apply_jitter(delay, jitter, rand_fun) do
-    factor = 1 - jitter + rand_fun.() * jitter
-    max(trunc(delay * factor), 0)
-  end
+  defp backoff_delay(backoff, _attempt), do: Backoff.delay(backoff.policy, 0)
 
   defp positive_or_default(value, _default) when is_integer(value) and value > 0, do: value
   defp positive_or_default(_value, default), do: default
@@ -248,8 +237,8 @@ defmodule Tinkex.SamplingDispatch do
   defp normalize_rand_fun(_fun), do: &:rand.uniform/0
 
   defp normalize_acquire_fun(fun) when is_function(fun, 2), do: fun
-  defp normalize_acquire_fun(_fun), do: &Semaphore.acquire/2
+  defp normalize_acquire_fun(_fun), do: &Counting.acquire/2
 
   defp normalize_release_fun(fun) when is_function(fun, 1), do: fun
-  defp normalize_release_fun(_fun), do: &Semaphore.release/1
+  defp normalize_release_fun(_fun), do: &Counting.release/1
 end

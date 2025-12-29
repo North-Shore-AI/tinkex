@@ -130,22 +130,7 @@ defmodule Tinkex.API.Sampling do
   # Private helpers
 
   defp prepare_request_body(request) do
-    request
-    |> drop_nil_values()
-    |> Jason.encode!()
-  end
-
-  defp drop_nil_values(map) when is_map(map) do
-    map
-    |> Map.from_struct()
-    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-    |> Map.new()
-  rescue
-    # Not a struct, just a regular map
-    _error ->
-      map
-      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
-      |> Map.new()
+    Tinkex.SchemaCodec.encode_json!(request, drop_nil?: true)
   end
 
   defp parse_sse_response(body) do

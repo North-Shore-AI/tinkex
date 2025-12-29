@@ -31,6 +31,8 @@ defmodule Tinkex.Types.CustomLossOutput do
   Each regularizer's contribution is `weight * value`.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
   alias Tinkex.Types.RegularizerOutput
 
   @enforce_keys [:loss_total]
@@ -41,6 +43,20 @@ defmodule Tinkex.Types.CustomLossOutput do
     :total_grad_norm,
     regularizers: %{}
   ]
+
+  @schema Schema.define([
+            {:loss_total, :float, [required: true]},
+            {:base_loss, :map, [optional: true]},
+            {:regularizers, :map, [optional: true, default: %{}]},
+            {:regularizer_total, :float, [optional: true]},
+            {:total_grad_norm, :float, [optional: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type base_loss_metrics :: %{
           value: float(),
@@ -116,42 +132,28 @@ defmodule Tinkex.Types.CustomLossOutput do
 end
 
 defimpl Jason.Encoder, for: Tinkex.Types.CustomLossOutput do
+  alias Tinkex.SchemaCodec
+
   def encode(output, opts) do
-    base = %{
+    regularizers =
+      output.regularizers
+      |> Enum.map(fn {name, reg} ->
+        {name,
+         reg
+         |> SchemaCodec.omit_nil_fields([:grad_norm, :grad_norm_weighted])
+         |> SchemaCodec.encode_map()}
+      end)
+      |> Map.new()
+
+    %{
       loss_total: output.loss_total,
       regularizer_total: output.regularizer_total,
-      regularizers:
-        output.regularizers
-        |> Enum.map(fn {name, reg} ->
-          {name,
-           %{
-             value: reg.value,
-             weight: reg.weight,
-             contribution: reg.contribution,
-             grad_norm: reg.grad_norm,
-             grad_norm_weighted: reg.grad_norm_weighted,
-             custom: reg.custom
-           }}
-        end)
-        |> Map.new()
+      regularizers: regularizers,
+      base_loss: output.base_loss,
+      total_grad_norm: output.total_grad_norm
     }
-
-    # Add base_loss if present
-    base =
-      if output.base_loss do
-        Map.put(base, :base_loss, output.base_loss)
-      else
-        base
-      end
-
-    # Add total_grad_norm if present
-    base =
-      if output.total_grad_norm do
-        Map.put(base, :total_grad_norm, output.total_grad_norm)
-      else
-        base
-      end
-
-    Jason.Encode.map(base, opts)
+    |> SchemaCodec.omit_nil_fields([:base_loss, :total_grad_norm])
+    |> SchemaCodec.encode_map()
+    |> Jason.Encode.map(opts)
   end
 end

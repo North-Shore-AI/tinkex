@@ -5,9 +5,26 @@ defmodule Tinkex.Types.SampleResponse do
   Mirrors Python tinker.types.SampleResponse.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
   alias Tinkex.Types.SampledSequence
 
   defstruct [:sequences, :prompt_logprobs, :topk_prompt_logprobs, type: "sample"]
+
+  @schema Schema.define([
+            {:sequences, {:array, {:object, SampledSequence.schema()}},
+             [optional: true, default: []]},
+            {:prompt_logprobs, {:nullable, {:array, {:union, [:float, :null]}}},
+             [optional: true]},
+            {:topk_prompt_logprobs, :any, [optional: true]},
+            {:type, :string, [optional: true, default: "sample"]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type topk_entry :: {integer(), float()}
   @type topk_prompt_logprobs :: [nil | [topk_entry()]] | nil
@@ -23,16 +40,13 @@ defmodule Tinkex.Types.SampleResponse do
   """
   @spec from_json(map()) :: t()
   def from_json(json) do
-    sequences =
-      json["sequences"]
-      |> Enum.map(&SampledSequence.from_json/1)
-
-    %__MODULE__{
-      sequences: sequences,
-      prompt_logprobs: json["prompt_logprobs"],
-      topk_prompt_logprobs: parse_topk_prompt_logprobs(json["topk_prompt_logprobs"]),
-      type: json["type"] || "sample"
-    }
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__),
+      coerce: true,
+      converters: %{
+        sequences: {:list, SampledSequence},
+        topk_prompt_logprobs: &parse_topk_prompt_logprobs/1
+      }
+    )
   end
 
   defp parse_topk_prompt_logprobs(nil), do: nil

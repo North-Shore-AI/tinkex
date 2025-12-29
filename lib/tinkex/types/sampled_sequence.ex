@@ -5,10 +5,24 @@ defmodule Tinkex.Types.SampledSequence do
   Mirrors Python tinker.types.SampledSequence.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
   alias Tinkex.Types.StopReason
 
   @enforce_keys [:tokens]
   defstruct [:tokens, :logprobs, :stop_reason]
+
+  @schema Schema.define([
+            {:tokens, {:array, :integer}, [required: true]},
+            {:logprobs, {:nullable, {:array, :float}}, [optional: true]},
+            {:stop_reason, :string, [optional: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           tokens: [integer()],
@@ -21,10 +35,9 @@ defmodule Tinkex.Types.SampledSequence do
   """
   @spec from_json(map()) :: t()
   def from_json(json) do
-    %__MODULE__{
-      tokens: json["tokens"],
-      logprobs: json["logprobs"],
-      stop_reason: StopReason.parse(json["stop_reason"])
-    }
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__),
+      coerce: true,
+      converters: %{stop_reason: &StopReason.parse/1}
+    )
   end
 end

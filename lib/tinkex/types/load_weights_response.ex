@@ -3,7 +3,21 @@ defmodule Tinkex.Types.LoadWeightsResponse do
   Response payload for load_weights.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   defstruct [:path, type: "load_weights"]
+
+  @schema Schema.define([
+            {:path, :string, [optional: true]},
+            {:type, :string, [optional: true, default: "load_weights"]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           path: String.t() | nil,
@@ -14,11 +28,7 @@ defmodule Tinkex.Types.LoadWeightsResponse do
   Parse from JSON map with string or atom keys.
   """
   @spec from_json(map()) :: t()
-  def from_json(%{"path" => path} = json) do
-    %__MODULE__{path: path, type: json["type"] || "load_weights"}
-  end
-
-  def from_json(%{} = json) do
-    %__MODULE__{path: json[:path], type: json[:type] || "load_weights"}
+  def from_json(json) do
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__), coerce: true)
   end
 end

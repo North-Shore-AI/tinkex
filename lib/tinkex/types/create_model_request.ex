@@ -5,6 +5,7 @@ defmodule Tinkex.Types.CreateModelRequest do
   Mirrors Python tinker.types.CreateModelRequest.
   """
 
+  alias Sinter.Schema
   alias Tinkex.Types.LoraConfig
 
   @enforce_keys [:session_id, :model_seq_id, :base_model]
@@ -18,6 +19,21 @@ defmodule Tinkex.Types.CreateModelRequest do
     lora_config: %LoraConfig{},
     type: "create_model"
   ]
+
+  @schema Schema.define([
+            {:session_id, :string, [required: true]},
+            {:model_seq_id, :integer, [required: true]},
+            {:base_model, :string, [required: true]},
+            {:user_metadata, :map, [optional: true]},
+            {:lora_config, {:object, LoraConfig.schema()}, [optional: true]},
+            {:type, :string, [optional: true, default: "create_model"]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           session_id: String.t(),

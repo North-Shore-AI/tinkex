@@ -29,6 +29,7 @@ defmodule Tinkex.Future do
 
   require Logger
 
+  alias Foundation.Backoff
   alias Tinkex.API.Futures
   alias Tinkex.Config
   alias Tinkex.Error
@@ -354,8 +355,16 @@ defmodule Tinkex.Future do
        when is_integer(iteration) and iteration >= 0 do
     capped_iteration = min(iteration, max_exponent(initial_ms, max_ms))
     capped_iteration = min(capped_iteration, @max_backoff_exponent)
-    backoff = trunc(:math.pow(2, capped_iteration)) * initial_ms
-    min(backoff, max_ms)
+
+    policy =
+      Backoff.Policy.new(
+        strategy: :exponential,
+        base_ms: initial_ms,
+        max_ms: max_ms,
+        jitter_strategy: :none
+      )
+
+    Backoff.delay(policy, capped_iteration)
   end
 
   defp try_again_sleep_ms(%TryAgainResponse{retry_after_ms: ms}, _iteration)

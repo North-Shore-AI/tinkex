@@ -5,8 +5,21 @@ defmodule Tinkex.Types.CreateModelResponse do
   Mirrors Python tinker.types.CreateModelResponse.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   @enforce_keys [:model_id]
   defstruct [:model_id]
+
+  @schema Schema.define([
+            {:model_id, :string, [required: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           model_id: String.t()
@@ -17,8 +30,6 @@ defmodule Tinkex.Types.CreateModelResponse do
   """
   @spec from_json(map()) :: t()
   def from_json(json) do
-    %__MODULE__{
-      model_id: json["model_id"]
-    }
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__), coerce: true)
   end
 end

@@ -5,8 +5,24 @@ defmodule Tinkex.Types.CreateSessionResponse do
   Mirrors Python tinker.types.CreateSessionResponse.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   @enforce_keys [:session_id]
   defstruct [:session_id, :info_message, :warning_message, :error_message]
+
+  @schema Schema.define([
+            {:session_id, :string, [required: true]},
+            {:info_message, :string, [optional: true]},
+            {:warning_message, :string, [optional: true]},
+            {:error_message, :string, [optional: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           session_id: String.t(),
@@ -20,11 +36,6 @@ defmodule Tinkex.Types.CreateSessionResponse do
   """
   @spec from_json(map()) :: t()
   def from_json(json) do
-    %__MODULE__{
-      session_id: json["session_id"],
-      info_message: json["info_message"],
-      warning_message: json["warning_message"],
-      error_message: json["error_message"]
-    }
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__), coerce: true)
   end
 end

@@ -199,6 +199,7 @@ defmodule Tinkex.TelemetryReporterTest do
     test "retries failed sends with exponential backoff", %{bypass: bypass, config: config} do
       parent = self()
       attempt_count = :counters.new(1, [:atomics])
+      sleep_ref = make_ref()
 
       Bypass.expect(bypass, "POST", "/api/v1/telemetry", fn conn ->
         :counters.add(attempt_count, 1, 1)
@@ -208,7 +209,7 @@ defmodule Tinkex.TelemetryReporterTest do
         if current < 3 do
           conn
           |> Plug.Conn.put_resp_content_type("application/json")
-          |> Plug.Conn.resp(500, ~s({"error":"server error"}))
+          |> Plug.Conn.resp(400, ~s({"error":"bad request"}))
         else
           {:ok, body, conn} = Plug.Conn.read_body(conn)
           payload = Jason.decode!(body)
@@ -220,6 +221,8 @@ defmodule Tinkex.TelemetryReporterTest do
         end
       end)
 
+      sleep_fun = fn ms -> send(parent, {:slept, sleep_ref, ms}) end
+
       {:ok, reporter} =
         Reporter.start_link(
           session_id: "retry-test",
@@ -229,6 +232,8 @@ defmodule Tinkex.TelemetryReporterTest do
           flush_threshold: 1_000,
           max_retries: 3,
           retry_base_delay_ms: 100,
+          retry_sleep_fun: sleep_fun,
+          retry_rand_fun: fn max -> max end,
           enabled: true
         )
 
@@ -242,6 +247,9 @@ defmodule Tinkex.TelemetryReporterTest do
 
       # Should eventually succeed
       assert_receive {:telemetry_payload, _payload}, 5_000
+
+      assert_receive {:slept, ^sleep_ref, 110}
+      assert_receive {:slept, ^sleep_ref, 220}
     end
 
     test "gives up after max_retries", %{bypass: bypass, config: config} do

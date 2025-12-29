@@ -3,6 +3,8 @@ defmodule Tinkex.Types.TrainingRun do
   Training run metadata with last checkpoint details.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
   alias Tinkex.Types.Checkpoint
 
   @enforce_keys [:training_run_id, :base_model, :model_owner, :is_lora, :last_request_time]
@@ -18,6 +20,26 @@ defmodule Tinkex.Types.TrainingRun do
     :last_sampler_checkpoint,
     :user_metadata
   ]
+
+  @schema Schema.define([
+            {:training_run_id, :string, [required: true]},
+            {:base_model, :string, [required: true]},
+            {:model_owner, :string, [required: true]},
+            {:is_lora, :boolean, [optional: true, default: false]},
+            {:lora_rank, {:nullable, :integer}, [optional: true]},
+            {:corrupted, :boolean, [optional: true, default: false]},
+            {:last_request_time, :any, [optional: true]},
+            {:last_checkpoint, {:nullable, {:object, Checkpoint.schema()}}, [optional: true]},
+            {:last_sampler_checkpoint, {:nullable, {:object, Checkpoint.schema()}},
+             [optional: true]},
+            {:user_metadata, {:nullable, :map}, [optional: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           training_run_id: String.t(),
@@ -37,30 +59,22 @@ defmodule Tinkex.Types.TrainingRun do
   """
   @spec from_map(map()) :: t()
   def from_map(map) when is_map(map) do
-    %__MODULE__{
-      training_run_id: fetch(map, "training_run_id") || fetch(map, "id"),
-      base_model: fetch(map, "base_model"),
-      model_owner: fetch(map, "model_owner"),
-      is_lora: fetch_boolean(map, "is_lora"),
-      lora_rank: map["lora_rank"] || map[:lora_rank],
-      corrupted: fetch_boolean(map, "corrupted", false),
-      last_request_time: parse_datetime(fetch(map, "last_request_time")),
-      last_checkpoint: map |> fetch("last_checkpoint") |> maybe_checkpoint(),
-      last_sampler_checkpoint: map |> fetch("last_sampler_checkpoint") |> maybe_checkpoint(),
-      user_metadata: map["user_metadata"] || map[:user_metadata]
-    }
-  end
+    map = normalize_training_run_id(map)
 
-  defp fetch(map, key) do
-    map[key] || map[String.to_atom(key)]
-  end
+    case SchemaCodec.validate(schema(), map, coerce: true) do
+      {:ok, validated} ->
+        struct =
+          SchemaCodec.to_struct(struct(__MODULE__), validated,
+            converters: %{
+              last_checkpoint: Checkpoint,
+              last_sampler_checkpoint: Checkpoint
+            }
+          )
 
-  defp fetch_boolean(map, key, default \\ false) do
-    case fetch(map, key) do
-      nil -> default
-      value when is_boolean(value) -> value
-      value when is_binary(value) -> String.downcase(value) == "true"
-      _ -> default
+        %__MODULE__{struct | last_request_time: parse_datetime(struct.last_request_time)}
+
+      {:error, errors} ->
+        raise ArgumentError, "invalid training run map: #{inspect(errors)}"
     end
   end
 
@@ -76,7 +90,15 @@ defmodule Tinkex.Types.TrainingRun do
   defp parse_datetime(%DateTime{} = dt), do: dt
   defp parse_datetime(other), do: other
 
-  defp maybe_checkpoint(nil), do: nil
-  defp maybe_checkpoint(%Checkpoint{} = checkpoint), do: checkpoint
-  defp maybe_checkpoint(map) when is_map(map), do: Checkpoint.from_map(map)
+  defp normalize_training_run_id(map) do
+    training_run_id =
+      Map.get(map, "training_run_id") || Map.get(map, :training_run_id) ||
+        Map.get(map, "id") || Map.get(map, :id)
+
+    if training_run_id do
+      Map.put_new(map, "training_run_id", training_run_id)
+    else
+      map
+    end
+  end
 end

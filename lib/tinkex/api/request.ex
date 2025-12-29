@@ -12,7 +12,7 @@ defmodule Tinkex.API.Request do
   alias Tinkex.API.Headers
   alias Tinkex.Files.Transform, as: FileTransform
   alias Tinkex.Multipart.{Encoder, FormSerializer}
-  alias Tinkex.Transform
+  alias Tinkex.SchemaCodec
 
   @doc """
   Prepares the request body and updates headers as needed.
@@ -89,7 +89,7 @@ defmodule Tinkex.API.Request do
   end
 
   defp serialize_form_body(body, transform_opts) do
-    transformed = Transform.transform(body, transform_opts)
+    transformed = SchemaCodec.encode_map(body, transform_opts)
 
     cond do
       is_nil(transformed) -> {:ok, %{}}
@@ -131,8 +131,6 @@ defmodule Tinkex.API.Request do
   defp encode_json_body(body, _transform_opts) when is_binary(body), do: body
 
   defp encode_json_body(body, transform_opts) do
-    body
-    |> Transform.transform(transform_opts)
-    |> Jason.encode!()
+    SchemaCodec.encode_json!(body, transform_opts)
   end
 end

@@ -28,6 +28,9 @@ defmodule Tinkex.Types.RegularizerOutput do
       }
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   @enforce_keys [:name, :value, :weight, :contribution]
   defstruct [
     :name,
@@ -38,6 +41,30 @@ defmodule Tinkex.Types.RegularizerOutput do
     :grad_norm_weighted,
     custom: %{}
   ]
+
+  @schema Schema.define([
+            {:name, :string, [required: true]},
+            {:value, :float, [required: true]},
+            {:weight, :float, [required: true]},
+            {:contribution, :float, [required: true]},
+            {:grad_norm, :float, [optional: true]},
+            {:grad_norm_weighted, :float, [optional: true]},
+            {:custom, :map, [optional: true, default: %{}]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
+
+  @doc """
+  Parse a regularizer output from JSON.
+  """
+  @spec from_json(map()) :: t()
+  def from_json(json) do
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__), coerce: true)
+  end
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -86,25 +113,9 @@ end
 
 defimpl Jason.Encoder, for: Tinkex.Types.RegularizerOutput do
   def encode(output, opts) do
-    map = %{
-      name: output.name,
-      value: output.value,
-      weight: output.weight,
-      contribution: output.contribution,
-      custom: output.custom
-    }
-
-    # Only include gradient fields if present
-    map =
-      if output.grad_norm do
-        Map.merge(map, %{
-          grad_norm: output.grad_norm,
-          grad_norm_weighted: output.grad_norm_weighted
-        })
-      else
-        map
-      end
-
-    Jason.Encode.map(map, opts)
+    output
+    |> Tinkex.SchemaCodec.omit_nil_fields([:grad_norm, :grad_norm_weighted])
+    |> Tinkex.SchemaCodec.encode_map()
+    |> Jason.Encode.map(opts)
   end
 end

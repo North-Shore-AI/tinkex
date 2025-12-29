@@ -34,8 +34,23 @@ defmodule Tinkex.Types.ImageChunk do
   CRITICAL: Field names are `data` and `format`, NOT `image_data` and `image_format`.
   """
 
+  alias Sinter.Schema
+
   @enforce_keys [:data, :format]
   defstruct [:data, :format, :expected_tokens, type: "image"]
+
+  @schema Schema.define([
+            {:data, :string, [required: true]},
+            {:format, :string, [required: true, choices: ["png", "jpeg"]]},
+            {:expected_tokens, {:nullable, :integer}, [optional: true]},
+            {:type, :string, [optional: true, default: "image"]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type format :: :png | :jpeg
   @type t :: %__MODULE__{
@@ -86,21 +101,9 @@ end
 
 defimpl Jason.Encoder, for: Tinkex.Types.ImageChunk do
   def encode(chunk, opts) do
-    format_str = Atom.to_string(chunk.format)
-
-    base_map = %{
-      data: chunk.data,
-      format: format_str,
-      type: chunk.type
-    }
-
-    map =
-      if is_nil(chunk.expected_tokens) do
-        base_map
-      else
-        Map.put(base_map, :expected_tokens, chunk.expected_tokens)
-      end
-
-    Jason.Encode.map(map, opts)
+    chunk
+    |> Tinkex.SchemaCodec.omit_nil_fields([:expected_tokens])
+    |> Tinkex.SchemaCodec.encode_map()
+    |> Jason.Encode.map(opts)
   end
 end

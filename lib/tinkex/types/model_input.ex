@@ -5,11 +5,29 @@ defmodule Tinkex.Types.ModelInput do
   Mirrors Python tinker.types.ModelInput.
   """
 
+  alias Sinter.Schema
   alias Tinkex.{Error, Tokenizer}
   alias Tinkex.Types.{EncodedTextChunk, ImageAssetPointerChunk, ImageChunk}
 
   @derive {Jason.Encoder, only: [:chunks]}
   defstruct chunks: []
+
+  @schema Schema.define([
+            {:chunks,
+             {:array,
+              {:union,
+               [
+                 {:object, EncodedTextChunk.schema()},
+                 {:object, ImageChunk.schema()},
+                 {:object, ImageAssetPointerChunk.schema()}
+               ]}}, [optional: true, default: []]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type chunk ::
           EncodedTextChunk.t()

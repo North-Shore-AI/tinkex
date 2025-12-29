@@ -5,8 +5,21 @@ defmodule Tinkex.Types.CreateSamplingSessionResponse do
   Mirrors Python tinker.types.CreateSamplingSessionResponse.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   @enforce_keys [:sampling_session_id]
   defstruct [:sampling_session_id]
+
+  @schema Schema.define([
+            {:sampling_session_id, :string, [required: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           sampling_session_id: String.t()
@@ -17,8 +30,6 @@ defmodule Tinkex.Types.CreateSamplingSessionResponse do
   """
   @spec from_json(map()) :: t()
   def from_json(json) do
-    %__MODULE__{
-      sampling_session_id: json["sampling_session_id"]
-    }
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__), coerce: true)
   end
 end

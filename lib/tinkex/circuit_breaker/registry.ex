@@ -28,6 +28,7 @@ defmodule Tinkex.CircuitBreaker.Registry do
       CircuitBreaker.Registry.reset("sampling-endpoint")
   """
 
+  alias Foundation.CircuitBreaker.Registry, as: FoundationRegistry
   alias Tinkex.CircuitBreaker
 
   @table_name :tinkex_circuit_breakers
@@ -39,19 +40,7 @@ defmodule Tinkex.CircuitBreaker.Registry do
   """
   @spec init() :: :ok
   def init do
-    case :ets.whereis(@table_name) do
-      :undefined ->
-        :ets.new(@table_name, [
-          :set,
-          :public,
-          :named_table,
-          read_concurrency: true,
-          write_concurrency: true
-        ])
-
-      _ref ->
-        :ok
-    end
+    _ = FoundationRegistry.new_registry(name: @table_name)
 
     :ok
   end
@@ -71,19 +60,7 @@ defmodule Tinkex.CircuitBreaker.Registry do
   @spec call(String.t(), (-> result), keyword()) :: result | {:error, :circuit_open}
         when result: term()
   def call(name, fun, opts \\ []) do
-    {version, cb} = get_or_create(name, opts)
-    success_fn = Keyword.get(opts, :success?, &default_success?/1)
-    current_state = CircuitBreaker.state(cb)
-
-    if allow_request?(cb, current_state) do
-      result = fun.()
-      success? = success_fn.(result)
-      updated_cb = apply_result(cb, success?)
-      update_with_retry(name, version, updated_cb, success?, opts)
-      result
-    else
-      {:error, :circuit_open}
-    end
+    FoundationRegistry.call(@table_name, name, fun, opts)
   end
 
   @doc """
@@ -93,10 +70,7 @@ defmodule Tinkex.CircuitBreaker.Registry do
   """
   @spec state(String.t()) :: CircuitBreaker.state()
   def state(name) do
-    case get_cb(name) do
-      nil -> :closed
-      cb -> CircuitBreaker.state(cb)
-    end
+    FoundationRegistry.state(@table_name, name)
   end
 
   @doc """
@@ -104,12 +78,7 @@ defmodule Tinkex.CircuitBreaker.Registry do
   """
   @spec reset(String.t()) :: :ok
   def reset(name) do
-    case get_entry(name) do
-      nil -> :ok
-      {version, cb} -> update_with_retry_raw(name, version, CircuitBreaker.reset(cb))
-    end
-
-    :ok
+    FoundationRegistry.reset(@table_name, name)
   end
 
   @doc """
@@ -117,9 +86,7 @@ defmodule Tinkex.CircuitBreaker.Registry do
   """
   @spec delete(String.t()) :: :ok
   def delete(name) do
-    ensure_table()
-    :ets.delete(@table_name, name)
-    :ok
+    FoundationRegistry.delete(@table_name, name)
   end
 
   @doc """
@@ -127,122 +94,6 @@ defmodule Tinkex.CircuitBreaker.Registry do
   """
   @spec list() :: [{String.t(), CircuitBreaker.state()}]
   def list do
-    ensure_table()
-
-    :ets.tab2list(@table_name)
-    |> Enum.map(fn
-      {name, cb} -> {name, CircuitBreaker.state(cb)}
-      {name, _version, cb} -> {name, CircuitBreaker.state(cb)}
-    end)
-  end
-
-  # Private functions
-
-  defp get_entry(name) do
-    ensure_table()
-
-    case :ets.lookup(@table_name, name) do
-      [{^name, version, cb}] ->
-        {version, cb}
-
-      [{^name, cb}] ->
-        :ets.insert(@table_name, {name, 0, cb})
-        {0, cb}
-
-      [] ->
-        nil
-    end
-  end
-
-  defp get_cb(name) do
-    case get_entry(name) do
-      nil -> nil
-      {_version, cb} -> cb
-    end
-  end
-
-  defp get_or_create(name, opts) do
-    cb_opts = Keyword.take(opts, [:failure_threshold, :reset_timeout_ms, :half_open_max_calls])
-
-    case get_entry(name) do
-      nil ->
-        cb = CircuitBreaker.new(name, cb_opts)
-
-        case :ets.insert_new(@table_name, {name, 0, cb}) do
-          true -> {0, cb}
-          false -> get_entry(name)
-        end
-
-      {version, cb} ->
-        {version, cb}
-    end
-  end
-
-  defp allow_request?(cb, current_state) do
-    case current_state do
-      :closed -> true
-      :open -> false
-      :half_open -> cb.half_open_calls < cb.half_open_max_calls
-    end
-  end
-
-  defp apply_result(cb, success?) do
-    current_state = CircuitBreaker.state(cb)
-
-    cb =
-      if current_state == :half_open do
-        %{cb | half_open_calls: cb.half_open_calls + 1}
-      else
-        cb
-      end
-
-    if success? do
-      CircuitBreaker.record_success(cb)
-    else
-      CircuitBreaker.record_failure(cb)
-    end
-  end
-
-  defp update_with_retry(name, version, updated_cb, success?, opts) do
-    if cas_update(name, version, updated_cb) do
-      :ok
-    else
-      case get_entry(name) do
-        {next_version, cb} ->
-          next_cb = apply_result(cb, success?)
-          update_with_retry(name, next_version, next_cb, success?, opts)
-
-        nil ->
-          {next_version, cb} = get_or_create(name, opts)
-          next_cb = apply_result(cb, success?)
-          update_with_retry(name, next_version, next_cb, success?, opts)
-      end
-    end
-  end
-
-  defp update_with_retry_raw(name, version, updated_cb) do
-    if cas_update(name, version, updated_cb) do
-      :ok
-    else
-      case get_entry(name) do
-        {next_version, cb} -> update_with_retry_raw(name, next_version, CircuitBreaker.reset(cb))
-        nil -> :ok
-      end
-    end
-  end
-
-  defp cas_update(name, version, cb) do
-    match_spec = [{{name, version, :"$1"}, [], [{{name, version + 1, cb}}]}]
-    :ets.select_replace(@table_name, match_spec) == 1
-  end
-
-  defp default_success?({:ok, _}), do: true
-  defp default_success?(_), do: false
-
-  defp ensure_table do
-    case :ets.whereis(@table_name) do
-      :undefined -> init()
-      _ref -> :ok
-    end
+    FoundationRegistry.list(@table_name)
   end
 end

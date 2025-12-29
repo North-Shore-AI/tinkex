@@ -5,8 +5,21 @@ defmodule Tinkex.Types.FutureRetrieveRequest do
   Mirrors Python `tinker.types.FutureRetrieveRequest`.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   @enforce_keys [:request_id]
   defstruct [:request_id]
+
+  @schema Schema.define([
+            {:request_id, :string, [required: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           request_id: String.t()
@@ -25,13 +38,14 @@ defmodule Tinkex.Types.FutureRetrieveRequest do
   """
   @spec to_json(t()) :: map()
   def to_json(%__MODULE__{request_id: request_id}) do
-    %{"request_id" => request_id}
+    SchemaCodec.encode_map(%__MODULE__{request_id: request_id})
   end
 
   @doc """
   Parse from JSON map.
   """
   @spec from_json(map()) :: t()
-  def from_json(%{"request_id" => request_id}), do: new(request_id)
-  def from_json(%{request_id: request_id}), do: new(request_id)
+  def from_json(json) do
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__), coerce: true)
+  end
 end

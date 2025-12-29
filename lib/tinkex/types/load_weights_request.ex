@@ -31,9 +31,25 @@ defmodule Tinkex.Types.LoadWeightsRequest do
   ```
   """
 
+  alias Sinter.Schema
+
   @enforce_keys [:model_id, :path]
   @derive {Jason.Encoder, only: [:model_id, :path, :seq_id, :optimizer, :type]}
   defstruct [:model_id, :path, :seq_id, optimizer: false, type: "load_weights"]
+
+  @schema Schema.define([
+            {:model_id, :string, [required: true]},
+            {:path, :string, [required: true]},
+            {:seq_id, :integer, [optional: true]},
+            {:optimizer, :boolean, [optional: true, default: false]},
+            {:type, :string, [optional: true, default: "load_weights"]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           model_id: String.t(),

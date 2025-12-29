@@ -7,6 +7,8 @@ defmodule Tinkex.Types.Checkpoint do
   preserved.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
   alias Tinkex.Types.ParsedCheckpointTinkerPath
 
   @type t :: %__MODULE__{
@@ -29,28 +31,42 @@ defmodule Tinkex.Types.Checkpoint do
     :time
   ]
 
+  @schema Schema.define([
+            {:checkpoint_id, :string, [required: true]},
+            {:checkpoint_type, :string, [required: true]},
+            {:tinker_path, :string, [required: true]},
+            {:training_run_id, :string, [optional: true]},
+            {:size_bytes, {:nullable, :integer}, [optional: true]},
+            {:public, {:nullable, :boolean}, [optional: true, default: false]},
+            {:time, :any, [optional: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
+
   @doc """
   Convert a map (from JSON) to a Checkpoint struct.
   """
   @spec from_map(map()) :: t()
   def from_map(map) do
-    tinker_path = get_field(map, :tinker_path)
+    case SchemaCodec.validate(schema(), map, coerce: true) do
+      {:ok, validated} ->
+        struct = SchemaCodec.to_struct(struct(__MODULE__), validated)
+        tinker_path = struct.tinker_path
 
-    %__MODULE__{
-      checkpoint_id: get_field(map, :checkpoint_id),
-      checkpoint_type: get_field(map, :checkpoint_type),
-      tinker_path: tinker_path,
-      training_run_id: get_field(map, :training_run_id) || training_run_from_path(tinker_path),
-      size_bytes: get_field(map, :size_bytes),
-      public: get_field(map, :public) || false,
-      time: parse_time(get_field(map, :time))
-    }
-  end
+        %__MODULE__{
+          struct
+          | training_run_id: struct.training_run_id || training_run_from_path(tinker_path),
+            public: if(is_nil(struct.public), do: false, else: struct.public),
+            time: parse_time(struct.time)
+        }
 
-  defp get_field(map, key) do
-    atom_key = key
-    string_key = Atom.to_string(key)
-    map[string_key] || map[atom_key]
+      {:error, errors} ->
+        raise ArgumentError, "invalid checkpoint map: #{inspect(errors)}"
+    end
   end
 
   defp parse_time(nil), do: nil

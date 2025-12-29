@@ -3,7 +3,22 @@ defmodule Tinkex.Types.SaveWeightsForSamplerResponse do
   Response payload for save_weights_for_sampler.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   defstruct [:path, :sampling_session_id, type: "save_weights_for_sampler"]
+
+  @schema Schema.define([
+            {:path, :string, [optional: true]},
+            {:sampling_session_id, :string, [optional: true]},
+            {:type, :string, [optional: true, default: "save_weights_for_sampler"]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{
           path: String.t() | nil,
@@ -15,14 +30,7 @@ defmodule Tinkex.Types.SaveWeightsForSamplerResponse do
   Parse from JSON map with string or atom keys.
   """
   @spec from_json(map()) :: t()
-  def from_json(%{} = json) do
-    path = Map.get(json, "path") || Map.get(json, :path)
-
-    %__MODULE__{
-      path: path,
-      sampling_session_id:
-        Map.get(json, "sampling_session_id") || Map.get(json, :sampling_session_id),
-      type: Map.get(json, "type") || Map.get(json, :type) || "save_weights_for_sampler"
-    }
+  def from_json(json) do
+    SchemaCodec.decode_struct(schema(), json, struct(__MODULE__), coerce: true)
   end
 end

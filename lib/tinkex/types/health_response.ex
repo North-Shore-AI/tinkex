@@ -3,8 +3,21 @@ defmodule Tinkex.Types.HealthResponse do
   Health check response.
   """
 
+  alias Sinter.Schema
+  alias Tinkex.SchemaCodec
+
   @enforce_keys [:status]
   defstruct [:status]
+
+  @schema Schema.define([
+            {:status, :string, [optional: true]}
+          ])
+
+  @doc """
+  Returns the Sinter schema for validation.
+  """
+  @spec schema() :: Schema.t()
+  def schema, do: @schema
 
   @type t :: %__MODULE__{status: String.t()}
 
@@ -13,6 +26,6 @@ defmodule Tinkex.Types.HealthResponse do
   """
   @spec from_json(map()) :: t()
   def from_json(map) do
-    %__MODULE__{status: map["status"] || map[:status]}
+    SchemaCodec.decode_struct(schema(), map, struct(__MODULE__), coerce: true)
   end
 end
