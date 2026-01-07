@@ -26,7 +26,11 @@ defmodule Tinkex.API.Rest do
   def get_session(config, session_id) do
     client = http_client(config)
 
-    client.get("/api/v1/sessions/#{session_id}", config: config, pool_type: :training)
+    client.get("/api/v1/sessions/#{session_id}",
+      config: config,
+      pool_type: :training,
+      endpoint_id: :get_session
+    )
   end
 
   @doc """
@@ -40,7 +44,12 @@ defmodule Tinkex.API.Rest do
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def list_sessions(config, limit \\ 20, offset \\ 0) do
     path = "/api/v1/sessions?limit=#{limit}&offset=#{offset}"
-    http_client(config).get(path, config: config, pool_type: :training)
+
+    http_client(config).get(path,
+      config: config,
+      pool_type: :training,
+      endpoint_id: :list_sessions
+    )
   end
 
   @doc """
@@ -48,10 +57,10 @@ defmodule Tinkex.API.Rest do
   """
   @spec list_checkpoints(Config.t(), String.t()) :: {:ok, map()} | {:error, Tinkex.Error.t()}
   def list_checkpoints(config, run_id) do
-    http_client(config).get(
-      "/api/v1/training_runs/#{run_id}/checkpoints",
+    http_client(config).get("/api/v1/training_runs/#{run_id}/checkpoints",
       config: config,
-      pool_type: :training
+      pool_type: :training,
+      endpoint_id: :list_checkpoints
     )
   end
 
@@ -66,7 +75,12 @@ defmodule Tinkex.API.Rest do
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def list_user_checkpoints(config, limit \\ 100, offset \\ 0) do
     path = "/api/v1/checkpoints?limit=#{limit}&offset=#{offset}"
-    http_client(config).get(path, config: config, pool_type: :training)
+
+    http_client(config).get(path,
+      config: config,
+      pool_type: :training,
+      endpoint_id: :list_user_checkpoints
+    )
   end
 
   @doc """
@@ -91,7 +105,12 @@ defmodule Tinkex.API.Rest do
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def get_checkpoint_archive_url(config, run_id, checkpoint_id) do
     path = "/api/v1/training_runs/#{run_id}/checkpoints/#{checkpoint_id}/archive"
-    http_client(config).get(path, config: config, pool_type: :training)
+
+    http_client(config).get(path,
+      config: config,
+      pool_type: :training,
+      endpoint_id: :get_checkpoint_archive_url
+    )
   end
 
   @doc """
@@ -111,7 +130,12 @@ defmodule Tinkex.API.Rest do
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def delete_checkpoint(config, run_id, checkpoint_id) do
     path = "/api/v1/training_runs/#{run_id}/checkpoints/#{checkpoint_id}"
-    http_client(config).delete(path, config: config, pool_type: :training)
+
+    http_client(config).delete(path,
+      config: config,
+      pool_type: :training,
+      endpoint_id: :delete_checkpoint
+    )
   end
 
   @doc """
@@ -146,7 +170,11 @@ defmodule Tinkex.API.Rest do
     encoded_id = URI.encode(sampler_id, &URI.char_unreserved?/1)
     path = "/api/v1/samplers/#{encoded_id}"
 
-    case http_client(config).get(path, config: config, pool_type: :sampling) do
+    case http_client(config).get(path,
+           config: config,
+           pool_type: :sampling,
+           endpoint_id: :get_sampler
+         ) do
       {:ok, json} ->
         {:ok, GetSamplerResponse.from_json(json)}
 
@@ -211,7 +239,8 @@ defmodule Tinkex.API.Rest do
 
     case http_client(config).post("/api/v1/weights_info", body,
            config: config,
-           pool_type: :training
+           pool_type: :training,
+           endpoint_id: :weights_info
          ) do
       {:ok, json} ->
         {:ok, WeightsInfoResponse.from_json(json)}
@@ -260,7 +289,11 @@ defmodule Tinkex.API.Rest do
   def get_training_run(config, training_run_id) do
     path = "/api/v1/training_runs/#{training_run_id}"
 
-    case http_client(config).get(path, config: config, pool_type: :training) do
+    case http_client(config).get(path,
+           config: config,
+           pool_type: :training,
+           endpoint_id: :get_training_run
+         ) do
       {:ok, data} -> {:ok, TrainingRun.from_map(data)}
       {:error, _} = error -> error
     end
@@ -285,7 +318,11 @@ defmodule Tinkex.API.Rest do
   def list_training_runs(config, limit \\ 20, offset \\ 0) do
     path = "/api/v1/training_runs?limit=#{limit}&offset=#{offset}"
 
-    case http_client(config).get(path, config: config, pool_type: :training) do
+    case http_client(config).get(path,
+           config: config,
+           pool_type: :training,
+           endpoint_id: :list_training_runs
+         ) do
       {:ok, data} -> {:ok, TrainingRunsResponse.from_map(data)}
       {:error, _} = error -> error
     end
@@ -298,7 +335,12 @@ defmodule Tinkex.API.Rest do
   def publish_checkpoint(config, checkpoint_path) do
     with {:ok, {run_id, checkpoint_id}} <- parse_tinker_path(checkpoint_path) do
       path = "/api/v1/training_runs/#{run_id}/checkpoints/#{checkpoint_id}/publish"
-      http_client(config).post(path, %{}, config: config, pool_type: :training)
+
+      http_client(config).post(path, %{},
+        config: config,
+        pool_type: :training,
+        endpoint_id: :publish_checkpoint
+      )
     end
   end
 
@@ -309,7 +351,12 @@ defmodule Tinkex.API.Rest do
   def unpublish_checkpoint(config, checkpoint_path) do
     with {:ok, {run_id, checkpoint_id}} <- parse_tinker_path(checkpoint_path) do
       path = "/api/v1/training_runs/#{run_id}/checkpoints/#{checkpoint_id}/publish"
-      http_client(config).delete(path, config: config, pool_type: :training)
+
+      http_client(config).delete(path,
+        config: config,
+        pool_type: :training,
+        endpoint_id: :unpublish_checkpoint
+      )
     end
   end
 

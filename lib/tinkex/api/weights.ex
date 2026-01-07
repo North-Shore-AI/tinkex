@@ -22,7 +22,9 @@ defmodule Tinkex.API.Weights do
     client.post(
       "/api/v1/save_weights",
       request,
-      Keyword.put(opts, :pool_type, :training)
+      opts
+      |> Keyword.put(:pool_type, :training)
+      |> Keyword.put(:endpoint_id, :save_weights)
     )
   end
 
@@ -49,7 +51,9 @@ defmodule Tinkex.API.Weights do
     client.post(
       "/api/v1/load_weights",
       request,
-      Keyword.put(opts, :pool_type, :training)
+      opts
+      |> Keyword.put(:pool_type, :training)
+      |> Keyword.put(:endpoint_id, :load_weights)
     )
   end
 
@@ -76,7 +80,9 @@ defmodule Tinkex.API.Weights do
     client.post(
       "/api/v1/save_weights_for_sampler",
       request,
-      Keyword.put(opts, :pool_type, :training)
+      opts
+      |> Keyword.put(:pool_type, :training)
+      |> Keyword.put(:endpoint_id, :save_weights_for_sampler)
     )
   end
 

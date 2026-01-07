@@ -1,7 +1,8 @@
 defmodule Tinkex.RateLimiterTest do
   use Supertester.ExUnitFoundation, isolation: :full_isolation
 
-  alias Tinkex.{PoolKey, RateLimiter}
+  alias Foundation.RateLimit.BackoffWindow
+  alias Tinkex.PoolKey
 
   setup do
     {:ok, _} = Application.ensure_all_started(:tinkex)
@@ -12,16 +13,21 @@ defmodule Tinkex.RateLimiterTest do
     base_url = "https://EXAMPLE.com:443"
     api_key = "key-1"
     normalized = PoolKey.normalize_base_url(base_url)
-    key = {:limiter, {normalized, api_key}}
+    key1 = {:limiter, {normalized, api_key}}
+    key2 = {:limiter, {PoolKey.normalize_base_url("https://example.com"), api_key}}
 
-    on_exit(fn -> :ets.delete(:tinkex_rate_limiters, key) end)
+    on_exit(fn ->
+      :ets.delete(:tinkex_rate_limiters, key1)
+      :ets.delete(:tinkex_rate_limiters, key2)
+    end)
 
-    :ets.delete(:tinkex_rate_limiters, key)
-    limiter1 = RateLimiter.for_key({base_url, api_key})
-    limiter2 = RateLimiter.for_key({"https://example.com", api_key})
+    :ets.delete(:tinkex_rate_limiters, key1)
+    :ets.delete(:tinkex_rate_limiters, key2)
+    limiter1 = BackoffWindow.for_key(:tinkex_rate_limiters, key1)
+    limiter2 = BackoffWindow.for_key(:tinkex_rate_limiters, key2)
 
     assert limiter1 == limiter2
-    assert [{^key, ^limiter1}] = :ets.lookup(:tinkex_rate_limiters, key)
+    assert [{^key1, ^limiter1}] = :ets.lookup(:tinkex_rate_limiters, key1)
   end
 
   test "insert_new prevents duplicate limiter creation" do
@@ -36,10 +42,10 @@ defmodule Tinkex.RateLimiterTest do
 
     task =
       Task.async(fn ->
-        RateLimiter.for_key({base_url, api_key})
+        BackoffWindow.for_key(:tinkex_rate_limiters, key)
       end)
 
-    limiter1 = RateLimiter.for_key({base_url, api_key})
+    limiter1 = BackoffWindow.for_key(:tinkex_rate_limiters, key)
     limiter2 = Task.await(task, 2_000)
 
     assert limiter1 == limiter2
@@ -55,21 +61,21 @@ defmodule Tinkex.RateLimiterTest do
     on_exit(fn -> :ets.delete(:tinkex_rate_limiters, key) end)
 
     :ets.delete(:tinkex_rate_limiters, key)
-    limiter = RateLimiter.for_key({base_url, api_key})
+    limiter = BackoffWindow.for_key(:tinkex_rate_limiters, key)
 
-    RateLimiter.clear_backoff(limiter)
-    refute RateLimiter.should_backoff?(limiter)
+    BackoffWindow.clear(limiter)
+    refute BackoffWindow.should_backoff?(limiter)
 
-    RateLimiter.set_backoff(limiter, 120)
-    assert RateLimiter.should_backoff?(limiter)
+    BackoffWindow.set(limiter, 120)
+    assert BackoffWindow.should_backoff?(limiter)
 
     start_ms = System.monotonic_time(:millisecond)
-    :ok = RateLimiter.wait_for_backoff(limiter)
+    :ok = BackoffWindow.wait(limiter)
     elapsed = System.monotonic_time(:millisecond) - start_ms
     assert elapsed >= 100
 
-    RateLimiter.clear_backoff(limiter)
-    refute RateLimiter.should_backoff?(limiter)
+    BackoffWindow.clear(limiter)
+    refute BackoffWindow.should_backoff?(limiter)
   end
 
   defp unique_base_url do

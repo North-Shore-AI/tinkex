@@ -7,14 +7,16 @@ defmodule Tinkex.SamplingDispatch do
   2. Throttled concurrency semaphore when a recent backoff was requested
   3. Byte budget semaphore (5MB baseline, 20× penalty during recent backoff)
 
-  Backoff timestamps are tracked with monotonic time to match RateLimiter
+  Backoff timestamps are tracked with monotonic time to match BackoffWindow
   behavior and keep a brief "recently throttled" window even after the
   backoff has cleared.
   """
 
   use GenServer
 
-  alias Tinkex.{BytesSemaphore, PoolKey, RateLimiter}
+  alias Foundation.RateLimit.BackoffWindow
+  alias Foundation.Semaphore.Weighted, as: WeightedSemaphore
+  alias Tinkex.PoolKey
 
   @default_concurrency 400
   @throttled_concurrency 10
@@ -29,7 +31,7 @@ defmodule Tinkex.SamplingDispatch do
   @type snapshot :: %{
           concurrency: %{name: term(), limit: pos_integer()},
           throttled: %{name: term(), limit: pos_integer()},
-          bytes: BytesSemaphore.t(),
+          bytes: WeightedSemaphore.t(),
           backoff_active?: boolean(),
           acquire_backoff: map()
         }
@@ -79,7 +81,7 @@ defmodule Tinkex.SamplingDispatch do
       limit: throttled_limit
     }
 
-    {:ok, bytes_semaphore} = BytesSemaphore.start_link(max_bytes: byte_budget)
+    {:ok, bytes_semaphore} = WeightedSemaphore.start_link(max_weight: byte_budget)
 
     {:ok,
      %{
@@ -99,7 +101,7 @@ defmodule Tinkex.SamplingDispatch do
 
   def handle_call({:set_backoff, duration_ms}, _from, state) do
     backoff_until = System.monotonic_time(:millisecond) + duration_ms
-    RateLimiter.set_backoff(state.rate_limiter, duration_ms)
+    BackoffWindow.set(state.rate_limiter, duration_ms)
     {:reply, :ok, %{state | last_backoff_until: backoff_until}}
   end
 
@@ -132,7 +134,7 @@ defmodule Tinkex.SamplingDispatch do
       maybe_acquire_throttled(snapshot.throttled, backoff_active?, snapshot.acquire_backoff)
 
       try do
-        BytesSemaphore.with_bytes(snapshot.bytes, effective_bytes, fun)
+        WeightedSemaphore.with_acquire(snapshot.bytes, effective_bytes, fun)
       after
         maybe_release_throttled(snapshot.throttled, backoff_active?, snapshot.acquire_backoff)
       end

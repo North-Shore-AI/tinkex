@@ -4,7 +4,7 @@
 
 **Pristine is the generalization of Tinkex.**
 
-The current approach (examples/tinkex duplicating original tinkex) is wrong. Instead:
+The current approach (examples/tinkex duplicating original tinkex) is wrong. Ignore `~/p/g/North-Shore-AI/pristine/examples/` entirely; it is not a reference source for this refactor. Instead:
 - **Pristine** = thick, contains all infrastructure (retry, circuit breaker, rate limiting, HTTP transport, streaming, etc.)
 - **Tinkex** = thin, configuration + manifests that render to a full API via Pristine
 
@@ -117,6 +117,7 @@ Foundation.Retry.run(fn -> ... end, policy)
 ## Phase 3: Refactor to Hexagonal
 
 **Goal:** Clear separation of domain logic from infrastructure via ports and adapters.
+Note: the original tinkex does not have ports/adapters; they are created in this phase.
 
 ### 3.1 Define Ports (Interfaces)
 
@@ -231,6 +232,7 @@ lib/tinkex/ports/*.ex
 # TO pristine
 lib/pristine/ports/*.ex
 ```
+Move the ports created in Phase 3 (skip if not present).
 
 ### 5.2 Move Adapters to Pristine
 
@@ -241,6 +243,7 @@ lib/tinkex/adapters/*.ex
 # TO pristine
 lib/pristine/adapters/*.ex
 ```
+Move the adapters created in Phase 3 (skip if not present).
 
 ### 5.3 Move Context/Pipeline
 
@@ -253,6 +256,7 @@ lib/tinkex/pipeline.ex
 lib/pristine/core/context.ex
 lib/pristine/core/pipeline.ex
 ```
+Move the context/pipeline created in Phase 3 (skip if not present).
 
 ### 5.4 Define Manifest Schema
 
@@ -385,7 +389,7 @@ lib/tinkex/
 - [ ] Create full tinkex manifest
 - [ ] Generate client via `mix pristine.generate`
 - [ ] Verify all 40+ endpoints work
-- [ ] Delete all hand-written infrastructure
+- [ ] Delete hand-written infrastructure created in Phases 3-5 (ports/adapters/context; skip if not present)
 - [ ] Keep only domain-specific modules
 - [ ] All tests pass
 

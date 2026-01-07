@@ -1,5 +1,7 @@
 # Module Replacement Map
 
+Note: this is the original tinkex; ignore `~/p/g/North-Shore-AI/pristine/examples/`. Ports/adapters are created in Phase 3.
+
 ## Infrastructure Replacements
 
 ### Retry & Backoff
@@ -90,7 +92,7 @@ These modules contain tinkex-specific business logic and should NOT be replaced:
 
 ## API Modules (Refactor to Use Ports)
 
-These modules should be refactored to use ports/adapters:
+These modules should be refactored to use ports/adapters (created in Phase 3):
 
 | Module | Current Role | Future Role |
 |--------|--------------|-------------|

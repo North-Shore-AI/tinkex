@@ -1,7 +1,8 @@
 defmodule Tinkex.Integration.SamplingWorkflowTest do
   use Tinkex.HTTPCase, async: true
 
-  alias Tinkex.{RateLimiter, SamplingClient, ServiceClient}
+  alias Foundation.RateLimit.BackoffWindow
+  alias Tinkex.{PoolKey, SamplingClient, ServiceClient}
   alias Tinkex.Types.{ModelInput, SampleResponse, SamplingParams}
 
   setup :setup_http_client
@@ -12,9 +13,9 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
   end
 
   setup %{config: config} do
-    {config.base_url, config.api_key}
-    |> RateLimiter.for_key()
-    |> RateLimiter.clear_backoff()
+    limiter_key = {:limiter, {PoolKey.normalize_base_url(config.base_url), config.api_key}}
+    limiter = BackoffWindow.for_key(:tinkex_rate_limiters, limiter_key)
+    BackoffWindow.clear(limiter)
 
     :ok
   end
@@ -158,7 +159,7 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
 
     [{_, entry}] = :ets.lookup(:tinkex_sampling_clients, {:config, sampling_client})
     backoff_until = :atomics.get(entry.rate_limiter, 1)
-    assert RateLimiter.should_backoff?(entry.rate_limiter)
+    assert BackoffWindow.should_backoff?(entry.rate_limiter)
 
     tasks =
       for _ <- 1..20 do
@@ -181,7 +182,7 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
 
     min_after_backoff = log |> Enum.drop(1) |> Enum.map(& &1.ts) |> Enum.min()
     assert min_after_backoff >= backoff_until
-    refute RateLimiter.should_backoff?(entry.rate_limiter)
+    refute BackoffWindow.should_backoff?(entry.rate_limiter)
 
     GenServer.stop(service)
   end
@@ -381,8 +382,8 @@ defmodule Tinkex.Integration.SamplingWorkflowTest do
     [{_, entry_b}] = :ets.lookup(:tinkex_sampling_clients, {:config, client_b})
 
     refute entry_a.rate_limiter == entry_b.rate_limiter
-    assert RateLimiter.should_backoff?(entry_a.rate_limiter)
-    refute RateLimiter.should_backoff?(entry_b.rate_limiter)
+    assert BackoffWindow.should_backoff?(entry_a.rate_limiter)
+    refute BackoffWindow.should_backoff?(entry_b.rate_limiter)
 
     backoff_until = :atomics.get(entry_a.rate_limiter, 1)
 

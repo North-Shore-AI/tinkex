@@ -1,0 +1,287 @@
+{
+  "name": "Tinkex",
+  "version": "0.3.4",
+  "base_url": "https://tinker.thinkingmachines.dev/services/tinker-prod",
+  "endpoints": [
+    {
+      "id": "raw_get",
+      "method": "GET",
+      "path": "/",
+      "body_type": "raw"
+    },
+    {
+      "id": "raw_post",
+      "method": "POST",
+      "path": "/",
+      "body_type": "json"
+    },
+    {
+      "id": "raw_delete",
+      "method": "DELETE",
+      "path": "/",
+      "body_type": "raw"
+    },
+    {
+      "id": "raw_stream_get",
+      "method": "GET",
+      "path": "/",
+      "body_type": "raw",
+      "streaming": true,
+      "stream_format": "sse",
+      "headers": {
+        "accept": "text/event-stream"
+      }
+    },
+    {
+      "id": "raw_stream_post",
+      "method": "POST",
+      "path": "/",
+      "body_type": "json",
+      "streaming": true,
+      "stream_format": "sse",
+      "headers": {
+        "accept": "text/event-stream"
+      }
+    },
+    {
+      "id": "create_session",
+      "method": "POST",
+      "path": "/api/v1/create_session",
+      "resource": "service",
+      "idempotency": true
+    },
+    {
+      "id": "session_heartbeat",
+      "method": "POST",
+      "path": "/api/v1/session_heartbeat",
+      "resource": "service"
+    },
+    {
+      "id": "heartbeat",
+      "method": "POST",
+      "path": "/api/v1/heartbeat",
+      "resource": "service"
+    },
+    {
+      "id": "create_sampling_session",
+      "method": "POST",
+      "path": "/api/v1/create_sampling_session",
+      "resource": "service"
+    },
+    {
+      "id": "get_server_capabilities",
+      "method": "GET",
+      "path": "/api/v1/get_server_capabilities",
+      "resource": "service"
+    },
+    {
+      "id": "healthz",
+      "method": "GET",
+      "path": "/api/v1/healthz",
+      "resource": "service"
+    },
+    {
+      "id": "create_model",
+      "method": "POST",
+      "path": "/api/v1/create_model",
+      "resource": "models",
+      "idempotency": true,
+      "async": true,
+      "poll_endpoint": "retrieve_future"
+    },
+    {
+      "id": "get_info",
+      "method": "POST",
+      "path": "/api/v1/get_info",
+      "resource": "models",
+      "idempotency": true
+    },
+    {
+      "id": "unload_model",
+      "method": "POST",
+      "path": "/api/v1/unload_model",
+      "resource": "models",
+      "idempotency": true,
+      "async": true,
+      "poll_endpoint": "retrieve_future"
+    },
+    {
+      "id": "load_weights",
+      "method": "POST",
+      "path": "/api/v1/load_weights",
+      "resource": "weights",
+      "idempotency": true,
+      "async": true,
+      "poll_endpoint": "retrieve_future"
+    },
+    {
+      "id": "save_weights",
+      "method": "POST",
+      "path": "/api/v1/save_weights",
+      "resource": "weights",
+      "idempotency": true,
+      "async": true,
+      "poll_endpoint": "retrieve_future"
+    },
+    {
+      "id": "save_weights_for_sampler",
+      "method": "POST",
+      "path": "/api/v1/save_weights_for_sampler",
+      "resource": "weights",
+      "idempotency": true,
+      "async": true,
+      "poll_endpoint": "retrieve_future"
+    },
+    {
+      "id": "weights_info",
+      "method": "POST",
+      "path": "/api/v1/weights_info",
+      "resource": "rest"
+    },
+    {
+      "id": "retrieve_future",
+      "method": "POST",
+      "path": "/api/v1/retrieve_future",
+      "resource": "futures",
+      "idempotency": true
+    },
+    {
+      "id": "forward",
+      "method": "POST",
+      "path": "/api/v1/forward",
+      "resource": "training",
+      "idempotency": true,
+      "async": true,
+      "poll_endpoint": "retrieve_future"
+    },
+    {
+      "id": "forward_backward",
+      "method": "POST",
+      "path": "/api/v1/forward_backward",
+      "resource": "training",
+      "idempotency": true,
+      "async": true,
+      "poll_endpoint": "retrieve_future"
+    },
+    {
+      "id": "optim_step",
+      "method": "POST",
+      "path": "/api/v1/optim_step",
+      "resource": "training",
+      "idempotency": true,
+      "async": true,
+      "poll_endpoint": "retrieve_future"
+    },
+    {
+      "id": "asample",
+      "method": "POST",
+      "path": "/api/v1/asample",
+      "resource": "sampling",
+      "idempotency": true,
+      "async": true,
+      "poll_endpoint": "retrieve_future"
+    },
+    {
+      "id": "stream_sample",
+      "method": "POST",
+      "path": "/api/v1/stream_sample",
+      "resource": "sampling",
+      "streaming": true,
+      "stream_format": "sse",
+      "headers": {
+        "accept": "text/event-stream"
+      }
+    },
+    {
+      "id": "telemetry",
+      "method": "POST",
+      "path": "/api/v1/telemetry",
+      "resource": "telemetry",
+      "idempotency": true
+    },
+    {
+      "id": "get_session",
+      "method": "GET",
+      "path": "/api/v1/sessions/:session_id",
+      "resource": "rest"
+    },
+    {
+      "id": "list_sessions",
+      "method": "GET",
+      "path": "/api/v1/sessions",
+      "resource": "rest"
+    },
+    {
+      "id": "list_checkpoints",
+      "method": "GET",
+      "path": "/api/v1/training_runs/:run_id/checkpoints",
+      "resource": "rest"
+    },
+    {
+      "id": "list_user_checkpoints",
+      "method": "GET",
+      "path": "/api/v1/checkpoints",
+      "resource": "rest"
+    },
+    {
+      "id": "get_checkpoint_archive_url",
+      "method": "GET",
+      "path": "/api/v1/training_runs/:run_id/checkpoints/:checkpoint_id/archive",
+      "resource": "rest"
+    },
+    {
+      "id": "delete_checkpoint",
+      "method": "DELETE",
+      "path": "/api/v1/training_runs/:run_id/checkpoints/:checkpoint_id",
+      "resource": "rest"
+    },
+    {
+      "id": "publish_checkpoint",
+      "method": "POST",
+      "path": "/api/v1/training_runs/:run_id/checkpoints/:checkpoint_id/publish",
+      "resource": "rest"
+    },
+    {
+      "id": "unpublish_checkpoint",
+      "method": "DELETE",
+      "path": "/api/v1/training_runs/:run_id/checkpoints/:checkpoint_id/publish",
+      "resource": "rest"
+    },
+    {
+      "id": "get_sampler",
+      "method": "GET",
+      "path": "/api/v1/samplers/:sampler_id",
+      "resource": "rest"
+    },
+    {
+      "id": "get_training_run",
+      "method": "GET",
+      "path": "/api/v1/training_runs/:training_run_id",
+      "resource": "rest"
+    },
+    {
+      "id": "list_training_runs",
+      "method": "GET",
+      "path": "/api/v1/training_runs",
+      "resource": "rest"
+    },
+    {
+      "id": "meta",
+      "method": "GET",
+      "path": "/api/v1/meta",
+      "resource": "misc"
+    },
+    {
+      "id": "events",
+      "method": "GET",
+      "path": "/api/v1/events",
+      "resource": "streaming",
+      "streaming": true,
+      "stream_format": "sse",
+      "headers": {
+        "accept": "text/event-stream"
+      }
+    }
+  ],
+  "types": {}
+}

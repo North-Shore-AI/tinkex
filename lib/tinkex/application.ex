@@ -126,7 +126,6 @@ defmodule Tinkex.Application do
   defp base_children(heartbeat_interval_ms, heartbeat_warning_after_ms) do
     [
       Tinkex.Metrics,
-      Tinkex.RetrySemaphore,
       Tinkex.SamplingRegistry,
       {Task.Supervisor, name: Tinkex.TaskSupervisor},
       {Tinkex.SessionManager,

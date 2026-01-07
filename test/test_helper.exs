@@ -16,8 +16,6 @@ ExUnit.configure(exclude: [slow: true])
 
 System.put_env("TINKER_TELEMETRY", "0")
 
-Code.require_file("support/http_case.ex", __DIR__)
-Code.require_file("support/api_worker.ex", __DIR__)
 Code.require_file("support/recovery_stubs.exs", __DIR__)
 Code.require_file("support/recovery_mocks.exs", __DIR__)
 

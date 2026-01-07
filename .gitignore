@@ -34,3 +34,4 @@ checkpoint_complete
 examples/repomix-output.xml
 
 repomix*.xml
+pristine/

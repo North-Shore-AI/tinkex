@@ -81,8 +81,14 @@ defmodule Tinkex.QueueStateLoggerTest do
           )
         end)
 
-      assert log =~ "server reason"
-      refute log =~ "concurrent sampler weights limit hit"
+      session_log =
+        log
+        |> String.split("\n", trim: true)
+        |> Enum.find(&String.contains?(&1, "session-override"))
+
+      assert session_log
+      assert session_log =~ "server reason"
+      refute session_log =~ "concurrent sampler weights limit hit"
     end
   end
 

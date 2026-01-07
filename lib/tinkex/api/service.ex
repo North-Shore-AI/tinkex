@@ -17,7 +17,9 @@ defmodule Tinkex.API.Service do
 
     case client.get(
            "/api/v1/get_server_capabilities",
-           Keyword.put(opts, :pool_type, :session)
+           opts
+           |> Keyword.put(:pool_type, :session)
+           |> Keyword.put(:endpoint_id, :get_server_capabilities)
          ) do
       {:ok, json} -> {:ok, GetServerCapabilitiesResponse.from_json(json)}
       {:error, _} = error -> error
@@ -31,7 +33,12 @@ defmodule Tinkex.API.Service do
   def health_check(opts) do
     client = Tinkex.API.client_module(opts)
 
-    case client.get("/api/v1/healthz", Keyword.put(opts, :pool_type, :session)) do
+    case client.get(
+           "/api/v1/healthz",
+           opts
+           |> Keyword.put(:pool_type, :session)
+           |> Keyword.put(:endpoint_id, :healthz)
+         ) do
       {:ok, json} -> {:ok, HealthResponse.from_json(json)}
       {:error, _} = error -> error
     end
@@ -48,7 +55,9 @@ defmodule Tinkex.API.Service do
     client.post(
       "/api/v1/create_model",
       request,
-      Keyword.put(opts, :pool_type, :session)
+      opts
+      |> Keyword.put(:pool_type, :session)
+      |> Keyword.put(:endpoint_id, :create_model)
     )
   end
 
@@ -63,7 +72,9 @@ defmodule Tinkex.API.Service do
     client.post(
       "/api/v1/create_sampling_session",
       request,
-      Keyword.put(opts, :pool_type, :session)
+      opts
+      |> Keyword.put(:pool_type, :session)
+      |> Keyword.put(:endpoint_id, :create_sampling_session)
     )
   end
 end

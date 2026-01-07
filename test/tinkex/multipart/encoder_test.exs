@@ -1,13 +1,32 @@
 defmodule Tinkex.Multipart.EncoderTest do
   use ExUnit.Case, async: true
 
-  alias Tinkex.Multipart.Encoder
+  alias Multipart
+  alias Multipart.{Boundary, Encoder, Form}
 
-  describe "encode/2" do
+  @form_opts [strategy: :bracket, list_format: :repeat, nil: :empty]
+
+  defp encode(form_fields, files, boundary \\ nil) do
+    form_parts = Form.to_parts(form_fields, @form_opts)
+    file_parts = Form.to_parts(files, @form_opts)
+    multipart = Multipart.new(form_parts ++ file_parts, boundary: boundary)
+
+    {content_type, body} = Encoder.encode(multipart)
+
+    body =
+      body
+      |> Encoder.to_stream()
+      |> Enum.to_list()
+      |> IO.iodata_to_binary()
+
+    {content_type, body}
+  end
+
+  describe "encode/1" do
     test "encodes single file" do
       files = %{"upload" => "file content"}
 
-      {:ok, body, content_type} = Encoder.encode_multipart(%{}, files)
+      {content_type, body} = encode(%{}, files)
 
       assert content_type =~ "multipart/form-data; boundary="
       assert body =~ "Content-Disposition: form-data; name=\"upload\""
@@ -17,7 +36,7 @@ defmodule Tinkex.Multipart.EncoderTest do
     test "encodes file with filename" do
       files = %{"doc" => {"readme.txt", "# README", "text/plain"}}
 
-      {:ok, body, _} = Encoder.encode_multipart(%{}, files)
+      {_content_type, body} = encode(%{}, files)
 
       assert body =~ "filename=\"readme.txt\""
       assert body =~ "Content-Type: text/plain"
@@ -30,7 +49,7 @@ defmodule Tinkex.Multipart.EncoderTest do
         "file2" => "content2"
       }
 
-      {:ok, body, _} = Encoder.encode_multipart(%{}, files)
+      {_content_type, body} = encode(%{}, files)
 
       assert body =~ "name=\"file1\""
       assert body =~ "name=\"file2\""
@@ -40,7 +59,7 @@ defmodule Tinkex.Multipart.EncoderTest do
       files = %{"upload" => "file content"}
       body_data = %{description: "A test file"}
 
-      {:ok, body, _} = Encoder.encode_multipart(body_data, files)
+      {_content_type, body} = encode(body_data, files)
 
       assert body =~ "name=\"description\""
       assert body =~ "A test file"
@@ -51,24 +70,24 @@ defmodule Tinkex.Multipart.EncoderTest do
         "file" => {"data.bin", <<1, 2, 3>>, "application/octet-stream", %{"x-custom" => "value"}}
       }
 
-      {:ok, body, content_type} = Encoder.encode_multipart(%{}, files)
+      {content_type, body} = encode(%{}, files)
 
       assert String.contains?(body, "x-custom: value")
       assert String.contains?(content_type, "boundary=")
     end
 
     test "properly terminates multipart body" do
-      {:ok, body, content_type} = Encoder.encode_multipart(%{"a" => "1"}, %{})
+      {content_type, body} = encode(%{"a" => "1"}, %{})
 
       [_, boundary] = String.split(content_type, "boundary=")
       assert String.ends_with?(body, "--#{boundary}--\r\n")
     end
   end
 
-  describe "generate_boundary/0" do
+  describe "boundary generation" do
     test "generates unique boundaries" do
-      b1 = Encoder.generate_boundary()
-      b2 = Encoder.generate_boundary()
+      b1 = Boundary.generate()
+      b2 = Boundary.generate()
 
       assert is_binary(b1)
       assert byte_size(b1) >= 16
@@ -76,9 +95,9 @@ defmodule Tinkex.Multipart.EncoderTest do
     end
 
     test "generates valid boundary format" do
-      boundary = Encoder.generate_boundary()
+      boundary = Boundary.generate()
 
-      assert Regex.match?(~r/^[a-zA-Z0-9_-]+$/, boundary)
+      assert Regex.match?(~r/^multipart_ex-[0-9a-f]+$/, boundary)
     end
   end
 end

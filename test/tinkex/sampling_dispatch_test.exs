@@ -1,10 +1,15 @@
 defmodule Tinkex.SamplingDispatchTest do
   use Supertester.ExUnitFoundation, isolation: :full_isolation
 
-  alias Tinkex.{RateLimiter, SamplingDispatch}
+  alias Foundation.RateLimit.BackoffWindow
+  alias Tinkex.{PoolKey, SamplingDispatch}
 
   test "applies 20x byte penalty during recent backoff" do
-    limiter = RateLimiter.for_key({"http://example.com", "k"})
+    limiter =
+      BackoffWindow.for_key(
+        :tinkex_rate_limiters,
+        {:limiter, {PoolKey.normalize_base_url("http://example.com"), "k"}}
+      )
 
     {:ok, dispatch} =
       SamplingDispatch.start_link(
@@ -55,7 +60,11 @@ defmodule Tinkex.SamplingDispatchTest do
   end
 
   test "executes without throttling when no backoff" do
-    limiter = RateLimiter.for_key({"http://example.com", "k2"})
+    limiter =
+      BackoffWindow.for_key(
+        :tinkex_rate_limiters,
+        {:limiter, {PoolKey.normalize_base_url("http://example.com"), "k2"}}
+      )
 
     {:ok, dispatch} =
       SamplingDispatch.start_link(
@@ -76,7 +85,12 @@ defmodule Tinkex.SamplingDispatchTest do
   end
 
   test "acquires with jittered exponential backoff when busy" do
-    limiter = RateLimiter.for_key({"http://example.com", "k3"})
+    limiter =
+      BackoffWindow.for_key(
+        :tinkex_rate_limiters,
+        {:limiter, {PoolKey.normalize_base_url("http://example.com"), "k3"}}
+      )
+
     parent = self()
     attempts = :atomics.new(1, [])
 

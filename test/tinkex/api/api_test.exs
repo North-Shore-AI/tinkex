@@ -331,7 +331,10 @@ defmodule Tinkex.APITest do
   end
 
   describe "headers and redaction" do
-    test "includes cloudflare headers when configured", %{bypass: bypass, config: config} do
+    test "includes cloudflare headers when configured", %{
+      bypass: bypass,
+      config: %Config{} = config
+    } do
       config =
         %Config{
           config
@@ -364,7 +367,7 @@ defmodule Tinkex.APITest do
       assert {:ok, %{"ok" => true}} = API.get("/cf-missing", config: config)
     end
 
-    test "redacts secrets when dumping headers", %{bypass: bypass, config: config} do
+    test "redacts secrets when dumping headers", %{bypass: bypass, config: %Config{} = config} do
       config =
         %Config{
           config
@@ -374,8 +377,8 @@ defmodule Tinkex.APITest do
             dump_headers?: true
         }
 
-      Logger.put_module_level(Tinkex.API.Retry, :info)
-      on_exit(fn -> Logger.delete_module_level(Tinkex.API.Retry) end)
+      Logger.put_module_level(Tinkex.API, :info)
+      on_exit(fn -> Logger.delete_module_level(Tinkex.API) end)
 
       Bypass.expect_once(bypass, "GET", "/dump", fn conn ->
         conn
@@ -403,7 +406,7 @@ defmodule Tinkex.APITest do
   end
 
   describe "default headers and query" do
-    test "merges default headers and query params", %{bypass: bypass, config: config} do
+    test "merges default headers and query params", %{bypass: bypass, config: %Config{} = config} do
       config = %Config{
         config
         | default_headers: %{"x-org" => "acme-co"},
@@ -429,7 +432,7 @@ defmodule Tinkex.APITest do
                )
     end
 
-    test "per-call query overrides defaults", %{bypass: bypass, config: config} do
+    test "per-call query overrides defaults", %{bypass: bypass, config: %Config{} = config} do
       config = %Config{config | default_query: %{"mode" => "default"}}
 
       Bypass.expect_once(bypass, "GET", "/override", fn conn ->

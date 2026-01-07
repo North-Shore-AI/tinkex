@@ -4,7 +4,7 @@ defmodule Tinkex.CircuitBreakerTest do
   """
   use ExUnit.Case, async: true
 
-  alias Tinkex.CircuitBreaker
+  alias Foundation.CircuitBreaker
 
   describe "new/1" do
     test "creates a circuit breaker with default options" do

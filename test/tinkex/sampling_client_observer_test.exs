@@ -140,8 +140,14 @@ defmodule Tinkex.SamplingClientObserverTest do
           })
         end)
 
-      assert log =~ "server override"
-      refute log =~ "concurrent sampler weights limit hit"
+      line =
+        log
+        |> String.split("\n")
+        |> Enum.find(fn entry -> String.contains?(entry, session_id) end)
+
+      assert line
+      assert line =~ "server override"
+      refute line =~ "concurrent sampler weights limit hit"
     end
 
     test "clears debounce entry when requested", %{

@@ -4,111 +4,96 @@ defmodule Tinkex.CircuitBreaker.RegistryTest do
   """
   use ExUnit.Case, async: true
 
-  alias Tinkex.CircuitBreaker.Registry
+  alias Foundation.CircuitBreaker.Registry
 
   setup do
-    # Ensure registry is initialized
-    Registry.init()
-
-    # Clean up any existing circuit breakers
-    for {name, _state} <- Registry.list() do
-      Registry.delete(name)
-    end
-
-    :ok
-  end
-
-  describe "init/0" do
-    test "creates ETS table" do
-      # Already initialized in setup
-      assert :ets.whereis(:tinkex_circuit_breakers) != :undefined
-    end
-
-    test "is idempotent" do
-      assert :ok == Registry.init()
-      assert :ok == Registry.init()
-    end
+    registry = Registry.new_registry()
+    {:ok, registry: registry}
   end
 
   describe "call/3" do
-    test "executes function and returns result" do
-      result = Registry.call("test-endpoint", fn -> {:ok, "success"} end)
+    test "executes function and returns result", %{registry: registry} do
+      result = Registry.call(registry, "test-endpoint", fn -> {:ok, "success"} end)
       assert result == {:ok, "success"}
     end
 
-    test "creates circuit breaker if not exists" do
-      Registry.delete("new-endpoint")
-      _result = Registry.call("new-endpoint", fn -> {:ok, "test"} end)
+    test "creates circuit breaker if not exists", %{registry: registry} do
+      Registry.delete(registry, "new-endpoint")
+      _result = Registry.call(registry, "new-endpoint", fn -> {:ok, "test"} end)
 
-      assert Registry.state("new-endpoint") == :closed
+      assert Registry.state(registry, "new-endpoint") == :closed
     end
 
-    test "records failures and opens circuit" do
+    test "records failures and opens circuit", %{registry: registry} do
       for _i <- 1..5 do
-        Registry.call("fail-endpoint", fn -> {:error, "failed"} end, failure_threshold: 5)
+        Registry.call(registry, "fail-endpoint", fn -> {:error, "failed"} end,
+          failure_threshold: 5
+        )
       end
 
-      assert Registry.state("fail-endpoint") == :open
+      assert Registry.state(registry, "fail-endpoint") == :open
     end
 
-    test "returns circuit_open when circuit is open" do
+    test "returns circuit_open when circuit is open", %{registry: registry} do
       # Trip the circuit
       for _i <- 1..2 do
-        Registry.call("open-endpoint", fn -> {:error, "failed"} end, failure_threshold: 2)
+        Registry.call(registry, "open-endpoint", fn -> {:error, "failed"} end,
+          failure_threshold: 2
+        )
       end
 
-      result = Registry.call("open-endpoint", fn -> {:ok, "should not run"} end)
+      result = Registry.call(registry, "open-endpoint", fn -> {:ok, "should not run"} end)
       assert result == {:error, :circuit_open}
     end
   end
 
   describe "state/1" do
-    test "returns :closed for non-existent circuit" do
-      assert Registry.state("nonexistent") == :closed
+    test "returns :closed for non-existent circuit", %{registry: registry} do
+      assert Registry.state(registry, "nonexistent") == :closed
     end
 
-    test "returns current state" do
-      Registry.call("state-test", fn -> {:ok, "test"} end)
-      assert Registry.state("state-test") == :closed
+    test "returns current state", %{registry: registry} do
+      Registry.call(registry, "state-test", fn -> {:ok, "test"} end)
+      assert Registry.state(registry, "state-test") == :closed
     end
   end
 
   describe "reset/1" do
-    test "resets circuit to closed" do
+    test "resets circuit to closed", %{registry: registry} do
       # Trip the circuit
       for _i <- 1..2 do
-        Registry.call("reset-test", fn -> {:error, "failed"} end, failure_threshold: 2)
+        Registry.call(registry, "reset-test", fn -> {:error, "failed"} end, failure_threshold: 2)
       end
 
-      assert Registry.state("reset-test") == :open
+      assert Registry.state(registry, "reset-test") == :open
 
-      Registry.reset("reset-test")
-      assert Registry.state("reset-test") == :closed
+      Registry.reset(registry, "reset-test")
+      assert Registry.state(registry, "reset-test") == :closed
     end
 
-    test "is safe for non-existent circuit" do
-      assert :ok == Registry.reset("nonexistent")
+    test "is safe for non-existent circuit", %{registry: registry} do
+      assert :ok == Registry.reset(registry, "nonexistent")
     end
   end
 
   describe "delete/1" do
-    test "removes circuit from registry" do
-      Registry.call("delete-test", fn -> {:ok, "test"} end)
-      assert Registry.state("delete-test") == :closed
+    test "removes circuit from registry", %{registry: registry} do
+      Registry.call(registry, "delete-test", fn -> {:ok, "test"} end)
+      assert Registry.state(registry, "delete-test") == :closed
 
-      Registry.delete("delete-test")
+      Registry.delete(registry, "delete-test")
 
       # Should return :closed for non-existent (default)
-      assert Registry.state("delete-test") == :closed
+      assert Registry.state(registry, "delete-test") == :closed
     end
   end
 
   describe "list/0" do
-    test "returns all circuits with states" do
-      Registry.call("list-a", fn -> {:ok, "a"} end)
-      Registry.call("list-b", fn -> {:ok, "b"} end)
+    test "returns all circuits with states", %{registry: registry} do
+      Registry.call(registry, "list-a", fn -> {:ok, "a"} end)
+      Registry.call(registry, "list-b", fn -> {:ok, "b"} end)
 
-      circuits = Registry.list()
+      circuits = Registry.list(registry)
 
       assert {"list-a", :closed} in circuits
       assert {"list-b", :closed} in circuits

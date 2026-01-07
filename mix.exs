@@ -15,20 +15,26 @@ defmodule Tinkex.MixProject do
       version: @version,
       tinker_sdk_version: @tinker_sdk_version,
       elixir: "~> 1.18",
+      elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       escript: [main_module: Tinkex.CLI],
+      dialyzer: [plt_add_apps: [:ex_unit]],
       deps: deps(),
       docs: docs(),
       description: description(),
       package: package(),
       name: "Tinkex",
       source_url: @source_url,
-      homepage_url: @source_url,
-      preferred_cli_env: [
-        dialyzer: :test
-      ]
+      homepage_url: @source_url
     ]
   end
+
+  def cli do
+    [preferred_envs: [dialyzer: :test]]
+  end
+
+  defp elixirc_paths(:test), do: ["lib", "test/support"]
+  defp elixirc_paths(_), do: ["lib"]
 
   # Run "mix help compile.app" to learn about applications.
   def application do
@@ -59,11 +65,15 @@ defmodule Tinkex.MixProject do
       {:tokenizers, "~> 0.5"},
 
       # Tokenization (TikToken-style byte BPE, Kimi K2 compatible)
-      {:tiktoken_ex, "~> 0.1.0"},
+      {:tiktoken_ex, path: "../tiktoken_ex", override: true},
 
       # Telemetry
       {:telemetry, "~> 1.2"},
       {:semaphore, "~> 1.3"},
+      {:foundation, path: "../../n/foundation"},
+      {:sinter, path: "../../n/sinter"},
+      {:multipart_ex, path: "../../n/multipart_ex"},
+      {:pristine, path: "../../n/pristine"},
 
       # Development
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},

@@ -6,6 +6,8 @@ defmodule Tinkex.API.Training do
   Pool size: 5 connections.
   """
 
+  alias Pristine.Core.Context
+
   alias Tinkex.Future
   alias Tinkex.Types.{ForwardBackwardOutput, OptimStepResponse}
 
@@ -43,7 +45,11 @@ defmodule Tinkex.API.Training do
       |> Keyword.put(:pool_type, :training)
       |> Keyword.put_new(:transform, drop_nil?: true)
 
-    client.post("/api/v1/forward_backward", request, opts)
+    client.post(
+      "/api/v1/forward_backward",
+      request,
+      Keyword.put(opts, :endpoint_id, :forward_backward)
+    )
   end
 
   @doc """
@@ -70,7 +76,7 @@ defmodule Tinkex.API.Training do
       |> Keyword.put(:pool_type, :training)
       |> Keyword.put_new(:transform, drop_nil?: true)
 
-    client.post("/api/v1/optim_step", request, opts)
+    client.post("/api/v1/optim_step", request, Keyword.put(opts, :endpoint_id, :optim_step))
   end
 
   @doc """
@@ -103,19 +109,25 @@ defmodule Tinkex.API.Training do
       |> Keyword.put(:pool_type, :training)
       |> Keyword.put_new(:transform, drop_nil?: true)
 
-    client.post("/api/v1/forward", request, opts)
+    client.post("/api/v1/forward", request, Keyword.put(opts, :endpoint_id, :forward))
   end
 
   defp poll_opts(opts) do
-    opts
-    |> Keyword.take([
-      :timeout,
-      :http_timeout,
-      :telemetry_metadata,
-      :queue_state_observer,
-      :sleep_fun
-    ])
-    |> Keyword.put(:config, Keyword.fetch!(opts, :config))
+    base_opts =
+      opts
+      |> Keyword.take([
+        :timeout,
+        :http_timeout,
+        :telemetry_metadata,
+        :queue_state_observer,
+        :sleep_fun,
+        :context
+      ])
+
+    case Keyword.get(opts, :context) do
+      %Context{} -> base_opts
+      _ -> Keyword.put(base_opts, :config, Keyword.fetch!(opts, :config))
+    end
   end
 
   defp await_timeout(opts), do: Keyword.get(opts, :await_timeout, :infinity)

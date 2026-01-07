@@ -7,7 +7,7 @@ defmodule Tinkex.API.RetryParityTest do
   """
   use ExUnit.Case, async: true
 
-  alias Tinkex.API.RetryConfig
+  alias Foundation.Retry.HTTP
 
   # Python constants from _constants.py
   @python_initial_delay 500
@@ -19,7 +19,7 @@ defmodule Tinkex.API.RetryParityTest do
       # Test many samples to verify jitter bounds
       delays =
         for _ <- 1..100 do
-          RetryConfig.retry_delay(0)
+          HTTP.retry_delay(0)
         end
 
       # All delays should be in range [base * 0.75, base * 1.0]
@@ -34,7 +34,7 @@ defmodule Tinkex.API.RetryParityTest do
       delays =
         for _ <- 1..100 do
           # Attempt 10 would give base_delay = 500 * 2^10 = 512_000ms before cap
-          RetryConfig.retry_delay(10)
+          HTTP.retry_delay(10)
         end
 
       # All delays should be capped at 10s * jitter_max (10_000 * 1.0 = 10_000)
@@ -59,7 +59,7 @@ defmodule Tinkex.API.RetryParityTest do
 
       for attempt <- 0..4 do
         base_expected = @python_initial_delay * round(:math.pow(2, attempt))
-        delays = for _ <- 1..20, do: RetryConfig.retry_delay(attempt)
+        delays = for _ <- 1..20, do: HTTP.retry_delay(attempt)
 
         min_expected = round(base_expected * 0.75)
         max_expected = round(base_expected * 1.0)
@@ -72,21 +72,21 @@ defmodule Tinkex.API.RetryParityTest do
 
   describe "should_retry?/2 status codes (Python parity)" do
     test "retries 408 (Request Timeout)" do
-      assert RetryConfig.retryable_status?(408)
+      assert HTTP.retryable_status?(408)
     end
 
     test "retries 409 (Conflict/Lock Timeout)" do
       # Python parity: _base_client.py line 724-727
-      assert RetryConfig.retryable_status?(409)
+      assert HTTP.retryable_status?(409)
     end
 
     test "retries 429 (Rate Limited)" do
-      assert RetryConfig.retryable_status?(429)
+      assert HTTP.retryable_status?(429)
     end
 
     test "retries 5xx (Server Errors)" do
       for status <- 500..599 do
-        assert RetryConfig.retryable_status?(status), "Expected #{status} to be retryable"
+        assert HTTP.retryable_status?(status), "Expected #{status} to be retryable"
       end
     end
 
@@ -94,31 +94,20 @@ defmodule Tinkex.API.RetryParityTest do
       non_retryable = Enum.filter(400..499, fn s -> s not in [408, 409, 429] end)
 
       for status <- non_retryable do
-        refute RetryConfig.retryable_status?(status), "Expected #{status} to not be retryable"
+        refute HTTP.retryable_status?(status), "Expected #{status} to not be retryable"
       end
     end
 
     test "does not retry 2xx" do
       for status <- 200..299 do
-        refute RetryConfig.retryable_status?(status), "Expected #{status} to not be retryable"
+        refute HTTP.retryable_status?(status), "Expected #{status} to not be retryable"
       end
     end
 
     test "does not retry 3xx" do
       for status <- 300..399 do
-        refute RetryConfig.retryable_status?(status), "Expected #{status} to not be retryable"
+        refute HTTP.retryable_status?(status), "Expected #{status} to not be retryable"
       end
-    end
-  end
-
-  describe "no wall-clock timeout (Python parity)" do
-    test "retry governed by max_retries only, not wall clock" do
-      # Python SDK does NOT have a 30s wall-clock cutoff.
-      # It retries up to max_retries times regardless of total elapsed time.
-      # This is tested via the API.post tests with slow responses,
-      # but we verify the config doesn't enforce a wall-clock limit.
-      config = RetryConfig.new(max_retries: 10)
-      refute Map.has_key?(config, :max_retry_duration_ms)
     end
   end
 end

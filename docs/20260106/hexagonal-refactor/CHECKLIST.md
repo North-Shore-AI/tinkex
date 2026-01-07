@@ -1,65 +1,67 @@
 # Hexagonal Refactor Checklist
 
+Note: this is the original tinkex; ignore `~/p/g/North-Shore-AI/pristine/examples/`. Ports/adapters are created in Phase 3.
+
 ## Phase 1: Integrate Foundation/Sinter
 
 ### Dependencies
-- [ ] Add `foundation` to mix.exs
-- [ ] Add `sinter` to mix.exs
-- [ ] Add `multipart_ex` to mix.exs
-- [ ] Run `mix deps.get`
+- [x] Add `foundation` to mix.exs
+- [x] Add `sinter` to mix.exs
+- [x] Add `multipart_ex` to mix.exs
+- [x] Run `mix deps.get`
 
 ### Retry/Backoff Replacement
-- [ ] Create `Foundation.Retry` wrapper if needed
-- [ ] Replace `Tinkex.RetryConfig` usages
-- [ ] Replace `Tinkex.RetryHandler` usages
-- [ ] Replace `lib/tinkex/retry.ex` usages
-- [ ] Delete `lib/tinkex/retry_config.ex`
-- [ ] Delete `lib/tinkex/retry_handler.ex`
-- [ ] Delete `lib/tinkex/retry.ex`
-- [ ] Tests pass
+- [x] Create `Foundation.Retry` wrapper if needed
+- [x] Replace `Tinkex.RetryConfig` usages
+- [x] Replace `Tinkex.RetryHandler` usages
+- [x] Replace `lib/tinkex/retry.ex` usages
+- [x] Delete `lib/tinkex/retry_config.ex`
+- [x] Delete `lib/tinkex/retry_handler.ex`
+- [x] Delete `lib/tinkex/retry.ex`
+- [x] Tests pass
 
 ### Circuit Breaker Replacement
-- [ ] Replace `Tinkex.CircuitBreaker` with `Foundation.CircuitBreaker`
-- [ ] Replace `Tinkex.CircuitBreaker.Registry` with `Foundation.CircuitBreaker.Registry`
-- [ ] Delete `lib/tinkex/circuit_breaker.ex`
-- [ ] Delete `lib/tinkex/circuit_breaker/registry.ex`
-- [ ] Tests pass
+- [x] Replace `Tinkex.CircuitBreaker` with `Foundation.CircuitBreaker`
+- [x] Replace `Tinkex.CircuitBreaker.Registry` with `Foundation.CircuitBreaker.Registry`
+- [x] Delete `lib/tinkex/circuit_breaker.ex`
+- [x] Delete `lib/tinkex/circuit_breaker/registry.ex`
+- [x] Tests pass
 
 ### Rate Limiting Replacement
-- [ ] Replace `Tinkex.RateLimiter` with `Foundation.RateLimit.BackoffWindow`
-- [ ] Delete `lib/tinkex/rate_limiter.ex`
-- [ ] Tests pass
+- [x] Replace `Tinkex.RateLimiter` with `Foundation.RateLimit.BackoffWindow`
+- [x] Delete `lib/tinkex/rate_limiter.ex`
+- [x] Tests pass
 
 ### Semaphore Replacement
-- [ ] Replace `Tinkex.RetrySemaphore` with `Foundation.Semaphore.Counting`
-- [ ] Replace `Tinkex.BytesSemaphore` with `Foundation.Semaphore.Weighted`
-- [ ] Delete `lib/tinkex/retry_semaphore.ex`
-- [ ] Delete `lib/tinkex/bytes_semaphore.ex`
-- [ ] Tests pass
+- [x] Replace `Tinkex.RetrySemaphore` with `Foundation.Semaphore.Counting`
+- [x] Replace `Tinkex.BytesSemaphore` with `Foundation.Semaphore.Weighted`
+- [x] Delete `lib/tinkex/retry_semaphore.ex`
+- [x] Delete `lib/tinkex/bytes_semaphore.ex`
+- [x] Tests pass
 
 ### Transform/NotGiven Replacement
-- [ ] Replace `Tinkex.NotGiven` with `Sinter.NotGiven`
-- [ ] Replace `Tinkex.Transform` with `Sinter.Transform`
-- [ ] Delete `lib/tinkex/not_given.ex`
-- [ ] Delete `lib/tinkex/transform.ex`
-- [ ] Tests pass
+- [x] Replace `Tinkex.NotGiven` with `Sinter.NotGiven`
+- [x] Replace `Tinkex.Transform` with `Sinter.Transform`
+- [x] Delete `lib/tinkex/not_given.ex`
+- [x] Delete `lib/tinkex/transform.ex`
+- [x] Tests pass
 
 ### Multipart Replacement
-- [ ] Replace `Tinkex.Multipart.Encoder` with `Multipart.Encoder`
-- [ ] Replace `Tinkex.Multipart.FormSerializer` with `Multipart.Form`
-- [ ] Delete `lib/tinkex/multipart/`
-- [ ] Tests pass
+- [x] Replace `Tinkex.Multipart.Encoder` with `Multipart.Encoder`
+- [x] Replace `Tinkex.Multipart.FormSerializer` with `Multipart.Form`
+- [x] Delete `lib/tinkex/multipart/`
+- [x] Tests pass
 
 ---
 
 ## Phase 2: Stabilize
 
-- [ ] `mix test` - all pass
-- [ ] `mix test --seed 12345` - pass
-- [ ] `mix test --seed 99999` - pass
-- [ ] `mix test --seed 1` - pass
-- [ ] `mix dialyzer` - no errors
-- [ ] `mix credo --strict` - no issues
+- [x] `mix test` - all pass
+- [x] `mix test --seed 12345` - pass
+- [x] `mix test --seed 99999` - pass
+- [x] `mix test --seed 1` - pass
+- [x] `mix dialyzer` - no errors
+- [x] `mix credo --strict` - no issues
 - [ ] No deprecation warnings
 - [ ] Commit checkpoint
 
@@ -68,63 +70,67 @@
 ## Phase 3: Hexagonal Refactor
 
 ### Define Ports
-- [ ] Create `lib/tinkex/ports/http_transport.ex`
-- [ ] Create `lib/tinkex/ports/retry_strategy.ex`
-- [ ] Create `lib/tinkex/ports/circuit_breaker.ex`
-- [ ] Create `lib/tinkex/ports/rate_limiter.ex`
-- [ ] Create `lib/tinkex/ports/serializer.ex`
-- [ ] Create `lib/tinkex/ports/streaming.ex`
-- [ ] Create `lib/tinkex/ports/telemetry.ex`
-- [ ] Create `lib/tinkex/ports/pool_manager.ex`
+- [x] Create `lib/tinkex/ports/http_transport.ex`
+- [x] Create `lib/tinkex/ports/retry_strategy.ex`
+- [x] Create `lib/tinkex/ports/circuit_breaker.ex`
+- [x] Create `lib/tinkex/ports/rate_limiter.ex`
+- [x] Create `lib/tinkex/ports/serializer.ex`
+- [x] Create `lib/tinkex/ports/streaming.ex`
+- [x] Create `lib/tinkex/ports/telemetry.ex`
+- [x] Create `lib/tinkex/ports/pool_manager.ex`
+- [x] Create `lib/tinkex/ports/semaphore.ex`
 
 ### Create Adapters
-- [ ] Create `lib/tinkex/adapters/finch_transport.ex`
-- [ ] Create `lib/tinkex/adapters/foundation_retry.ex`
-- [ ] Create `lib/tinkex/adapters/foundation_cb.ex`
-- [ ] Create `lib/tinkex/adapters/foundation_rate.ex`
-- [ ] Create `lib/tinkex/adapters/jason_serializer.ex`
-- [ ] Create `lib/tinkex/adapters/sse_streaming.ex`
+- [x] Create `lib/tinkex/adapters/finch_transport.ex`
+- [x] Create `lib/tinkex/adapters/foundation_retry.ex`
+- [x] Create `lib/tinkex/adapters/foundation_cb.ex`
+- [x] Create `lib/tinkex/adapters/foundation_rate.ex`
+- [x] Create `lib/tinkex/adapters/jason_serializer.ex`
+- [x] Create `lib/tinkex/adapters/sse_streaming.ex`
+- [x] Create `lib/tinkex/adapters/foundation_semaphore.ex`
 
 ### Create Context
-- [ ] Create `lib/tinkex/context.ex`
-- [ ] Wire up adapters via Context
+- [x] Create `lib/tinkex/context.ex`
+- [x] Wire up adapters via Context
 
 ### Reorganize Domain
-- [ ] Move `SamplingClient` to `lib/tinkex/domain/sampling/client.ex`
-- [ ] Move `TrainingClient` to `lib/tinkex/domain/training/client.ex`
-- [ ] Move `Future` to `lib/tinkex/domain/futures/poller.ex`
-- [ ] Move `RestClient` to `lib/tinkex/domain/rest/client.ex`
+- [x] Move `SamplingClient` to `lib/tinkex/domain/sampling/client.ex`
+- [x] Move `TrainingClient` to `lib/tinkex/domain/training/client.ex`
+- [x] Move `Future` to `lib/tinkex/domain/futures/poller.ex`
+- [x] Move `RestClient` to `lib/tinkex/domain/rest/client.ex`
 - [ ] Keep types in `lib/tinkex/types/`
 
 ### Refactor Clients to Use Ports
-- [ ] SamplingClient uses ports via Context
-- [ ] TrainingClient uses ports via Context
-- [ ] Future uses ports via Context
-- [ ] RestClient uses ports via Context
+- [x] SamplingClient uses ports via Context
+- [x] TrainingClient uses ports via Context
+- [x] Future uses ports via Context
+- [x] RestClient uses ports via Context
 
 ### Delete Old API Layer
-- [ ] Delete `lib/tinkex/api/api.ex`
-- [ ] Delete `lib/tinkex/api/request.ex`
-- [ ] Delete `lib/tinkex/api/response.ex`
-- [ ] Delete `lib/tinkex/api/response_handler.ex`
-- [ ] Delete `lib/tinkex/api/compression.ex`
-- [ ] Delete `lib/tinkex/api/headers.ex`
-- [ ] Delete `lib/tinkex/api/url.ex`
-- [ ] Delete `lib/tinkex/api/helpers.ex`
-- [ ] Delete `lib/tinkex/api/telemetry.ex`
-- [ ] Delete `lib/tinkex/api/retry.ex`
-- [ ] Delete `lib/tinkex/api/retry_config.ex`
-- [ ] Delete `lib/tinkex/api/stream_response.ex`
+- [x] Delete `lib/tinkex/api/api.ex`
+- [x] Delete `lib/tinkex/api/request.ex`
+- [x] Delete `lib/tinkex/api/response.ex`
+- [x] Delete `lib/tinkex/api/response_handler.ex`
+- [x] Delete `lib/tinkex/api/compression.ex`
+- [x] Delete `lib/tinkex/api/headers.ex`
+- [x] Delete `lib/tinkex/api/url.ex`
+- [x] Delete `lib/tinkex/api/helpers.ex`
+- [x] Delete `lib/tinkex/api/telemetry.ex`
+- [x] Delete `lib/tinkex/api/retry.ex`
+- [x] Delete `lib/tinkex/api/retry_config.ex`
+- [x] Delete `lib/tinkex/api/stream_response.ex`
 
 ---
 
 ## Phase 4: Stabilize
 
-- [ ] `mix test` - all pass
-- [ ] `mix test --seed 12345` - pass
-- [ ] `mix dialyzer` - no errors
-- [ ] `mix credo --strict` - no issues
-- [ ] Domain modules have zero infrastructure imports
+- [x] `mix test` - all pass
+- [x] `mix test --seed 12345` - pass
+- [x] `mix test --seed 99999` - pass
+- [x] `mix test --seed 1` - pass
+- [x] `mix dialyzer` - no errors
+- [x] `mix credo --strict` - no issues
+- [x] Domain modules have zero infrastructure imports
 - [ ] Commit checkpoint
 
 ---
@@ -132,16 +138,16 @@
 ## Phase 5: Extract to Pristine
 
 ### Move Ports
-- [ ] Move `lib/tinkex/ports/*.ex` to `pristine/lib/pristine/ports/`
+- [ ] Move `lib/tinkex/ports/*.ex` (created in Phase 3) to `pristine/lib/pristine/ports/`
 - [ ] Update imports/aliases
 
 ### Move Adapters
-- [ ] Move `lib/tinkex/adapters/*.ex` to `pristine/lib/pristine/adapters/`
+- [ ] Move `lib/tinkex/adapters/*.ex` (created in Phase 3) to `pristine/lib/pristine/adapters/`
 - [ ] Update imports/aliases
 
 ### Move Context/Pipeline
-- [ ] Move Context to `pristine/lib/pristine/core/context.ex`
-- [ ] Move Pipeline logic to `pristine/lib/pristine/core/pipeline.ex`
+- [ ] Move Context (created in Phase 3) to `pristine/lib/pristine/core/context.ex`
+- [ ] Move Pipeline logic (if created) to `pristine/lib/pristine/core/pipeline.ex`
 
 ### Update Tinkex to Use Pristine
 - [ ] Add pristine as dependency
@@ -172,9 +178,9 @@
 - [ ] Verify generated client works
 
 ### Delete Infrastructure
-- [ ] Delete `lib/tinkex/ports/` (moved to pristine)
-- [ ] Delete `lib/tinkex/adapters/` (moved to pristine)
-- [ ] Delete `lib/tinkex/context.ex` (moved to pristine)
+- [ ] Delete `lib/tinkex/ports/` (created in Phase 3; moved to pristine)
+- [ ] Delete `lib/tinkex/adapters/` (created in Phase 3; moved to pristine)
+- [ ] Delete `lib/tinkex/context.ex` (created in Phase 3; moved to pristine)
 
 ### Keep Domain-Specific
 - [ ] Keep `lib/tinkex/tokenizer.ex`

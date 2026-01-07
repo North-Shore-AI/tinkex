@@ -16,7 +16,9 @@ defmodule Tinkex.API.Models do
     case client.post(
            "/api/v1/get_info",
            request,
-           Keyword.put(opts, :pool_type, :training)
+           opts
+           |> Keyword.put(:pool_type, :training)
+           |> Keyword.put(:endpoint_id, :get_info)
          ) do
       {:ok, json} -> {:ok, GetInfoResponse.from_json(json)}
       {:error, _} = error -> error
@@ -34,7 +36,9 @@ defmodule Tinkex.API.Models do
     case client.post(
            "/api/v1/unload_model",
            request,
-           Keyword.put(opts, :pool_type, :training)
+           opts
+           |> Keyword.put(:pool_type, :training)
+           |> Keyword.put(:endpoint_id, :unload_model)
          ) do
       {:ok, %{"request_id" => _} = future} -> {:ok, future}
       {:ok, %{request_id: _} = future} -> {:ok, future}

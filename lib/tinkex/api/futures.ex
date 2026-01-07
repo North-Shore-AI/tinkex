@@ -27,6 +27,7 @@ defmodule Tinkex.API.Futures do
       opts
       |> Keyword.put(:pool_type, :futures)
       |> Keyword.put_new(:raw_response?, true)
+      |> Keyword.put(:endpoint_id, :retrieve_future)
     )
   end
 end

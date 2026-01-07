@@ -1,9 +1,10 @@
 defmodule Tinkex.Integration.MultiClientConcurrencyTest do
   use Tinkex.HTTPCase, async: true
 
+  alias Foundation.RateLimit.BackoffWindow, as: RateLimit
+
   alias Tinkex.{
     PoolKey,
-    RateLimiter,
     SamplingClient,
     ServiceClient,
     TrainingClient
@@ -364,7 +365,7 @@ defmodule Tinkex.Integration.MultiClientConcurrencyTest do
     refute entry_a.rate_limiter == entry_b.rate_limiter
 
     backoff_until = :atomics.get(entry_a.rate_limiter, 1)
-    assert RateLimiter.should_backoff?(entry_a.rate_limiter)
+    assert RateLimit.should_backoff?(entry_a.rate_limiter)
 
     training_tasks =
       for {training, tag} <- [{training_a, :a}, {training_b, :b}] do
@@ -407,8 +408,8 @@ defmodule Tinkex.Integration.MultiClientConcurrencyTest do
     training_results = Task.await_many(training_tasks, 10_000)
     assert Enum.sort(training_results) == [:a, :b]
 
-    refute RateLimiter.should_backoff?(entry_a.rate_limiter)
-    refute RateLimiter.should_backoff?(entry_b.rate_limiter)
+    refute RateLimit.should_backoff?(entry_a.rate_limiter)
+    refute RateLimit.should_backoff?(entry_b.rate_limiter)
     assert :atomics.get(entry_a.rate_limiter, 1) == 0
     assert :atomics.get(entry_b.rate_limiter, 1) == 0
 

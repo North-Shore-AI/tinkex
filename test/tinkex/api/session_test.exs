@@ -66,7 +66,7 @@ defmodule Tinkex.API.SessionTest do
       )
     end
 
-    test "enforces heartbeat timeout and retries", %{config: config} do
+    test "enforces heartbeat timeout and retries", %{config: %Config{} = config} do
       config = %Config{config | http_client: StubHTTPClient}
 
       assert {:ok, _} = Session.heartbeat(%{session_id: "session-123"}, config: config)

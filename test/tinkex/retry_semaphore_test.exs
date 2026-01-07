@@ -1,97 +1,141 @@
 defmodule Tinkex.RetrySemaphoreTest do
   use Supertester.ExUnitFoundation, isolation: :full_isolation
 
-  alias Tinkex.RetrySemaphore
+  alias Foundation.Backoff
+  alias Foundation.Semaphore.Counting, as: CountingSemaphore
 
-  test "reuses semaphore for same max_connections" do
-    sem1 = RetrySemaphore.get_semaphore(2)
-    sem2 = RetrySemaphore.get_semaphore(2)
+  test "enforces capacity per name" do
+    registry = CountingSemaphore.new_registry()
+    name = {:retry, self()}
 
-    assert sem1 == sem2
+    assert CountingSemaphore.acquire(registry, name, 2)
+    assert CountingSemaphore.acquire(registry, name, 2)
+    refute CountingSemaphore.acquire(registry, name, 2)
+
+    assert CountingSemaphore.count(registry, name) == 2
+
+    CountingSemaphore.release(registry, name)
+    CountingSemaphore.release(registry, name)
+
+    assert CountingSemaphore.count(registry, name) == 0
   end
 
   test "limits concurrent executions" do
     test_pid = self()
     counter = :atomics.new(1, [])
     max_seen = :atomics.new(1, [])
+    registry = CountingSemaphore.new_registry()
+    name = {:retry, test_pid}
+
+    backoff =
+      Backoff.Policy.new(
+        strategy: :constant,
+        base_ms: 1,
+        max_ms: 1,
+        jitter_strategy: :none
+      )
+
+    sleep_fun = fn _ms ->
+      send(test_pid, {:blocked, self()})
+
+      receive do
+        :retry -> :ok
+      end
+    end
 
     fun = fn ->
-      # Increment counter and track max
-      current = :atomics.add_get(counter, 1, 1)
-      max_current = :atomics.get(max_seen, 1)
+      :ok =
+        CountingSemaphore.acquire_blocking(
+          registry,
+          name,
+          1,
+          backoff,
+          sleep_fun: sleep_fun
+        )
 
-      if current > max_current do
-        :atomics.put(max_seen, 1, current)
+      try do
+        current = :atomics.add_get(counter, 1, 1)
+        max_current = :atomics.get(max_seen, 1)
+
+        if current > max_current do
+          :atomics.put(max_seen, 1, current)
+        end
+
+        send(test_pid, {:entered, self()})
+
+        receive do
+          :proceed -> :ok
+        end
+      after
+        :atomics.add_get(counter, 1, -1)
+        CountingSemaphore.release(registry, name)
+        send(test_pid, {:released, self()})
       end
-
-      # Signal test process that we're in the critical section
-      send(test_pid, {:entered, self()})
-
-      # Wait for permission to proceed
-      receive do
-        :proceed -> :ok
-      end
-
-      :atomics.add_get(counter, 1, -1)
-      :ok
     end
 
     tasks =
       for _ <- 1..3 do
-        Task.async(fn -> RetrySemaphore.with_semaphore(1, fun) end)
+        Task.async(fun)
       end
 
-    # Wait for first task to enter critical section
     assert_receive {:entered, pid1}, 1_000
 
-    # Give a moment for other tasks to attempt entry (they should be blocked)
-    # Use receive with timeout instead of sleep
-    receive do
-      {:entered, _pid2} -> flunk("Second task should not enter while first holds semaphore")
-    after
-      100 -> :ok
-    end
+    blocked =
+      for _ <- 1..2 do
+        assert_receive {:blocked, pid}, 1_000
+        pid
+      end
 
-    # Allow first task to complete
     send(pid1, :proceed)
+    assert_receive {:released, ^pid1}, 1_000
 
-    # Wait for second task to enter
-    assert_receive {:entered, pid2}, 1_000
-
-    # Verify third task is still blocked
-    receive do
-      {:entered, _pid3} -> flunk("Third task should not enter while second holds semaphore")
-    after
-      100 -> :ok
-    end
-
-    # Allow second task to complete
+    [pid2, pid3] = blocked
+    send(pid2, :retry)
+    assert_receive {:entered, ^pid2}, 1_000
     send(pid2, :proceed)
+    assert_receive {:released, ^pid2}, 1_000
 
-    # Wait for third task to enter
-    assert_receive {:entered, pid3}, 1_000
-
-    # Allow third task to complete
+    send(pid3, :retry)
+    assert_receive {:entered, ^pid3}, 1_000
     send(pid3, :proceed)
+    assert_receive {:released, ^pid3}, 1_000
 
-    # Wait for all tasks to complete
     Enum.each(tasks, &Task.await(&1, 2_000))
 
-    # Verify max concurrent was never more than 1
     assert :atomics.get(max_seen, 1) <= 1
   end
 
   test "separates capacity by semaphore key" do
     parent = self()
+    registry = CountingSemaphore.new_registry()
+
+    backoff =
+      Backoff.Policy.new(
+        strategy: :constant,
+        base_ms: 1,
+        max_ms: 1,
+        jitter_strategy: :none
+      )
 
     fun = fn key ->
-      RetrySemaphore.with_semaphore(key, 1, fn ->
+      :ok =
+        CountingSemaphore.acquire_blocking(
+          registry,
+          key,
+          1,
+          backoff,
+          sleep_fun: fn _ -> send(parent, {:blocked, key}) end
+        )
+
+      try do
         send(parent, {:entered, key, self()})
 
         receive do
           :proceed -> :ok
         end
-      end)
+      after
+        CountingSemaphore.release(registry, key)
+      end
     end
 
     t1 = Task.async(fn -> fun.({:client, 1}) end)
@@ -107,38 +151,57 @@ defmodule Tinkex.RetrySemaphoreTest do
     Task.await(t2, 1_000)
   end
 
-  test "backs off with jittered exponential delay when busy" do
+  test "backs off with exponential delay when busy" do
     parent = self()
-    attempts = :atomics.new(1, [])
+    registry = CountingSemaphore.new_registry()
+    name = {:retry, parent}
 
-    acquire_fun = fn _name, _max ->
-      attempt = :atomics.add_get(attempts, 1, 1)
-      attempt > 3
-    end
+    assert CountingSemaphore.acquire(registry, name, 1)
 
-    sleep_fun = fn ms -> send(parent, {:slept, ms}) end
-
-    result =
-      RetrySemaphore.with_semaphore(
-        1,
-        [
-          backoff: [
-            base_ms: 5,
-            max_ms: 20,
-            jitter: 0.0,
-            sleep_fun: sleep_fun,
-            acquire_fun: acquire_fun,
-            release_fun: fn _name -> :ok end,
-            rand_fun: fn -> 0.0 end
-          ]
-        ],
-        fn -> :ok end
+    backoff =
+      Backoff.Policy.new(
+        strategy: :exponential,
+        base_ms: 5,
+        max_ms: 20,
+        jitter_strategy: :none
       )
 
-    assert result == :ok
-    assert_receive {:slept, 5}
-    assert_receive {:slept, 10}
-    assert_receive {:slept, 20}
-    refute_receive {:slept, _}
+    sleep_fun = fn ms ->
+      send(parent, {:slept, ms, self()})
+
+      receive do
+        :continue -> :ok
+      end
+    end
+
+    task =
+      Task.async(fn ->
+        :ok =
+          CountingSemaphore.acquire_blocking(
+            registry,
+            name,
+            1,
+            backoff,
+            sleep_fun: sleep_fun
+          )
+
+        send(parent, {:acquired, self()})
+        CountingSemaphore.release(registry, name)
+      end)
+
+    assert_receive {:slept, 5, pid}, 1_000
+    send(pid, :continue)
+
+    assert_receive {:slept, 10, ^pid}, 1_000
+    send(pid, :continue)
+
+    assert_receive {:slept, 20, ^pid}, 1_000
+    CountingSemaphore.release(registry, name)
+    send(pid, :continue)
+
+    assert_receive {:acquired, ^pid}, 1_000
+    refute_receive {:slept, _, _}, 50
+
+    Task.await(task, 1_000)
   end
 end

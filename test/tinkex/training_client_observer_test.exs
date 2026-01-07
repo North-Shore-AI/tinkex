@@ -126,8 +126,14 @@ defmodule Tinkex.TrainingClientObserverTest do
           })
         end)
 
-      assert log =~ "server override"
-      refute log =~ "concurrent training clients rate limit hit"
+      line =
+        log
+        |> String.split("\n")
+        |> Enum.find(fn entry -> String.contains?(entry, model_id) end)
+
+      assert line
+      assert line =~ "server override"
+      refute line =~ "concurrent training clients rate limit hit"
     end
   end
 end

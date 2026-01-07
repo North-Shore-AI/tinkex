@@ -3,7 +3,7 @@ defmodule Tinkex.SamplingClientTest do
 
   import ExUnit.CaptureLog
 
-  alias Tinkex.RateLimiter
+  alias Foundation.RateLimit.BackoffWindow
   alias Tinkex.SamplingClient
   alias Tinkex.Types.{ModelInput, SampleResponse, SamplingParams}
 
@@ -73,6 +73,51 @@ defmodule Tinkex.SamplingClientTest do
     assert is_reference(entry.request_id_counter)
     assert is_pid(entry.dispatch)
     assert entry.http_pool == config.http_pool
+  end
+
+  test "maps retry_config options into retry policy and settings", %{
+    bypass: bypass,
+    config: config
+  } do
+    Bypass.expect(bypass, fn conn ->
+      {:ok, _body, conn} = Plug.Conn.read_body(conn)
+
+      case conn.request_path do
+        "/api/v1/create_sampling_session" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"sampling_session_id":"sample-retry"}))
+      end
+    end)
+
+    {:ok, client} =
+      SamplingClient.start_link(
+        session_id: "sess-retry",
+        sampling_client_id: 0,
+        base_model: "base",
+        config: config,
+        retry_config: [
+          max_retries: 3,
+          base_delay_ms: 100,
+          max_delay_ms: 200,
+          jitter_pct: 0.0,
+          progress_timeout_ms: 10_000,
+          max_connections: 5,
+          enable_retry_logic: false
+        ]
+      )
+
+    [{_, entry}] = :ets.lookup(:tinkex_sampling_clients, {:config, client})
+
+    assert entry.retry_config.enable_retry_logic == false
+    assert entry.retry_config.max_connections == 5
+
+    policy = entry.retry_config.policy
+    assert policy.max_attempts == 3
+    assert policy.progress_timeout_ms == 10_000
+    assert policy.backoff.base_ms == 100
+    assert policy.backoff.max_ms == 200
+    assert policy.backoff.jitter_strategy == :none
   end
 
   test "sample uses ETS config and returns typed response", %{bypass: bypass, config: config} do
@@ -156,7 +201,7 @@ defmodule Tinkex.SamplingClientTest do
 
     {:ok, task} = SamplingClient.sample(client, prompt, params)
     assert {:error, %Tinkex.Error{status: 429}} = Task.await(task, 5_000)
-    assert RateLimiter.should_backoff?(entry.rate_limiter)
+    assert BackoffWindow.should_backoff?(entry.rate_limiter)
 
     backoff_until = :atomics.get(entry.rate_limiter, 1)
     assert_in_delta(backoff_until - start_ms, 1_000, 300)

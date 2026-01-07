@@ -366,7 +366,7 @@ defmodule Tinkex.ServiceClientTest do
     GenServer.stop(svc)
   end
 
-  test "multiple service clients do not interfere", %{config: config} do
+  test "multiple service clients do not interfere", %{config: %Config{} = config} do
     bypass1 = Bypass.open()
     bypass2 = Bypass.open()
 

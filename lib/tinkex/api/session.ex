@@ -23,7 +23,13 @@ defmodule Tinkex.API.Session do
   def create(request, opts) do
     client = Tinkex.API.client_module(opts)
 
-    client.post("/api/v1/create_session", request, Keyword.put(opts, :pool_type, :session))
+    client.post(
+      "/api/v1/create_session",
+      request,
+      opts
+      |> Keyword.put(:pool_type, :session)
+      |> Keyword.put(:endpoint_id, :create_session)
+    )
   end
 
   @doc """
@@ -62,6 +68,10 @@ defmodule Tinkex.API.Session do
       |> Keyword.put(:timeout, 10_000)
       |> Keyword.put(:max_retries, 0)
 
-    client.post("/api/v1/session_heartbeat", request, opts)
+    client.post(
+      "/api/v1/session_heartbeat",
+      request,
+      Keyword.put(opts, :endpoint_id, :session_heartbeat)
+    )
   end
 end
