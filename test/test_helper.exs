@@ -16,9 +16,6 @@ ExUnit.configure(exclude: [slow: true])
 
 System.put_env("TINKER_TELEMETRY", "0")
 
-Code.require_file("support/recovery_stubs.exs", __DIR__)
-Code.require_file("support/recovery_mocks.exs", __DIR__)
-
 telemetry_handler = "supertester-phase2"
 event_name = [:supertester, :concurrent, :scenario, :stop]
 

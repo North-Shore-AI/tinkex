@@ -40,7 +40,6 @@ defmodule Tinkex.Env do
       proxy_headers: proxy_headers(env),
       default_headers: default_headers(env),
       default_query: default_query(env),
-      http_client: http_client(env),
       http_pool: http_pool(env),
       otel_propagate: otel_propagate(env)
     }
@@ -204,19 +203,6 @@ defmodule Tinkex.Env do
   end
 
   @doc """
-  Get custom HTTP client module from environment.
-
-  Set `TINKEX_HTTP_CLIENT` to a module name (e.g., `Tinkex.API`).
-  """
-  @spec http_client(env_source()) :: module() | nil
-  def http_client(env \\ :system) do
-    env
-    |> fetch("TINKEX_HTTP_CLIENT")
-    |> normalize()
-    |> parse_module()
-  end
-
-  @doc """
   Get HTTP pool name from environment.
 
   Set `TINKEX_HTTP_POOL` to an atom name (e.g., `Tinkex.HTTP.Pool`).
@@ -316,25 +302,6 @@ defmodule Tinkex.Env do
   defp normalize_value(nil), do: nil
   defp normalize_value(value) when is_binary(value), do: value
   defp normalize_value(value), do: to_string(value)
-
-  defp parse_module(nil), do: nil
-
-  defp parse_module(value) when is_binary(value) do
-    trimmed = String.trim(value)
-
-    candidate =
-      if String.starts_with?(trimmed, "Elixir.") do
-        trimmed
-      else
-        "Elixir." <> trimmed
-      end
-
-    try do
-      String.to_existing_atom(candidate)
-    rescue
-      ArgumentError -> nil
-    end
-  end
 
   defp parse_atom(nil), do: nil
 

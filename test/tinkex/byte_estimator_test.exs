@@ -3,12 +3,13 @@ defmodule Tinkex.ByteEstimatorTest do
 
   alias Tinkex.ByteEstimator
 
+  alias Tinkex.ModelInput
+
   alias Tinkex.Types.{
     Datum,
     EncodedTextChunk,
     ImageAssetPointerChunk,
     ImageChunk,
-    ModelInput,
     TensorData
   }
 

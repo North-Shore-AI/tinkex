@@ -17,8 +17,10 @@ defmodule Tinkex.EnvTest do
       "TINKEX_POLL_BACKOFF" => "exponential",
       "TINKEX_DEFAULT_HEADERS" => ~s({"Authorization":"Bearer token","x-extra":"1"}),
       "TINKEX_DEFAULT_QUERY" => ~s({"mode":"fast","flag":true}),
-      "TINKEX_HTTP_CLIENT" => "Tinkex.API",
-      "TINKEX_HTTP_POOL" => "custom_pool"
+      "TINKEX_HTTP_POOL" => "custom_pool",
+      "TINKEX_POOL_SIZE" => "200",
+      "TINKEX_POOL_COUNT" => "5",
+      "TINKEX_OTEL_PROPAGATE" => "true"
     }
 
     snapshot = Env.snapshot(env)
@@ -35,8 +37,10 @@ defmodule Tinkex.EnvTest do
     assert snapshot.poll_backoff == :exponential
     assert snapshot.default_headers == %{"Authorization" => "Bearer token", "x-extra" => "1"}
     assert snapshot.default_query == %{"flag" => "true", "mode" => "fast"}
-    assert snapshot.http_client == Tinkex.API
     assert snapshot.http_pool == :custom_pool
+    assert snapshot.pool_size == 200
+    assert snapshot.pool_count == 5
+    assert snapshot.otel_propagate
   end
 
   test "defaults and blank values" do

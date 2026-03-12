@@ -82,3 +82,44 @@
 - Restored error categorization defaults and added header dump logging with redaction in `Tinkex.API`.
 - Re-ran Phase 4 suite: `mix test`, seeds 12345/99999/1, `mix dialyzer`, `mix credo --strict`, `mix compile --warnings-as-errors`.
 - Verified pristine + foundation: `mix test`, `mix dialyzer`, `mix credo --strict`, `mix compile --warnings-as-errors`.
+
+## Hexagonal Refactor Progress (Phase 5-6)
+
+### Changes
+- Removed `lib/tinkex/ports/`, `lib/tinkex/adapters/`, and `lib/tinkex/context.ex`; Tinkex now builds `Pristine.Core.Context` via `Tinkex.Config.context/2`.
+- Added manifest-driven client: `lib/tinkex/manifest.yaml` (JSON content) + `lib/tinkex/generated/` (`Tinkex.Generated` namespace).
+- Moved domain-only modules to `lib/tinkex/domain/{tokenizer,byte_estimator,model_input}.ex`; removed legacy API/CLI/recovery code.
+- Added `Tinkex.Config.client/2` convenience for generated client creation.
+- Pruned tests to config/env/error/domain/types; removed legacy API/CLI/telemetry/recovery coverage.
+- Simplified tokenizer implementation (no ETS cache; Kimi requires local model/config paths).
+
+### New module locations
+- Context: `Pristine.Core.Context` (built via `Tinkex.Config.context/2`).
+- Generated API client/resources/types: `lib/tinkex/generated/`.
+- Domain-specific code: `lib/tinkex/domain/`.
+
+### Commands
+- Regenerate client: `mix pristine.generate --manifest lib/tinkex/manifest.yaml --output lib/tinkex/generated --namespace Tinkex.Generated`
+- Phase 6 verification (tinkex): `mix test`, `mix test --seed 12345`, `mix test --seed 99999`, `mix test --seed 1`, `mix dialyzer`, `mix credo --strict`, `mix compile --warnings-as-errors`
+- Pristine/foundation verification: run the same suite in `../../n/pristine` and `../../n/foundation`.
+
+### Gotchas
+- `manifest.yaml` is JSON; keep it valid JSON even with `.yaml` suffix.
+- Kimi tokenization requires `:tiktoken_model_path` + `:tokenizer_config_path` (no HuggingFace download fallback).
+- OTel header propagation is optional via `TINKEX_OTEL_PROPAGATE`; headers are injected in `Tinkex.Config`.
+
+## Manifest Reimagining Docs (2026-01-06)
+
+### Changes
+- Added manifest design series under `docs/20260106/manifest-reimagining/` with context, surface inventory, feature decomposition, manifest schema proposal, Pristine architecture plan, generation/compat guidance, and TDD plan.
+- Added Pristine review + full implementation plan under `docs/20260106/manifest-reimagining/pristine-implementation/`.
+
+### New docs
+- `docs/20260106/manifest-reimagining/00_context_and_goals.md`
+- `docs/20260106/manifest-reimagining/01_surface_inventory.md`
+- `docs/20260106/manifest-reimagining/02_feature_decomposition.md`
+- `docs/20260106/manifest-reimagining/03_manifest_schema.md`
+- `docs/20260106/manifest-reimagining/04_pristine_architecture.md`
+- `docs/20260106/manifest-reimagining/05_generation_and_compat.md`
+- `docs/20260106/manifest-reimagining/06_tdd_and_validation.md`
+- `docs/20260106/manifest-reimagining/pristine-implementation/plan.md`

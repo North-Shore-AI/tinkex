@@ -5,7 +5,8 @@ defmodule Tinkex.Types.Datum do
   Mirrors Python tinker.types.Datum.
   """
 
-  alias Tinkex.Types.{ModelInput, TensorData}
+  alias Tinkex.ModelInput
+  alias Tinkex.Types.TensorData
 
   @enforce_keys [:model_input]
   @derive {Jason.Encoder, only: [:model_input, :loss_fn_inputs]}

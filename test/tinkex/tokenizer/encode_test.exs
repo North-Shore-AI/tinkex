@@ -1,21 +1,7 @@
 defmodule Tinkex.Tokenizer.EncodeTest do
-  use Supertester.ExUnitFoundation,
-    isolation: :full_isolation,
-    ets_isolation: [:tinkex_tokenizers]
-
-  alias Supertester.ETSIsolation
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
+  alias Tinkex.Generated.Types.{GetInfoResponse, ModelData}
   alias Tinkex.Tokenizer
-  alias Tinkex.Types.{GetInfoResponse, ModelData}
-  alias Tokenizers.Tokenizer, as: HFTokenizer
-
-  setup %{isolation_context: ctx} do
-    {:ok, _} = Application.ensure_all_started(:tokenizers)
-
-    tokenizer_cache = Map.fetch!(ctx.isolated_ets_tables, :tinkex_tokenizers)
-    {:ok, _} = ETSIsolation.inject_table(Tokenizer, :cache_table, tokenizer_cache, create: false)
-
-    {:ok, tokenizer_cache: tokenizer_cache}
-  end
 
   test "get_tokenizer_id uses training client info when provided" do
     parent = self()
@@ -47,27 +33,5 @@ defmodule Tinkex.Tokenizer.EncodeTest do
   test "get_tokenizer_id applies Llama-3 hack" do
     assert "thinkingmachineslabinc/meta-llama-3-tokenizer" ==
              Tokenizer.get_tokenizer_id("meta-llama/Llama-3-8B-Instruct")
-  end
-
-  @tag :network
-  test "encode caches tokenizer by resolved id", %{tokenizer_cache: tokenizer_cache} do
-    counter = start_supervised!({Agent, fn -> 0 end})
-
-    load_fun = fn id, opts ->
-      Agent.update(counter, &(&1 + 1))
-      HFTokenizer.from_pretrained(id, opts)
-    end
-
-    model_name = "gpt2"
-
-    assert {:ok, ids1} = Tokenizer.encode("cache test", model_name, load_fun: load_fun)
-    assert is_list(ids1)
-    assert Enum.all?(ids1, &is_integer/1)
-
-    assert {:ok, ids2} = Tokenizer.encode("cache test", model_name, load_fun: load_fun)
-    assert ids1 == ids2
-
-    assert Agent.get(counter, & &1) == 1
-    assert [{^model_name, _}] = :ets.lookup(tokenizer_cache, model_name)
   end
 end

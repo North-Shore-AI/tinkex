@@ -17,7 +17,6 @@ defmodule Tinkex.MixProject do
       elixir: "~> 1.18",
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
-      escript: [main_module: Tinkex.CLI],
       dialyzer: [plt_add_apps: [:ex_unit]],
       deps: deps(),
       docs: docs(),
@@ -29,17 +28,12 @@ defmodule Tinkex.MixProject do
     ]
   end
 
-  def cli do
-    [preferred_envs: [dialyzer: :test]]
-  end
-
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
 
   # Run "mix help compile.app" to learn about applications.
   def application do
     [
-      mod: {Tinkex.Application, []},
       extra_applications: [:logger]
     ]
   end
@@ -78,7 +72,7 @@ defmodule Tinkex.MixProject do
       # Development
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:ex_doc, "~> 0.30", only: :dev, runtime: false},
+      {:ex_doc, "~> 0.40.0", only: :dev, runtime: false},
 
       # Regularization primitives
       {:nx_penalties, "~> 0.1.2"},
@@ -86,7 +80,7 @@ defmodule Tinkex.MixProject do
       # Testing
       {:mox, "~> 1.0", only: :test},
       {:bypass, "~> 2.1", only: :test},
-      {:supertester, "~> 0.4.0", only: :test}
+      {:supertester, "~> 0.5.1", only: :test}
     ]
   end
 

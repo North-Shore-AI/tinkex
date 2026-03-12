@@ -1,8 +1,8 @@
-defmodule Tinkex.Types.ModelInputFromTextTest do
+defmodule Tinkex.ModelInputFromTextTest do
   use Supertester.ExUnitFoundation, isolation: :full_isolation
 
-  alias Tinkex.{Error, Tokenizer}
-  alias Tinkex.Types.{EncodedTextChunk, ModelInput}
+  alias Tinkex.{Error, ModelInput, Tokenizer}
+  alias Tinkex.Types.EncodedTextChunk
 
   setup do
     ensure_table()

@@ -1,30 +1,46 @@
 defmodule Tinkex do
   @moduledoc """
-  Documentation for `Tinkex`.
+  Thin entrypoint for configuring and using the Tinkex SDK.
   """
 
-  alias Tinkex.API
+  alias Pristine.Core.Context
+  alias Tinkex.Config
 
   @doc """
-  Hello world.
-
-  ## Examples
-
-      iex> Tinkex.hello()
-      :world
-
+  Build a `Tinkex.Config` from runtime options.
   """
-  def hello do
-    :world
+  @spec config(keyword()) :: Config.t()
+  def config(opts \\ []) do
+    Config.new(opts)
   end
 
-  @doc false
-  def http_post(path, body, opts \\ []) do
-    API.post(path, body, opts)
+  @doc """
+  Build a generated client from a config or keyword options.
+  """
+  @spec client(Config.t() | keyword()) :: Tinkex.Generated.Client.t()
+  def client(%Config{} = config), do: Config.client(config)
+  def client(opts) when is_list(opts), do: config(opts) |> Config.client()
+
+  @doc """
+  Build a generated client from a config plus override options.
+  """
+  @spec client(Config.t(), keyword()) :: Tinkex.Generated.Client.t()
+  def client(%Config{} = config, opts) when is_list(opts) do
+    Config.client(config, opts)
   end
 
-  @doc false
-  def http_get(path, opts \\ []) do
-    API.get(path, opts)
+  @doc """
+  Build a Pristine context from a config or keyword options.
+  """
+  @spec context(Config.t() | keyword()) :: Context.t()
+  def context(%Config{} = config), do: Config.context(config)
+  def context(opts) when is_list(opts), do: config(opts) |> Config.context()
+
+  @doc """
+  Build a Pristine context from a config plus override options.
+  """
+  @spec context(Config.t(), keyword()) :: Context.t()
+  def context(%Config{} = config, opts) when is_list(opts) do
+    Config.context(config, opts)
   end
 end

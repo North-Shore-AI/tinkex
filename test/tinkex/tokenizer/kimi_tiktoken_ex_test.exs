@@ -1,25 +1,11 @@
 defmodule Tinkex.Tokenizer.KimiTikTokenExTest do
-  use Supertester.ExUnitFoundation,
-    isolation: :full_isolation,
-    ets_isolation: [:tinkex_tokenizers]
-
-  alias Supertester.ETSIsolation
+  use Supertester.ExUnitFoundation, isolation: :full_isolation
   alias TiktokenEx.Encoding, as: TikEncoding
   alias Tinkex.Tokenizer
 
   @kimi_tokenizer "moonshotai/Kimi-K2-Thinking"
 
-  setup %{isolation_context: ctx} do
-    {:ok, _} = Application.ensure_all_started(:tinkex)
-    tokenizer_cache = Map.fetch!(ctx.isolated_ets_tables, :tinkex_tokenizers)
-    {:ok, _} = ETSIsolation.inject_table(Tokenizer, :cache_table, tokenizer_cache, create: false)
-
-    {:ok, tokenizer_cache: tokenizer_cache}
-  end
-
-  test "uses tiktoken_ex for Kimi encode/decode (no network)", %{
-    tokenizer_cache: tokenizer_cache
-  } do
+  test "uses tiktoken_ex for Kimi encode/decode (no network)" do
     with_tmp_dir(fn dir ->
       model_path = Path.join(dir, "tiktoken.model")
       config_path = Path.join(dir, "tokenizer_config.json")
@@ -58,11 +44,6 @@ defmodule Tinkex.Tokenizer.KimiTikTokenExTest do
 
       assert {:ok, [6, 0, 1, 2]} = Tokenizer.encode("<|bos|>Say", @kimi_tokenizer, opts)
       assert {:ok, "<|bos|>Say"} = Tokenizer.decode([6, 0, 1, 2], @kimi_tokenizer, opts)
-
-      assert [{@kimi_tokenizer, %TikEncoding{}}] =
-               :ets.lookup(tokenizer_cache, @kimi_tokenizer)
-
-      {:ok, _} = Tokenizer.get_or_load_tokenizer(@kimi_tokenizer, opts)
     end)
   end
 

@@ -1,287 +1,1706 @@
 {
-  "name": "Tinkex",
-  "version": "0.3.4",
   "base_url": "https://tinker.thinkingmachines.dev/services/tinker-prod",
   "endpoints": [
     {
+      "body_type": "raw",
       "id": "raw_get",
       "method": "GET",
-      "path": "/",
-      "body_type": "raw"
+      "path": "/"
     },
     {
+      "body_type": "json",
       "id": "raw_post",
       "method": "POST",
-      "path": "/",
-      "body_type": "json"
+      "path": "/"
     },
     {
+      "body_type": "raw",
       "id": "raw_delete",
       "method": "DELETE",
-      "path": "/",
-      "body_type": "raw"
+      "path": "/"
     },
     {
+      "body_type": "raw",
+      "headers": {
+        "accept": "text/event-stream"
+      },
       "id": "raw_stream_get",
       "method": "GET",
       "path": "/",
-      "body_type": "raw",
-      "streaming": true,
       "stream_format": "sse",
-      "headers": {
-        "accept": "text/event-stream"
-      }
+      "streaming": true
     },
     {
+      "body_type": "json",
+      "headers": {
+        "accept": "text/event-stream"
+      },
       "id": "raw_stream_post",
       "method": "POST",
       "path": "/",
-      "body_type": "json",
-      "streaming": true,
       "stream_format": "sse",
-      "headers": {
-        "accept": "text/event-stream"
-      }
+      "streaming": true
     },
     {
       "id": "create_session",
+      "idempotency": true,
       "method": "POST",
       "path": "/api/v1/create_session",
-      "resource": "service",
-      "idempotency": true
+      "request": "CreateSessionRequest",
+      "resource": "session",
+      "response": "CreateSessionResponse"
     },
     {
       "id": "session_heartbeat",
       "method": "POST",
       "path": "/api/v1/session_heartbeat",
-      "resource": "service"
+      "request": "SessionHeartbeatRequest",
+      "resource": "session",
+      "response": "SessionHeartbeatResponse",
+      "retry": "no_retry",
+      "timeout": 10000
     },
     {
       "id": "heartbeat",
       "method": "POST",
       "path": "/api/v1/heartbeat",
-      "resource": "service"
+      "resource": "session"
     },
     {
       "id": "create_sampling_session",
       "method": "POST",
       "path": "/api/v1/create_sampling_session",
-      "resource": "service"
+      "request": "CreateSamplingSessionRequest",
+      "resource": "session",
+      "response": "CreateSamplingSessionResponse"
     },
     {
+      "body_type": "raw",
       "id": "get_server_capabilities",
       "method": "GET",
       "path": "/api/v1/get_server_capabilities",
-      "resource": "service"
+      "resource": "session",
+      "response": "GetServerCapabilitiesResponse"
     },
     {
+      "body_type": "raw",
       "id": "healthz",
       "method": "GET",
       "path": "/api/v1/healthz",
-      "resource": "service"
+      "resource": "session",
+      "response": "HealthResponse"
     },
     {
       "id": "create_model",
+      "idempotency": true,
       "method": "POST",
       "path": "/api/v1/create_model",
-      "resource": "models",
-      "idempotency": true,
-      "async": true,
-      "poll_endpoint": "retrieve_future"
+      "request": "CreateModelRequest",
+      "resource": "session",
+      "response": "CreateModelResponse"
     },
     {
       "id": "get_info",
+      "idempotency": true,
       "method": "POST",
       "path": "/api/v1/get_info",
-      "resource": "models",
-      "idempotency": true
+      "request": "GetInfoRequest",
+      "resource": "training",
+      "response": "GetInfoResponse"
     },
     {
+      "async": true,
       "id": "unload_model",
+      "idempotency": true,
       "method": "POST",
       "path": "/api/v1/unload_model",
-      "resource": "models",
-      "idempotency": true,
-      "async": true,
-      "poll_endpoint": "retrieve_future"
+      "poll_endpoint": "retrieve_future",
+      "request": "UnloadModelRequest",
+      "resource": "training",
+      "response": "GenericMap"
     },
     {
+      "async": true,
       "id": "load_weights",
+      "idempotency": true,
       "method": "POST",
       "path": "/api/v1/load_weights",
-      "resource": "weights",
-      "idempotency": true,
-      "async": true,
-      "poll_endpoint": "retrieve_future"
+      "poll_endpoint": "retrieve_future",
+      "request": "LoadWeightsRequest",
+      "resource": "training",
+      "response": "GenericMap"
     },
     {
+      "async": true,
       "id": "save_weights",
+      "idempotency": true,
       "method": "POST",
       "path": "/api/v1/save_weights",
-      "resource": "weights",
-      "idempotency": true,
-      "async": true,
-      "poll_endpoint": "retrieve_future"
+      "poll_endpoint": "retrieve_future",
+      "request": "SaveWeightsRequest",
+      "resource": "training",
+      "response": "GenericMap"
     },
     {
+      "async": true,
       "id": "save_weights_for_sampler",
+      "idempotency": true,
       "method": "POST",
       "path": "/api/v1/save_weights_for_sampler",
-      "resource": "weights",
-      "idempotency": true,
-      "async": true,
-      "poll_endpoint": "retrieve_future"
+      "poll_endpoint": "retrieve_future",
+      "request": "SaveWeightsForSamplerRequest",
+      "resource": "training",
+      "response": "GenericMap"
     },
     {
       "id": "weights_info",
       "method": "POST",
       "path": "/api/v1/weights_info",
-      "resource": "rest"
+      "request": "WeightsInfoRequest",
+      "resource": "training",
+      "response": "WeightsInfoResponse"
     },
     {
       "id": "retrieve_future",
+      "idempotency": true,
       "method": "POST",
       "path": "/api/v1/retrieve_future",
+      "request": "FutureRetrieveRequest",
       "resource": "futures",
-      "idempotency": true
+      "response": "FutureRetrieveResponse"
     },
     {
+      "async": true,
       "id": "forward",
+      "idempotency": true,
       "method": "POST",
       "path": "/api/v1/forward",
+      "poll_endpoint": "retrieve_future",
+      "request": "ForwardRequest",
       "resource": "training",
-      "idempotency": true,
-      "async": true,
-      "poll_endpoint": "retrieve_future"
+      "response": "GenericMap",
+      "transform": {
+        "drop_nil?": true
+      }
     },
     {
+      "async": true,
       "id": "forward_backward",
+      "idempotency": true,
       "method": "POST",
       "path": "/api/v1/forward_backward",
+      "poll_endpoint": "retrieve_future",
+      "request": "ForwardBackwardRequest",
       "resource": "training",
-      "idempotency": true,
-      "async": true,
-      "poll_endpoint": "retrieve_future"
+      "response": "GenericMap",
+      "transform": {
+        "drop_nil?": true
+      }
     },
     {
+      "async": true,
       "id": "optim_step",
+      "idempotency": true,
       "method": "POST",
       "path": "/api/v1/optim_step",
+      "poll_endpoint": "retrieve_future",
+      "request": "OptimStepRequest",
       "resource": "training",
-      "idempotency": true,
-      "async": true,
-      "poll_endpoint": "retrieve_future"
+      "response": "GenericMap",
+      "transform": {
+        "drop_nil?": true
+      }
     },
     {
       "id": "asample",
+      "idempotency": true,
       "method": "POST",
       "path": "/api/v1/asample",
+      "request": "SampleRequest",
       "resource": "sampling",
-      "idempotency": true,
-      "async": true,
-      "poll_endpoint": "retrieve_future"
+      "response": "SampleResponse",
+      "retry": "no_retry",
+      "transform": {
+        "drop_nil?": true
+      }
     },
     {
+      "headers": {
+        "accept": "text/event-stream"
+      },
       "id": "stream_sample",
       "method": "POST",
       "path": "/api/v1/stream_sample",
+      "request": "SampleRequest",
       "resource": "sampling",
-      "streaming": true,
       "stream_format": "sse",
-      "headers": {
-        "accept": "text/event-stream"
+      "streaming": true,
+      "transform": {
+        "drop_nil?": true
       }
     },
     {
       "id": "telemetry",
+      "idempotency": true,
       "method": "POST",
       "path": "/api/v1/telemetry",
+      "request": "TelemetrySendRequest",
       "resource": "telemetry",
-      "idempotency": true
+      "response": "TelemetryResponse"
     },
     {
+      "body_type": "raw",
       "id": "get_session",
       "method": "GET",
       "path": "/api/v1/sessions/:session_id",
-      "resource": "rest"
+      "resource": "training",
+      "response": "GetSessionResponse"
     },
     {
+      "body_type": "raw",
       "id": "list_sessions",
       "method": "GET",
       "path": "/api/v1/sessions",
-      "resource": "rest"
+      "resource": "training",
+      "response": "ListSessionsResponse"
     },
     {
+      "body_type": "raw",
       "id": "list_checkpoints",
       "method": "GET",
       "path": "/api/v1/training_runs/:run_id/checkpoints",
-      "resource": "rest"
+      "resource": "training",
+      "response": "CheckpointsListResponse"
     },
     {
+      "body_type": "raw",
       "id": "list_user_checkpoints",
       "method": "GET",
       "path": "/api/v1/checkpoints",
-      "resource": "rest"
+      "resource": "training",
+      "response": "CheckpointsListResponse"
     },
     {
+      "body_type": "raw",
       "id": "get_checkpoint_archive_url",
       "method": "GET",
       "path": "/api/v1/training_runs/:run_id/checkpoints/:checkpoint_id/archive",
-      "resource": "rest"
+      "resource": "training",
+      "response": "CheckpointArchiveUrlResponse"
     },
     {
+      "body_type": "raw",
       "id": "delete_checkpoint",
       "method": "DELETE",
       "path": "/api/v1/training_runs/:run_id/checkpoints/:checkpoint_id",
-      "resource": "rest"
+      "resource": "training",
+      "response": "GenericMap"
     },
     {
       "id": "publish_checkpoint",
       "method": "POST",
       "path": "/api/v1/training_runs/:run_id/checkpoints/:checkpoint_id/publish",
-      "resource": "rest"
+      "resource": "training",
+      "response": "GenericMap"
     },
     {
+      "body_type": "raw",
       "id": "unpublish_checkpoint",
       "method": "DELETE",
       "path": "/api/v1/training_runs/:run_id/checkpoints/:checkpoint_id/publish",
-      "resource": "rest"
+      "resource": "training",
+      "response": "GenericMap"
     },
     {
+      "body_type": "raw",
       "id": "get_sampler",
       "method": "GET",
       "path": "/api/v1/samplers/:sampler_id",
-      "resource": "rest"
+      "resource": "sampling",
+      "response": "GetSamplerResponse"
     },
     {
+      "body_type": "raw",
       "id": "get_training_run",
       "method": "GET",
       "path": "/api/v1/training_runs/:training_run_id",
-      "resource": "rest"
+      "resource": "training",
+      "response": "TrainingRun"
     },
     {
+      "body_type": "raw",
       "id": "list_training_runs",
       "method": "GET",
       "path": "/api/v1/training_runs",
-      "resource": "rest"
+      "resource": "training",
+      "response": "TrainingRunsResponse"
     },
     {
+      "body_type": "raw",
       "id": "meta",
       "method": "GET",
       "path": "/api/v1/meta",
-      "resource": "misc"
+      "resource": "training",
+      "response": "GenericMap"
     },
     {
+      "body_type": "raw",
+      "headers": {
+        "accept": "text/event-stream"
+      },
       "id": "events",
       "method": "GET",
       "path": "/api/v1/events",
-      "resource": "streaming",
-      "streaming": true,
+      "resource": "telemetry",
       "stream_format": "sse",
-      "headers": {
-        "accept": "text/event-stream"
-      }
+      "streaming": true
     }
   ],
-  "types": {}
+  "name": "Tinkex",
+  "retry_policies": {
+    "no_retry": {
+      "max_retries": 0
+    }
+  },
+  "types": {
+    "TelemetrySeverity": {
+      "type": "any"
+    },
+    "SampledSequence": {
+      "fields": {
+        "logprobs": {
+          "required": false,
+          "type": "any"
+        },
+        "stop_reason": {
+          "required": false,
+          "type": "any"
+        },
+        "tokens": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "ModelInput": {
+      "fields": {
+        "chunks": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "OptimStepRequest": {
+      "fields": {
+        "adam_params": {
+          "required": true,
+          "type": "any"
+        },
+        "model_id": {
+          "required": true,
+          "type": "any"
+        },
+        "seq_id": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "RegularizerOutput": {
+      "fields": {
+        "contribution": {
+          "required": true,
+          "type": "any"
+        },
+        "custom": {
+          "required": false,
+          "type": "any"
+        },
+        "grad_norm": {
+          "required": false,
+          "type": "any"
+        },
+        "grad_norm_weighted": {
+          "required": false,
+          "type": "any"
+        },
+        "name": {
+          "required": true,
+          "type": "any"
+        },
+        "value": {
+          "required": true,
+          "type": "any"
+        },
+        "weight": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "TryAgainResponse": {
+      "fields": {
+        "queue_state": {
+          "required": true,
+          "type": "any"
+        },
+        "queue_state_reason": {
+          "required": false,
+          "type": "any"
+        },
+        "request_id": {
+          "required": true,
+          "type": "any"
+        },
+        "retry_after_ms": {
+          "required": false,
+          "type": "any"
+        },
+        "type": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "SessionHeartbeatResponse": {
+      "fields": {
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "GetSamplerResponse": {
+      "fields": {
+        "base_model": {
+          "required": true,
+          "type": "any"
+        },
+        "model_path": {
+          "required": false,
+          "type": "any"
+        },
+        "sampler_id": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "GetSessionResponse": {
+      "fields": {
+        "sampler_ids": {
+          "required": false,
+          "type": "any"
+        },
+        "training_run_ids": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "TelemetryResponse": {
+      "fields": {
+        "status": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "LossFnType": {
+      "type": "any"
+    },
+    "SaveWeightsForSamplerRequest": {
+      "fields": {
+        "model_id": {
+          "required": true,
+          "type": "any"
+        },
+        "path": {
+          "required": false,
+          "type": "any"
+        },
+        "sampling_session_seq_id": {
+          "required": false,
+          "type": "any"
+        },
+        "seq_id": {
+          "required": false,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "TelemetrySendRequest": {
+      "fields": {
+        "events": {
+          "required": true,
+          "type": "any"
+        },
+        "platform": {
+          "required": true,
+          "type": "any"
+        },
+        "sdk_version": {
+          "required": true,
+          "type": "any"
+        },
+        "session_id": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "RegularizerSpec": {
+      "fields": {
+        "async": {
+          "required": false,
+          "type": "any"
+        },
+        "fn": {
+          "required": true,
+          "type": "any"
+        },
+        "name": {
+          "required": true,
+          "type": "any"
+        },
+        "weight": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "GetServerCapabilitiesResponse": {
+      "fields": {
+        "supported_models": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "GetInfoRequest": {
+      "fields": {
+        "model_id": {
+          "required": true,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "CreateSamplingSessionResponse": {
+      "fields": {
+        "sampling_session_id": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "ImageAssetPointerChunk": {
+      "fields": {
+        "expected_tokens": {
+          "required": false,
+          "type": "any"
+        },
+        "format": {
+          "required": true,
+          "type": "any"
+        },
+        "location": {
+          "required": true,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "ModelData": {
+      "fields": {
+        "arch": {
+          "required": false,
+          "type": "any"
+        },
+        "model_name": {
+          "required": false,
+          "type": "any"
+        },
+        "tokenizer_id": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "ForwardBackwardOutput": {
+      "fields": {
+        "loss_fn_output_type": {
+          "required": true,
+          "type": "any"
+        },
+        "loss_fn_outputs": {
+          "required": false,
+          "type": "any"
+        },
+        "metrics": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "UnloadModelRequest": {
+      "fields": {
+        "model_id": {
+          "required": true,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "TelemetryBatch": {
+      "fields": {
+        "events": {
+          "required": false,
+          "type": "any"
+        },
+        "metadata": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "FutureCompletedResponse": {
+      "fields": {
+        "result": {
+          "required": true,
+          "type": "any"
+        },
+        "status": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "SamplingParams": {
+      "fields": {
+        "max_tokens": {
+          "required": false,
+          "type": "any"
+        },
+        "seed": {
+          "required": false,
+          "type": "any"
+        },
+        "stop": {
+          "required": false,
+          "type": "any"
+        },
+        "temperature": {
+          "required": false,
+          "type": "any"
+        },
+        "top_k": {
+          "required": false,
+          "type": "any"
+        },
+        "top_p": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "ImageChunk": {
+      "fields": {
+        "data": {
+          "required": true,
+          "type": "any"
+        },
+        "expected_tokens": {
+          "required": false,
+          "type": "any"
+        },
+        "format": {
+          "required": true,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "LoraConfig": {
+      "fields": {
+        "rank": {
+          "required": false,
+          "type": "any"
+        },
+        "seed": {
+          "required": false,
+          "type": "any"
+        },
+        "train_attn": {
+          "required": false,
+          "type": "any"
+        },
+        "train_mlp": {
+          "required": false,
+          "type": "any"
+        },
+        "train_unembed": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "TelemetryGenericEvent": {
+      "fields": {
+        "event": {
+          "required": false,
+          "type": "any"
+        },
+        "event_data": {
+          "required": false,
+          "type": "any"
+        },
+        "event_id": {
+          "required": true,
+          "type": "any"
+        },
+        "event_name": {
+          "required": true,
+          "type": "any"
+        },
+        "event_session_index": {
+          "required": true,
+          "type": "any"
+        },
+        "severity": {
+          "required": false,
+          "type": "any"
+        },
+        "timestamp": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "CreateModelResponse": {
+      "fields": {
+        "model_id": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "SampleResponse": {
+      "fields": {
+        "prompt_logprobs": {
+          "required": false,
+          "type": "any"
+        },
+        "sequences": {
+          "required": false,
+          "type": "any"
+        },
+        "topk_prompt_logprobs": {
+          "required": false,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "CreateSessionResponse": {
+      "fields": {
+        "error_message": {
+          "required": false,
+          "type": "any"
+        },
+        "info_message": {
+          "required": false,
+          "type": "any"
+        },
+        "session_id": {
+          "required": true,
+          "type": "any"
+        },
+        "warning_message": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "Checkpoint": {
+      "fields": {
+        "checkpoint_id": {
+          "required": false,
+          "type": "any"
+        },
+        "checkpoint_type": {
+          "required": false,
+          "type": "any"
+        },
+        "public": {
+          "required": false,
+          "type": "any"
+        },
+        "size_bytes": {
+          "required": false,
+          "type": "any"
+        },
+        "time": {
+          "required": false,
+          "type": "any"
+        },
+        "tinker_path": {
+          "required": false,
+          "type": "any"
+        },
+        "training_run_id": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "CustomLossOutput": {
+      "fields": {
+        "base_loss": {
+          "required": false,
+          "type": "any"
+        },
+        "loss_total": {
+          "required": true,
+          "type": "any"
+        },
+        "regularizer_total": {
+          "required": false,
+          "type": "any"
+        },
+        "regularizers": {
+          "required": false,
+          "type": "any"
+        },
+        "total_grad_norm": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "LoadWeightsResponse": {
+      "fields": {
+        "path": {
+          "required": false,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "WeightsInfoResponse": {
+      "fields": {
+        "base_model": {
+          "required": true,
+          "type": "any"
+        },
+        "is_lora": {
+          "required": true,
+          "type": "any"
+        },
+        "lora_rank": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "CheckpointArchiveUrlResponse": {
+      "fields": {
+        "expires": {
+          "required": false,
+          "type": "any"
+        },
+        "url": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "HealthResponse": {
+      "fields": {
+        "status": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "TypeAliases": {
+      "type": "any"
+    },
+    "TelemetryEventType": {
+      "type": "any"
+    },
+    "TelemetryEvent": {
+      "type": "any"
+    },
+    "TensorDtype": {
+      "type": "any"
+    },
+    "SaveWeightsForSamplerResponse": {
+      "fields": {
+        "path": {
+          "required": false,
+          "type": "any"
+        },
+        "sampling_session_id": {
+          "required": false,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "OptimStepResponse": {
+      "fields": {
+        "metrics": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "SaveWeightsRequest": {
+      "fields": {
+        "model_id": {
+          "required": true,
+          "type": "any"
+        },
+        "path": {
+          "required": false,
+          "type": "any"
+        },
+        "seq_id": {
+          "required": false,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "CheckpointsListResponse": {
+      "fields": {
+        "checkpoints": {
+          "required": false,
+          "type": "any"
+        },
+        "cursor": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "WeightsInfoRequest": {
+      "fields": {
+        "tinker_path": {
+          "required": true,
+          "type": "string"
+        }
+      },
+      "type": "object"
+    },
+    "TelemetrySessionStartEvent": {
+      "fields": {
+        "event": {
+          "required": false,
+          "type": "any"
+        },
+        "event_id": {
+          "required": true,
+          "type": "any"
+        },
+        "event_session_index": {
+          "required": true,
+          "type": "any"
+        },
+        "severity": {
+          "required": false,
+          "type": "any"
+        },
+        "timestamp": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "Datum": {
+      "fields": {
+        "loss_fn_inputs": {
+          "required": false,
+          "type": "any"
+        },
+        "model_input": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "ForwardBackwardInput": {
+      "fields": {
+        "data": {
+          "required": true,
+          "type": "any"
+        },
+        "loss_fn": {
+          "required": true,
+          "type": "any"
+        },
+        "loss_fn_config": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "GenericMap": {
+      "type": "map"
+    },
+    "TrainingRunsResponse": {
+      "fields": {
+        "cursor": {
+          "required": false,
+          "type": "any"
+        },
+        "training_runs": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "FutureRetrieveResponse": {
+      "type": "any"
+    },
+    "SupportedModel": {
+      "fields": {
+        "arch": {
+          "required": false,
+          "type": "any"
+        },
+        "model_id": {
+          "required": false,
+          "type": "any"
+        },
+        "model_name": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "CreateModelRequest": {
+      "fields": {
+        "base_model": {
+          "required": true,
+          "type": "any"
+        },
+        "lora_config": {
+          "required": false,
+          "type": "any"
+        },
+        "model_seq_id": {
+          "required": true,
+          "type": "any"
+        },
+        "session_id": {
+          "required": true,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        },
+        "user_metadata": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "SampleStreamChunk": {
+      "fields": {
+        "event_type": {
+          "required": false,
+          "type": "any"
+        },
+        "finish_reason": {
+          "required": false,
+          "type": "any"
+        },
+        "index": {
+          "required": false,
+          "type": "any"
+        },
+        "logprob": {
+          "required": false,
+          "type": "any"
+        },
+        "token": {
+          "required": false,
+          "type": "any"
+        },
+        "token_id": {
+          "required": false,
+          "type": "any"
+        },
+        "total_tokens": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "TrainingRun": {
+      "fields": {
+        "base_model": {
+          "required": true,
+          "type": "any"
+        },
+        "corrupted": {
+          "required": false,
+          "type": "any"
+        },
+        "is_lora": {
+          "required": true,
+          "type": "any"
+        },
+        "last_checkpoint": {
+          "required": false,
+          "type": "any"
+        },
+        "last_request_time": {
+          "required": true,
+          "type": "any"
+        },
+        "last_sampler_checkpoint": {
+          "required": false,
+          "type": "any"
+        },
+        "lora_rank": {
+          "required": false,
+          "type": "any"
+        },
+        "model_owner": {
+          "required": true,
+          "type": "any"
+        },
+        "training_run_id": {
+          "required": true,
+          "type": "any"
+        },
+        "user_metadata": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "ForwardRequest": {
+      "fields": {
+        "forward_input": {
+          "required": true,
+          "type": "any"
+        },
+        "model_id": {
+          "required": true,
+          "type": "any"
+        },
+        "seq_id": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "EncodedTextChunk": {
+      "fields": {
+        "tokens": {
+          "required": true,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "CreateSamplingSessionRequest": {
+      "fields": {
+        "base_model": {
+          "required": false,
+          "type": "any"
+        },
+        "model_path": {
+          "required": false,
+          "type": "any"
+        },
+        "sampling_session_seq_id": {
+          "required": true,
+          "type": "any"
+        },
+        "session_id": {
+          "required": true,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "RequestFailedResponse": {
+      "fields": {
+        "category": {
+          "required": true,
+          "type": "any"
+        },
+        "error": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "AdamParams": {
+      "fields": {
+        "beta1": {
+          "required": false,
+          "type": "any"
+        },
+        "beta2": {
+          "required": false,
+          "type": "any"
+        },
+        "eps": {
+          "required": false,
+          "type": "any"
+        },
+        "grad_clip_norm": {
+          "required": false,
+          "type": "any"
+        },
+        "learning_rate": {
+          "required": false,
+          "type": "any"
+        },
+        "weight_decay": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "FutureRetrieveRequest": {
+      "fields": {
+        "request_id": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "ListSessionsResponse": {
+      "fields": {
+        "sessions": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "LoadWeightsRequest": {
+      "fields": {
+        "model_id": {
+          "required": true,
+          "type": "any"
+        },
+        "optimizer": {
+          "required": false,
+          "type": "any"
+        },
+        "path": {
+          "required": true,
+          "type": "any"
+        },
+        "seq_id": {
+          "required": false,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "SessionHeartbeatRequest": {
+      "fields": {
+        "session_id": {
+          "required": true,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "Cursor": {
+      "fields": {
+        "limit": {
+          "required": true,
+          "type": "any"
+        },
+        "offset": {
+          "required": true,
+          "type": "any"
+        },
+        "total_count": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "ForwardBackwardRequest": {
+      "fields": {
+        "forward_backward_input": {
+          "required": true,
+          "type": "any"
+        },
+        "model_id": {
+          "required": true,
+          "type": "any"
+        },
+        "seq_id": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "TelemetryUnhandledExceptionEvent": {
+      "fields": {
+        "error_message": {
+          "required": true,
+          "type": "any"
+        },
+        "error_type": {
+          "required": true,
+          "type": "any"
+        },
+        "event": {
+          "required": false,
+          "type": "any"
+        },
+        "event_id": {
+          "required": true,
+          "type": "any"
+        },
+        "event_session_index": {
+          "required": true,
+          "type": "any"
+        },
+        "severity": {
+          "required": false,
+          "type": "any"
+        },
+        "timestamp": {
+          "required": true,
+          "type": "any"
+        },
+        "traceback": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "SampleRequest": {
+      "fields": {
+        "base_model": {
+          "required": false,
+          "type": "any"
+        },
+        "model_path": {
+          "required": false,
+          "type": "any"
+        },
+        "num_samples": {
+          "required": false,
+          "type": "any"
+        },
+        "prompt": {
+          "required": true,
+          "type": "any"
+        },
+        "prompt_logprobs": {
+          "required": false,
+          "type": "any"
+        },
+        "sampling_params": {
+          "required": true,
+          "type": "any"
+        },
+        "sampling_session_id": {
+          "required": false,
+          "type": "any"
+        },
+        "seq_id": {
+          "required": false,
+          "type": "any"
+        },
+        "topk_prompt_logprobs": {
+          "required": false,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "SaveWeightsResponse": {
+      "fields": {
+        "path": {
+          "required": true,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "StopReason": {
+      "type": "any"
+    },
+    "GetInfoResponse": {
+      "fields": {
+        "is_lora": {
+          "required": false,
+          "type": "any"
+        },
+        "lora_rank": {
+          "required": false,
+          "type": "any"
+        },
+        "model_data": {
+          "required": true,
+          "type": "any"
+        },
+        "model_id": {
+          "required": true,
+          "type": "any"
+        },
+        "model_name": {
+          "required": false,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "CreateSessionRequest": {
+      "fields": {
+        "sdk_version": {
+          "required": true,
+          "type": "any"
+        },
+        "tags": {
+          "required": true,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        },
+        "user_metadata": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "QueueState": {
+      "type": "any"
+    },
+    "TensorData": {
+      "fields": {
+        "data": {
+          "required": false,
+          "type": "any"
+        },
+        "dtype": {
+          "required": false,
+          "type": "any"
+        },
+        "shape": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "ParsedCheckpointTinkerPath": {
+      "fields": {
+        "checkpoint_id": {
+          "required": true,
+          "type": "any"
+        },
+        "checkpoint_type": {
+          "required": true,
+          "type": "any"
+        },
+        "tinker_path": {
+          "required": true,
+          "type": "any"
+        },
+        "training_run_id": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "UnloadModelResponse": {
+      "fields": {
+        "model_id": {
+          "required": true,
+          "type": "any"
+        },
+        "type": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "FuturePendingResponse": {
+      "fields": {
+        "status": {
+          "required": false,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "FutureFailedResponse": {
+      "fields": {
+        "error": {
+          "required": true,
+          "type": "any"
+        },
+        "status": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "TelemetrySessionEndEvent": {
+      "fields": {
+        "duration": {
+          "required": false,
+          "type": "any"
+        },
+        "event": {
+          "required": false,
+          "type": "any"
+        },
+        "event_id": {
+          "required": true,
+          "type": "any"
+        },
+        "event_session_index": {
+          "required": true,
+          "type": "any"
+        },
+        "severity": {
+          "required": false,
+          "type": "any"
+        },
+        "timestamp": {
+          "required": true,
+          "type": "any"
+        }
+      },
+      "type": "object"
+    },
+    "RequestErrorCategory": {
+      "type": "any"
+    }
+  },
+  "version": "0.3.4"
 }
