@@ -109,8 +109,16 @@ defmodule Tinkex.CLIManagementTest do
        %{
          "base_model" => "meta-llama/Llama-3.1-8B",
          "is_lora" => true,
-         "lora_rank" => 16
+         "lora_rank" => 16,
+         "train_attn" => true,
+         "train_mlp" => false,
+         "train_unembed" => true
        }}
+    end
+
+    def set_checkpoint_ttl_from_tinker_path(_config, path, ttl_seconds) do
+      send(self(), {:set_ttl, path, ttl_seconds})
+      {:ok, %{"status" => "updated"}}
     end
 
     def publish_checkpoint(_config, path) do
@@ -132,8 +140,8 @@ defmodule Tinkex.CLIManagementTest do
       end
     end
 
-    def list_training_runs(_config, limit, offset) do
-      send(self(), {:runs, limit, offset})
+    def list_training_runs(_config, limit, offset, opts \\ []) do
+      send(self(), {:runs, limit, offset, opts})
 
       slice =
         @runs
@@ -151,10 +159,29 @@ defmodule Tinkex.CLIManagementTest do
        }}
     end
 
-    def get_training_run(_config, run_id) do
-      send(self(), {:run_info, run_id})
+    def get_training_run(_config, run_id, opts \\ []) do
+      send(self(), {:run_info, run_id, opts})
 
       {:ok, Enum.find(@runs, fn run -> run["training_run_id"] == run_id end)}
+    end
+  end
+
+  defmodule RestClientStub do
+    def new(session_id, config) do
+      {:rest_client_stub, session_id, config}
+    end
+  end
+
+  defmodule HuggingFaceStub do
+    def push_checkpoint_adapter(rest_client, checkpoint_path, opts) do
+      send(self(), {:push_hf, rest_client, checkpoint_path, opts})
+
+      {:ok,
+       %{
+         repo_id: "user/adapter-repo",
+         revision: opts[:revision] || "main",
+         public: opts[:public] || false
+       }}
     end
   end
 
@@ -255,11 +282,91 @@ defmodule Tinkex.CLIManagementTest do
     assert data["size_bytes"] == 1024
     assert data["public"] == true
     assert data["time"] == "2025-11-26T00:00:00Z"
+    assert data["expires_at"] == nil
     assert data["base_model"] == "meta-llama/Llama-3.1-8B"
     assert data["is_lora"] == true
     assert data["lora_rank"] == 16
+    assert data["train_attn"] == true
+    assert data["train_mlp"] == false
+    assert data["train_unembed"] == true
 
     assert_received {:weights_info, "tinker://run-a/weights/0001"}
+  end
+
+  test "checkpoint set-ttl updates checkpoint ttl" do
+    stdout =
+      capture_io(fn ->
+        assert {:ok, %{command: :checkpoint, action: :set_ttl, ttl_seconds: 3600}} =
+                 CLI.run([
+                   "checkpoint",
+                   "set-ttl",
+                   "tinker://run-a/weights/0001",
+                   "--ttl",
+                   "3600",
+                   "--api-key",
+                   "tml-k",
+                   "--format",
+                   "json"
+                 ])
+      end)
+
+    data = Jason.decode!(stdout)
+    assert data["path"] == "tinker://run-a/weights/0001"
+    assert data["ttl_seconds"] == 3600
+    assert data["remove"] == false
+
+    assert_received {:set_ttl, "tinker://run-a/weights/0001", 3600}
+  end
+
+  test "checkpoint set-ttl supports --remove" do
+    output =
+      capture_io(fn ->
+        assert {:ok, %{command: :checkpoint, action: :set_ttl, ttl_seconds: nil, remove: true}} =
+                 CLI.run([
+                   "checkpoint",
+                   "set-ttl",
+                   "tinker://run-a/weights/0001",
+                   "--remove",
+                   "--api-key",
+                   "tml-k"
+                 ])
+      end)
+
+    assert output =~ "Removed expiration for tinker://run-a/weights/0001"
+    assert_received {:set_ttl, "tinker://run-a/weights/0001", nil}
+  end
+
+  test "checkpoint set-ttl requires exactly one of --ttl or --remove" do
+    stderr =
+      capture_io(:stderr, fn ->
+        assert {:error, %Tinkex.Error{type: :validation, category: :user}} =
+                 CLI.run([
+                   "checkpoint",
+                   "set-ttl",
+                   "tinker://run-a/weights/0001",
+                   "--api-key",
+                   "tml-k"
+                 ])
+      end)
+
+    assert stderr =~ "Must specify either --ttl <seconds> or --remove"
+
+    stderr =
+      capture_io(:stderr, fn ->
+        assert {:error, %Tinkex.Error{type: :validation, category: :user}} =
+                 CLI.run([
+                   "checkpoint",
+                   "set-ttl",
+                   "tinker://run-a/weights/0001",
+                   "--ttl",
+                   "3600",
+                   "--remove",
+                   "--api-key",
+                   "tml-k"
+                 ])
+      end)
+
+    assert stderr =~ "Cannot specify both --ttl and --remove"
   end
 
   test "checkpoint publish and unpublish dispatch to API" do
@@ -433,8 +540,8 @@ defmodule Tinkex.CLIManagementTest do
     assert first["last_checkpoint"]["checkpoint_id"] == "ckpt-run-a-1"
     assert first["last_sampler_checkpoint"]["checkpoint_id"] == "ckpt-run-a-2"
 
-    assert_received {:runs, 2, 0}
-    assert_received {:runs, 1, 2}
+    assert_received {:runs, 2, 0, []}
+    assert_received {:runs, 1, 2, []}
   end
 
   test "run info surfaces owner, lora rank, status, checkpoints, and metadata" do
@@ -450,6 +557,102 @@ defmodule Tinkex.CLIManagementTest do
     assert output =~ "Status: Failed"
     assert output =~ "Last training checkpoint: ckpt-run-a-2"
     assert output =~ "Metadata: stage=dev"
-    assert_received {:run_info, "run-b"}
+    assert_received {:run_info, "run-b", []}
+  end
+
+  test "run commands forward access_scope" do
+    capture_io(fn ->
+      assert {:ok, %{command: :run, action: :list}} =
+               CLI.run([
+                 "run",
+                 "list",
+                 "--api-key",
+                 "tml-k",
+                 "--access-scope",
+                 "accessible",
+                 "--format",
+                 "json"
+               ])
+    end)
+
+    assert_received {:runs, 2, 0, [access_scope: "accessible"]}
+
+    capture_io(fn ->
+      assert {:ok, %{command: :run, action: :info, run_id: "run-a"}} =
+               CLI.run([
+                 "run",
+                 "info",
+                 "run-a",
+                 "--api-key",
+                 "tml-k",
+                 "--access-scope",
+                 "accessible"
+               ])
+    end)
+
+    assert_received {:run_info, "run-a", [access_scope: "accessible"]}
+  end
+
+  test "checkpoint push-hf dispatches to huggingface integration" do
+    Application.put_env(:tinkex, :cli_management_deps, %{
+      rest_api_module: RestStub,
+      rest_client_module: RestClientStub,
+      huggingface_module: HuggingFaceStub,
+      config_module: Tinkex.Config,
+      json_module: Jason,
+      checkpoint_page_size: 2,
+      run_page_size: 2
+    })
+
+    on_exit(fn -> Application.delete_env(:tinkex, :cli_management_deps) end)
+
+    stdout =
+      capture_io(fn ->
+        assert {:ok, %{command: :checkpoint, action: :push_hf, repo_id: "user/adapter-repo"}} =
+                 CLI.run([
+                   "checkpoint",
+                   "push-hf",
+                   "tinker://run-a/weights/0001",
+                   "--repo",
+                   "user/adapter-repo",
+                   "--public",
+                   "--revision",
+                   "ckpt-branch",
+                   "--commit-message",
+                   "Upload adapter",
+                   "--create-pr",
+                   "--allow-pattern",
+                   "*.json",
+                   "--allow-pattern",
+                   "*.safetensors",
+                   "--ignore-pattern",
+                   "checkpoint_complete",
+                   "--hf-token",
+                   "hf_secret",
+                   "--no-model-card",
+                   "--api-key",
+                   "tml-k",
+                   "--format",
+                   "json"
+                 ])
+      end)
+
+    data = Jason.decode!(stdout)
+    assert data["repo_id"] == "user/adapter-repo"
+    assert data["revision"] == "ckpt-branch"
+    assert data["public"] == true
+
+    assert_received {:push_hf, {:rest_client_stub, "cli", _config}, "tinker://run-a/weights/0001",
+                     opts}
+
+    assert opts[:repo_id] == "user/adapter-repo"
+    assert opts[:public] == true
+    assert opts[:revision] == "ckpt-branch"
+    assert opts[:commit_message] == "Upload adapter"
+    assert opts[:create_pr] == true
+    assert opts[:allow_patterns] == ["*.json", "*.safetensors"]
+    assert opts[:ignore_patterns] == ["checkpoint_complete"]
+    assert opts[:hf_token] == "hf_secret"
+    assert opts[:add_model_card] == false
   end
 end

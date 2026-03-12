@@ -12,9 +12,20 @@ Save a named checkpoint; the server returns a `tinker://` path you can store.
 IO.puts("Saved to: #{path}")
 ```
 
+To create an expiring checkpoint, pass `ttl_seconds:`:
+
+```elixir
+{:ok, task} =
+  Tinkex.TrainingClient.save_state(training_client, "checkpoint-001", ttl_seconds: 86_400)
+
+{:ok, %Tinkex.Types.SaveWeightsResponse{path: path}} = Task.await(task)
+```
+
 Tips:
 - Use descriptive names (e.g., `"epoch-3-loss-1.23"`).
 - Call periodically (every N steps or minutes) to bound loss of progress.
+- Use short TTLs for throwaway experiment checkpoints and remove expiration later through `RestClient.set_checkpoint_ttl_from_tinker_path/3` if you decide to keep one.
+- The same `ttl_seconds:` option is available on `TrainingClient.save_weights_for_sampler/3` when you want expiring sampler checkpoints instead of training checkpoints.
 
 ## Loading Checkpoints
 
@@ -69,7 +80,7 @@ To restore optimizer state as well, use the dedicated helper:
 Async variants are also available (`*_async/3`).
 
 What happens:
-1) Fetch checkpoint metadata (`base_model`, LoRA rank).
+1) Fetch checkpoint metadata (`base_model`, LoRA rank, and train flags when present).
 2) Start a new TrainingClient with matching config.
 3) Load weights (and optimizer if requested).
 

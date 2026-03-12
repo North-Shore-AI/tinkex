@@ -34,6 +34,10 @@ defmodule Tinkex.SamplingClientTest do
     end
   end
 
+  defmodule MockTokenizer do
+    defstruct [:id]
+  end
+
   setup :setup_http_client
 
   setup do
@@ -119,6 +123,79 @@ defmodule Tinkex.SamplingClientTest do
 
     {:ok, task} = SamplingClient.sample(self(), prompt, params)
     assert {:error, %Tinkex.Error{type: :validation}} = Task.await(task, 1_000)
+  end
+
+  test "get_tokenizer resolves tokenizer from sampler base_model", %{
+    bypass: bypass,
+    config: config
+  } do
+    unique_model = "custom-org/custom-model-#{System.unique_integer([:positive])}"
+
+    Bypass.expect_once(bypass, "GET", "/api/v1/samplers/sample-tokenizer", fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(
+        200,
+        Jason.encode!(%{sampler_id: "sample-tokenizer", base_model: unique_model})
+      )
+    end)
+
+    load_fun = fn tokenizer_id, _opts ->
+      send(self(), {:load_called, tokenizer_id})
+      {:ok, %MockTokenizer{id: tokenizer_id}}
+    end
+
+    {:ok, client} =
+      SamplingClient.start_link(
+        session_id: "sess-tokenizer",
+        sampling_client_id: 0,
+        base_model: "unused",
+        sampling_session_id: "sample-tokenizer",
+        config: config
+      )
+
+    assert {:ok, %MockTokenizer{id: ^unique_model}} =
+             SamplingClient.get_tokenizer(client, load_fun: load_fun)
+
+    assert_received {:load_called, ^unique_model}
+  end
+
+  test "get_tokenizer strips revision suffixes from sampler base_model", %{
+    bypass: bypass,
+    config: config
+  } do
+    unique_model = "custom-org/custom-model-#{System.unique_integer([:positive])}"
+
+    Bypass.expect_once(bypass, "GET", "/api/v1/samplers/sample-tokenizer-rev", fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(
+        200,
+        Jason.encode!(%{
+          sampler_id: "sample-tokenizer-rev",
+          base_model: "#{unique_model}:revision-123"
+        })
+      )
+    end)
+
+    load_fun = fn tokenizer_id, _opts ->
+      send(self(), {:load_called, tokenizer_id})
+      {:ok, %MockTokenizer{id: tokenizer_id}}
+    end
+
+    {:ok, client} =
+      SamplingClient.start_link(
+        session_id: "sess-tokenizer-rev",
+        sampling_client_id: 0,
+        base_model: "unused",
+        sampling_session_id: "sample-tokenizer-rev",
+        config: config
+      )
+
+    assert {:ok, %MockTokenizer{id: ^unique_model}} =
+             SamplingClient.get_tokenizer(client, load_fun: load_fun)
+
+    assert_received {:load_called, ^unique_model}
   end
 
   test "sets size-based backoff on 429", %{bypass: bypass, config: config} do

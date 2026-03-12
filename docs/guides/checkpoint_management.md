@@ -39,6 +39,15 @@ Save a named checkpoint during training:
 {:ok, %Tinkex.Types.SaveWeightsResponse{path: checkpoint_path}} = Task.await(task)
 ```
 
+Save an expiring checkpoint by passing a TTL in seconds:
+
+```elixir
+{:ok, task} =
+  Tinkex.TrainingClient.save_state(training_client, "checkpoint-001", ttl_seconds: 86_400)
+
+{:ok, %Tinkex.Types.SaveWeightsResponse{path: checkpoint_path}} = Task.await(task)
+```
+
 Load weights (without optimizer state) for transfer learning or evaluation:
 
 ```elixir
@@ -113,6 +122,7 @@ Enum.each(response.checkpoints, fn checkpoint ->
   IO.puts("Size: #{checkpoint.size_bytes} bytes")
   IO.puts("Public: #{checkpoint.public}")
   IO.puts("Created: #{checkpoint.time}")
+  IO.puts("Expires: #{checkpoint.expires_at || "never"}")
   IO.puts("")
 end)
 ```
@@ -146,7 +156,13 @@ end)
 Get all training runs with pagination:
 
 ```elixir
-{:ok, response} = Tinkex.RestClient.list_training_runs(rest_client, limit: 20, offset: 0)
+{:ok, response} =
+  Tinkex.RestClient.list_training_runs(
+    rest_client,
+    limit: 20,
+    offset: 0,
+    access_scope: "accessible"
+  )
 
 Enum.each(response.training_runs, fn run ->
   IO.puts("Run ID: #{run.training_run_id}")
@@ -169,7 +185,12 @@ end)
 Retrieve detailed information about a specific training run:
 
 ```elixir
-{:ok, run} = Tinkex.RestClient.get_training_run(rest_client, "run-abc123")
+{:ok, run} =
+  Tinkex.RestClient.get_training_run(
+    rest_client,
+    "run-abc123",
+    access_scope: "accessible"
+  )
 
 IO.puts("Base Model: #{run.base_model}")
 IO.puts("Is LoRA: #{run.is_lora}")
@@ -205,6 +226,29 @@ Get detailed information about a checkpoint, including base model and LoRA confi
 IO.puts("Base Model: #{weights_info.base_model}")
 IO.puts("Is LoRA: #{weights_info.is_lora}")
 IO.puts("LoRA Rank: #{weights_info.lora_rank}")
+IO.puts("Train attention: #{inspect(weights_info.train_attn)}")
+IO.puts("Train MLP: #{inspect(weights_info.train_mlp)}")
+IO.puts("Train unembed: #{inspect(weights_info.train_unembed)}")
+```
+
+### Update Checkpoint TTL
+
+Use the REST client to add or remove expiration after the checkpoint already exists:
+
+```elixir
+{:ok, _} =
+  Tinkex.RestClient.set_checkpoint_ttl_from_tinker_path(
+    rest_client,
+    "tinker://run-abc123/weights/0001",
+    86_400
+  )
+
+{:ok, _} =
+  Tinkex.RestClient.set_checkpoint_ttl_from_tinker_path(
+    rest_client,
+    "tinker://run-abc123/weights/0001",
+    nil
+  )
 ```
 
 ### Validate Checkpoint Compatibility
@@ -297,6 +341,9 @@ IO.puts("Expires at: #{inspect(url_response.expires)}")
 ```
 
 This URL can be used with external download tools or for programmatic access.
+Tinkex automatically retries short `503 Archive still being generated`
+responses before surfacing an error, so this helper is safe to call immediately
+after creating a checkpoint.
 
 If you already have IDs from the training run list, you can call the ID-based helpers instead:
 
@@ -387,7 +434,12 @@ IO.puts("Checkpoint deleted")
 Sessions group related training runs and samplers:
 
 ```elixir
-{:ok, session} = Tinkex.RestClient.get_session(rest_client, "session-xyz")
+{:ok, session} =
+  Tinkex.RestClient.get_session(
+    rest_client,
+    "session-xyz",
+    access_scope: "accessible"
+  )
 
 IO.puts("Training Runs: #{inspect(session.training_run_ids)}")
 IO.puts("Samplers: #{inspect(session.sampler_ids)}")
@@ -398,10 +450,16 @@ IO.puts("Samplers: #{inspect(session.sampler_ids)}")
 Get all sessions with pagination:
 
 ```elixir
-{:ok, response} = Tinkex.RestClient.list_sessions(rest_client, limit: 20, offset: 0)
+{:ok, response} =
+  Tinkex.RestClient.list_sessions(
+    rest_client,
+    limit: 20,
+    offset: 0,
+    access_scope: "accessible"
+  )
 
-Enum.each(response.sessions, fn session ->
-  IO.puts("Session ID: #{session.session_id}")
+Enum.each(response.sessions, fn session_id ->
+  IO.puts("Session ID: #{session_id}")
 end)
 ```
 
@@ -527,6 +585,22 @@ case Tinkex.RestClient.get_checkpoint_archive_url_by_tinker_path(rest_client, ch
     IO.puts("Checkpoint not available: #{inspect(error)}")
 end
 ```
+
+## CLI Helpers
+
+The CLI mirrors the REST helpers for common checkpoint lifecycle tasks:
+
+```bash
+./tinkex checkpoint info tinker://run-abc123/weights/0001 --api-key "$TINKER_API_KEY"
+./tinkex checkpoint set-ttl tinker://run-abc123/weights/0001 --ttl 86400 --api-key "$TINKER_API_KEY"
+./tinkex checkpoint set-ttl tinker://run-abc123/weights/0001 --remove --api-key "$TINKER_API_KEY"
+./tinkex checkpoint push-hf tinker://run-abc123/weights/0001 --repo your-user/my-adapter --hf-token "$HF_TOKEN" --api-key "$TINKER_API_KEY"
+```
+
+`checkpoint push-hf` resolves auth in this order: `--hf-token`, `HF_TOKEN`,
+`HUGGING_FACE_HUB_TOKEN`, then `HF_TOKEN_PATH` (defaulting to `$HF_HOME/token`).
+It also reuses the same checkpoint-archive helper, including the transient
+`503 Archive still being generated` retry behavior.
 
 ### 2. Use Pagination for Large Collections
 

@@ -76,6 +76,33 @@ defmodule Tinkex.ServiceClientTest do
     GenServer.stop(pid)
   end
 
+  test "start_link forwards config project_id during session creation", %{
+    bypass: bypass,
+    config: config,
+    manager: manager
+  } do
+    Bypass.expect_once(bypass, "POST", "/api/v1/create_session", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      payload = Jason.decode!(body)
+
+      assert payload["project_id"] == "project-service"
+
+      Conn.resp(conn, 200, ~s({"session_id":"service-session-project"}))
+    end)
+
+    {:ok, pid} =
+      ServiceClient.start_link(
+        config: %{config | project_id: "project-service"},
+        training_client_module: TrainingClientStub,
+        sampling_client_module: SamplingClientStub,
+        session_manager: manager
+      )
+
+    assert :sys.get_state(pid).session_id == "service-session-project"
+
+    GenServer.stop(pid)
+  end
+
   test "create_lora_training_client starts supervised child with sequencing", %{
     bypass: bypass,
     config: config,
@@ -281,6 +308,50 @@ defmodule Tinkex.ServiceClientTest do
     assert %LoraConfig{rank: 8} = state.lora_config
     assert state.model_seq_id == 0
     assert state.session_id == "service-session-5"
+
+    GenServer.stop(client)
+    GenServer.stop(svc)
+  end
+
+  test "create_training_client_from_state restores LoRA train flags from weights info", %{
+    bypass: bypass,
+    config: config,
+    manager: manager
+  } do
+    expect_create_session(bypass, "service-session-flags")
+
+    expect_weights_info(bypass, "tinker://run/weights/ckpt-flags", %{
+      "base_model" => "meta/flags-base",
+      "is_lora" => true,
+      "lora_rank" => 8,
+      "train_mlp" => false,
+      "train_attn" => true,
+      "train_unembed" => false
+    })
+
+    {:ok, svc} =
+      ServiceClient.start_link(
+        config: config,
+        training_client_module: TrainingClientLoadStub,
+        sampling_client_module: SamplingClientStub,
+        session_manager: manager
+      )
+
+    assert {:ok, client} =
+             ServiceClient.create_training_client_from_state(
+               svc,
+               "tinker://run/weights/ckpt-flags",
+               test_pid: self()
+             )
+
+    assert_receive {:load_state_called, "tinker://run/weights/ckpt-flags", _opts, state}, 2_000
+
+    assert %LoraConfig{
+             rank: 8,
+             train_mlp: false,
+             train_attn: true,
+             train_unembed: false
+           } = state.lora_config
 
     GenServer.stop(client)
     GenServer.stop(svc)

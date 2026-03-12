@@ -8,6 +8,7 @@ defmodule Tinkex.ConfigTest do
 
     def post(_path, _body, _opts), do: {:ok, %{}}
     def get(_path, _opts), do: {:ok, %{}}
+    def put(_path, _body, _opts), do: {:ok, %{}}
     def delete(_path, _opts), do: {:ok, %{}}
   end
 
@@ -55,6 +56,19 @@ defmodule Tinkex.ConfigTest do
     test "accepts user_metadata" do
       config = Config.new(api_key: "tml-test-key", user_metadata: %{user_id: "123"})
       assert config.user_metadata == %{user_id: "123"}
+    end
+
+    test "stores project_id from opts and app config" do
+      Application.put_env(:tinkex, :project_id, "project-app")
+
+      on_exit(fn ->
+        Application.delete_env(:tinkex, :project_id)
+      end)
+
+      assert Config.new(api_key: "tml-test-key").project_id == "project-app"
+
+      assert Config.new(api_key: "tml-test-key", project_id: "project-opt").project_id ==
+               "project-opt"
     end
 
     test "normalizes recovery policy maps" do

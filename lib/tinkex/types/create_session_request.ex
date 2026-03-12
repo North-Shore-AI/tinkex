@@ -6,13 +6,14 @@ defmodule Tinkex.Types.CreateSessionRequest do
   """
 
   @enforce_keys [:tags, :sdk_version]
-  @derive {Jason.Encoder, only: [:tags, :user_metadata, :sdk_version, :type]}
-  defstruct [:tags, :user_metadata, :sdk_version, type: "create_session"]
+  @derive {Jason.Encoder, only: [:tags, :user_metadata, :sdk_version, :project_id, :type]}
+  defstruct [:tags, :user_metadata, :sdk_version, :project_id, type: "create_session"]
 
   @type t :: %__MODULE__{
           tags: [String.t()],
           user_metadata: map() | nil,
           sdk_version: String.t(),
+          project_id: String.t() | nil,
           type: String.t()
         }
 end

@@ -29,6 +29,7 @@ defmodule Tinkex.SamplingClient do
 
   require Logger
 
+  alias Tinkex.API.Rest
   alias Tinkex.API.{Sampling, Service}
   alias Tinkex.QueueStateLogger
 
@@ -92,6 +93,23 @@ defmodule Tinkex.SamplingClient do
   @spec create_async(pid(), keyword()) :: Task.t()
   def create_async(service_client, opts \\ []) do
     Tinkex.ServiceClient.create_sampling_client_async(service_client, opts)
+  end
+
+  @doc """
+  Get a tokenizer for this sampling client's base model.
+
+  Resolves sampler metadata to discover the current base model, then reuses the
+  shared tokenizer cache and loading logic from `Tinkex.Tokenizer`.
+  """
+  @spec get_tokenizer(t(), keyword()) ::
+          {:ok, Tinkex.Tokenizer.handle()} | {:error, Error.t()}
+  def get_tokenizer(client, opts \\ []) do
+    sampler_fun = Keyword.get(opts, :sampler_fun, &get_sampler_default/1)
+
+    with {:ok, sampler} <- sampler_fun.(client),
+         tokenizer_id <- Tinkex.Tokenizer.get_tokenizer_id(sampler.base_model, nil, opts) do
+      Tinkex.Tokenizer.get_or_load_tokenizer(tokenizer_id, opts)
+    end
   end
 
   @doc """
@@ -395,6 +413,16 @@ defmodule Tinkex.SamplingClient do
   end
 
   defp validate_sampling_inputs(_base_model, _model_path), do: :ok
+
+  defp get_sampler_default(client) do
+    case :ets.lookup(:tinkex_sampling_clients, {:config, client}) do
+      [{{:config, ^client}, entry}] ->
+        Rest.get_sampler(entry.config, entry.sampling_session_id)
+
+      [] ->
+        {:error, Error.new(:validation, "SamplingClient not initialized")}
+    end
+  end
 
   defp resolve_sampling_session_id(
          nil,

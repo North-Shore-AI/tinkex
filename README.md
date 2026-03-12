@@ -6,19 +6,20 @@
 
 **Elixir SDK for the Tinker ML Training and Inference API**
 
-[![CI](https://github.com/North-Shore-AI/tinkex/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/North-Shore-AI/tinkex/actions/workflows/ci.yml)
+[![CI](https://github.com/North-Shore-AI/tinkex/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/North-Shore-AI/tinkex/actions/workflows/ci.yml)
 [![Hex.pm](https://img.shields.io/hexpm/v/tinkex.svg)](https://hex.pm/packages/tinkex)
 [![Docs](https://img.shields.io/badge/docs-hexdocs.pm-blue.svg)](https://hexdocs.pm/tinkex)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 
 Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-machines-lab/tinker), providing a functional, concurrent interface to the [Tinker](https://tinker-docs.thinkingmachines.ai/) distributed machine learning platform by [Thinking Machines Lab](https://thinkingmachines.ai/). It enables fine-tuning large language models using LoRA (Low-Rank Adaptation) and performing high-performance text generation.
 
-## 0.3.4 Highlights
+## 0.4.0 Highlights
 
-- **Streaming Sampling**: New `SamplingClient.sample_stream/4` function for real-time token streaming via SSE. Process tokens incrementally as they are generated.
-- **OpenTelemetry Integration**: Opt-in W3C Trace Context propagation (`traceparent`/`tracestate` headers). Enable with `otel_propagate: true` or `TINKEX_OTEL_PROPAGATE=true`.
-- **Circuit Breaker**: Per-endpoint circuit breaker pattern via `Tinkex.CircuitBreaker` and `Tinkex.CircuitBreaker.Registry` for resilient API calls.
-- **Future Polling (Python SDK Parity)**: Polling loop handles 408/5xx/connection errors internally with backoff and uses a 45s per-request poll timeout (overall poll timeout defaults to infinity).
+- **Checkpoint lifecycle parity**: checkpoint TTLs, parsed `expires_at`, CLI `checkpoint set-ttl`, and richer checkpoint/run inspection output.
+- **Wider REST visibility**: `access_scope: "owned" | "accessible"` is supported across session and training-run reads, including CLI run management.
+- **Tokenizer/runtime parity**: `SamplingClient.get_tokenizer/2`, tokenizer revision normalization, and weights-info train flags for checkpoint restores.
+- **Safer futures**: metadata-only fallback, malformed transient `400` retries, and bounded response-byte budgeting for large future payloads.
+- **Hugging Face export**: CLI `checkpoint push-hf` uploads adapter checkpoints with token-file/env/flag auth resolution and LFS support.
 
 ## Features
 
@@ -32,7 +33,7 @@ Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-
 - **Circuit Breaker**: `Tinkex.CircuitBreaker` and `Tinkex.CircuitBreaker.Registry` for resilient API calls with automatic failure detection and recovery
 - **OpenTelemetry**: Opt-in W3C Trace Context propagation for distributed tracing across services
 - **ServiceClient**: Manage models, sessions, and service operations
-- **RestClient**: List sessions, enumerate user checkpoints, fetch archive URLs, and delete checkpoints
+- **RestClient**: List sessions, inspect checkpoints, update checkpoint TTLs, widen reads with `access_scope`, and fetch archive URLs
 - **CheckpointDownload**: Memory-efficient streaming downloads with O(1) memory usage and optional progress reporting
 - **Async/Concurrent**: Built on Elixir's actor model for efficient concurrent operations
 - **Type Safety**: Leverages Elixir typespecs and pattern matching
@@ -42,7 +43,7 @@ Tinkex is an Elixir port of the [Tinker Python SDK](https://github.com/thinking-
 - **Metrics Aggregation**: Built-in `Tinkex.Metrics` for counters, gauges, and latency percentiles with snapshot/export helpers
 - **Session lifecycle resilience**: `SessionManager.stop_session/2` waits for heartbeat cleanup, heartbeats use the canonical `/api/v1/session_heartbeat` path, and sustained heartbeat failures now surface as warnings (after ~2 minutes by default) instead of silently dropping sessions.
 - **Queue observability**: Sampling and training clients expose queue observers that feed `Future.poll/2`, emitting debounced warnings with human-readable rate limit or capacity reasons and telemetry for queue state changes and future errors/timeouts (including HTTP 410 “expired promise” handling).
-- **REST metadata & inspection APIs**: New endpoints surface samplers, weights metadata, and training runs while the SDK exposes `GetSamplerResponse`, `WeightsInfoResponse`, `ImageChunk.expected_tokens`, `LoadWeightsRequest.optimizer`, and the `:cispo`/`:dro` `LossFnType` tags for richer load/save tooling.
+- **REST metadata & inspection APIs**: Sampler, weights, session, and training-run reads now surface checkpoint expiration, train flags, and `access_scope` parity where the backend supports it.
 - **Checkpoint persistence**: `TrainingClient.save_state/3`, `TrainingClient.load_state/3`, `TrainingClient.load_state_with_optimizer/3`, and `ServiceClient.create_training_client_from_state/3` enable saving checkpoints and resuming training with optimizer state.
 - **Recovery automation (opt-in)**: `Tinkex.Recovery.Policy` + `Monitor` + `Executor` restart corrupted runs from checkpoints with callbacks, telemetry, and bounded concurrency; defaults off.
 - **Multipart uploads**: The `:files` option builds multipart/form-data bodies automatically (path and tuple normalization, bracketed form fields, boundary generation, and tuple metadata) while preserving JSON requests when no files are present; includes a runnable multipart example and path-based helpers.
@@ -60,6 +61,7 @@ Tinkex is an independent, community-maintained Elixir SDK for the Tinker API. It
 - Kimi K2 tokenization: `docs/guides/kimi_k2_tokenization.md` (live example: `examples/kimi_k2_sampling_live.exs`)
 - Custom loss training (per-datum logprobs, backend gradients): `docs/guides/custom_loss_training.md` and `mix run examples/custom_loss_training.exs`
 - Training persistence: `docs/guides/training_persistence.md` (live example: `examples/training_persistence_live.exs`)
+- Checkpoint management + Hub export: `docs/guides/checkpoint_management.md` and `docs/guides/cli_guide.md`
 - Recovery automation (opt-in restarts): `docs/guides/recovery.md`
 - Save-and-sample convenience: `mix run examples/save_weights_and_sample.exs` demonstrates `TrainingClient.save_weights_and_get_sampling_client_sync/2` (requires `TINKER_API_KEY`)
 - Multipart uploads: `docs/guides/file_uploads.md` (live helper: `mix run examples/file_upload_multipart.exs`; uploads `examples/uploads/sample_upload.bin` by default, override via `TINKER_UPLOAD_FILE`)
@@ -71,7 +73,7 @@ Add `tinkex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:tinkex, "~> 0.3.4"}
+    {:tinkex, "~> 0.4.0"}
   ]
 end
 ```
@@ -332,8 +334,26 @@ Use the `RestClient` for synchronous session and checkpoint management, and `Che
 {:ok, sessions} = Tinkex.RestClient.list_sessions(rest, limit: 10)
 IO.inspect(sessions.sessions, label: "sessions")
 
+{:ok, runs} = Tinkex.RestClient.list_training_runs(rest, limit: 20, access_scope: "accessible")
+IO.inspect(Enum.map(runs.training_runs, & &1.training_run_id), label: "accessible runs")
+
 {:ok, checkpoints} = Tinkex.RestClient.list_user_checkpoints(rest, limit: 20)
 IO.inspect(Enum.map(checkpoints.checkpoints, & &1.tinker_path), label: "checkpoints")
+
+{:ok, _ttl_update} =
+  Tinkex.RestClient.set_checkpoint_ttl_from_tinker_path(
+    rest,
+    "tinker://run-123/weights/0001",
+    86_400
+  )
+
+{:ok, archive} =
+  Tinkex.RestClient.get_checkpoint_archive_url_by_tinker_path(
+    rest,
+    "tinker://run-123/weights/0001"
+  )
+
+IO.puts("Archive URL expires at #{archive.expires}")
 
 # Download with streaming (O(1) memory usage)
 {:ok, download} =
@@ -673,6 +693,25 @@ MIX_ENV=prod mix escript.build   # produces ./tinkex
 
 The command starts a ServiceClient, creates a LoRA training client, saves weights for sampling, and writes a metadata JSON to `--output` (including `model_id`, `weights_path` and timestamp). The raw weights are stored by the service; the CLI only writes metadata locally. See `./tinkex checkpoint --help` for the full option list.
 
+Manage checkpoint expiration or export a checkpoint adapter to Hugging Face:
+
+```bash
+./tinkex checkpoint set-ttl tinker://run-123/weights/0001 \
+  --ttl 86400 \
+  --api-key "$TINKER_API_KEY"
+
+./tinkex checkpoint push-hf tinker://run-123/weights/0001 \
+  --repo your-user/tinker-llama-adapter \
+  --hf-token "$HF_TOKEN" \
+  --public \
+  --api-key "$TINKER_API_KEY"
+```
+
+`checkpoint push-hf` resolves auth in this order: `--hf-token`, `HF_TOKEN`,
+`HUGGING_FACE_HUB_TOKEN`, then `HF_TOKEN_PATH` (defaulting to `$HF_HOME/token`).
+Checkpoint archive URL helpers also retry short `503 Archive still being generated`
+responses before surfacing an error.
+
 Generate text with a sampling client:
 
 ```bash
@@ -685,7 +724,7 @@ Generate text with a sampling client:
   --api-key "$TINKER_API_KEY"
 ```
 
-Pass `--prompt-file` to load a prompt from disk (plain text or a JSON array of token IDs), `--json` to print the full sample response payload, and `--output <path>` to write the generation output to a file instead of stdout.
+Pass `--prompt-file` to load a prompt from disk (plain text or a JSON array of token IDs), `--json` to print the full sample response payload, and `--output <path>` to write the generation output to a file instead of stdout. Run-management commands also accept `--access-scope accessible` when you need shared run visibility.
 
 Check build metadata:
 

@@ -10,6 +10,7 @@ Tinkex follows an async-by-default design where long-running operations (samplin
 - Implements exponential backoff with configurable timeouts
 - Emits telemetry events for queue state transitions **and** future errors/timeouts
 - Supports custom observers via the `QueueStateObserver` behaviour
+- Handles metadata-only completions by re-fetching the full payload behind a shared 5 MB byte budget per `{base_url, api_key}`
 
 This approach decouples request initiation from result retrieval, enabling concurrent operations without blocking your application.
 
@@ -25,8 +26,10 @@ When you call a Tinkex API that creates a long-running request (e.g., `SamplingC
    - `%FutureCompletedResponse{}` → poll returns `{:ok, result}`
    - `%FuturePendingResponse{}` → sleep with exponential backoff, retry
    - `%FutureFailedResponse{}` → categorize error, retry or fail
+   - `%FutureCompletedMetadataResponse{}` → acquire response budget, then re-request the full payload
    - `%TryAgainResponse{}` → emit queue state telemetry, sleep, retry
-   - HTTP 410 (expired promise) → treated as retryable; recreate the request
+   - HTTP 410 (expired promise) → surfaced as an error telling the caller to submit a new request
+   - Malformed transient HTTP 400s → retried a few times before surfacing as failures
 4. Client awaits the task to get the final result
 
 **Backoff strategy:**
@@ -66,6 +69,33 @@ task = Future.poll("req-abc123",
 - `:queue_state_observer` — module implementing `QueueStateObserver` behaviour
 - `:telemetry_metadata` — additional metadata for telemetry events
 - `:sleep_fun` — custom sleep function for testing (default: `&Process.sleep/1`)
+- `:poll_backoff` — backoff policy for polling retries on 408/5xx (`:exponential`, `{:exponential, initial_ms, max_ms}`, or a 1-arity function)
+
+You can also enable polling backoff globally through config or env fallback:
+
+```elixir
+config = Tinkex.Config.new(poll_backoff: :exponential)
+# or export TINKEX_POLL_BACKOFF=exponential
+```
+
+## Metadata-only fallback
+
+`Future.poll/2` starts by asking the server for a lightweight status check with
+`allow_metadata_only: true`. When the server responds with:
+
+- `%FutureCompletedMetadataResponse{status: "complete_metadata", response_payload_size: bytes}`
+
+the client acquires that many bytes from a shared `ResponseByteLimiter`, then
+re-polls the same request with `allow_metadata_only: false` to fetch the full
+payload. This keeps large future completions from stampeding memory when many
+requests finish at once.
+
+What to know:
+
+- The limiter is shared per `{base_url, api_key}` pair.
+- The current budget is 5 MB and is internal, not a public config knob.
+- Small futures complete in one round-trip; only metadata-only completions take
+  the extra fetch.
 
 ## Awaiting a Single Future
 

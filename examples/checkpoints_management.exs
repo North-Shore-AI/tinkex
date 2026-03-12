@@ -6,6 +6,7 @@ defmodule Tinkex.Examples.CheckpointsManagement do
   - List all user checkpoints
   - List checkpoints for a specific run
   - View checkpoint details
+  - Inspect checkpoint expiration metadata
   """
 
   alias Tinkex.{ServiceClient, RestClient, Config}
@@ -65,6 +66,7 @@ defmodule Tinkex.Examples.CheckpointsManagement do
           IO.puts("    Size: #{size}")
           IO.puts("    Public: #{ckpt.public}")
           IO.puts("    Created: #{ckpt.time}")
+          IO.puts("    Expires: #{ckpt.expires_at || "never"}")
           IO.puts("")
         end)
 
@@ -132,6 +134,7 @@ defmodule Tinkex.Examples.CheckpointsManagement do
       IO.puts("    Size: #{size}")
       IO.puts("    Public: #{ckpt.public}")
       IO.puts("    Created: #{ckpt.time}")
+      IO.puts("    Expires: #{ckpt.expires_at || "never"}")
       IO.puts("")
     end)
   end
@@ -145,6 +148,7 @@ defmodule Tinkex.Examples.CheckpointsManagement do
 
         Enum.each(response.checkpoints, fn ckpt ->
           IO.puts("  • #{ckpt.tinker_path}")
+          IO.puts("    Expires: #{ckpt.expires_at || "never"}")
         end)
 
       {:error, error} ->

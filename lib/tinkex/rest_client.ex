@@ -27,7 +27,7 @@ defmodule Tinkex.RestClient do
   """
 
   alias Tinkex.API.Rest
-  alias Tinkex.Config
+  alias Tinkex.{CheckpointTTL, Config, Error}
 
   alias Tinkex.Types.{
     CheckpointArchiveUrlResponse,
@@ -39,6 +39,8 @@ defmodule Tinkex.RestClient do
     TrainingRunsResponse,
     WeightsInfoResponse
   }
+
+  @access_scopes ~w[owned accessible]
 
   @type t :: %__MODULE__{
           session_id: String.t(),
@@ -72,11 +74,12 @@ defmodule Tinkex.RestClient do
       IO.inspect(response.training_run_ids)
       IO.inspect(response.sampler_ids)
   """
-  @spec get_session(t(), String.t()) :: {:ok, GetSessionResponse.t()} | {:error, Tinkex.Error.t()}
-  def get_session(%__MODULE__{config: config}, session_id) do
-    case Rest.get_session(config, session_id) do
-      {:ok, data} -> {:ok, GetSessionResponse.from_map(data)}
-      error -> error
+  @spec get_session(t(), String.t(), keyword()) ::
+          {:ok, GetSessionResponse.t()} | {:error, Tinkex.Error.t()}
+  def get_session(%__MODULE__{config: config}, session_id, opts \\ []) do
+    with {:ok, rest_opts} <- validate_access_scope(opts),
+         {:ok, data} <- Rest.get_session(config, session_id, rest_opts) do
+      {:ok, GetSessionResponse.from_map(data)}
     end
   end
 
@@ -95,12 +98,14 @@ defmodule Tinkex.RestClient do
   @spec list_sessions(t(), keyword()) ::
           {:ok, ListSessionsResponse.t()} | {:error, Tinkex.Error.t()}
   def list_sessions(%__MODULE__{config: config}, opts \\ []) do
-    limit = Keyword.get(opts, :limit, 20)
-    offset = Keyword.get(opts, :offset, 0)
+    with {:ok, rest_opts} <- validate_access_scope(opts) do
+      limit = Keyword.get(rest_opts, :limit, 20)
+      offset = Keyword.get(rest_opts, :offset, 0)
 
-    case Rest.list_sessions(config, limit, offset) do
-      {:ok, data} -> {:ok, ListSessionsResponse.from_map(data)}
-      error -> error
+      case Rest.list_sessions(config, limit, offset, rest_opts) do
+        {:ok, data} -> {:ok, ListSessionsResponse.from_map(data)}
+        error -> error
+      end
     end
   end
 
@@ -197,8 +202,14 @@ defmodule Tinkex.RestClient do
   """
   @spec get_checkpoint_archive_url(t(), String.t()) ::
           {:ok, CheckpointArchiveUrlResponse.t()} | {:error, Tinkex.Error.t()}
-  def get_checkpoint_archive_url(%__MODULE__{config: config}, checkpoint_path) do
-    case Rest.get_checkpoint_archive_url(config, checkpoint_path) do
+  def get_checkpoint_archive_url(client, checkpoint_path),
+    do: get_checkpoint_archive_url(client, checkpoint_path, [])
+
+  @spec get_checkpoint_archive_url(t(), String.t(), keyword()) ::
+          {:ok, CheckpointArchiveUrlResponse.t()} | {:error, Tinkex.Error.t()}
+  def get_checkpoint_archive_url(%__MODULE__{config: config}, checkpoint_path, opts)
+      when is_binary(checkpoint_path) and is_list(opts) do
+    case Rest.get_checkpoint_archive_url(config, checkpoint_path, opts) do
       {:ok, data} -> {:ok, CheckpointArchiveUrlResponse.from_map(data)}
       error -> error
     end
@@ -209,8 +220,13 @@ defmodule Tinkex.RestClient do
   """
   @spec get_checkpoint_archive_url(t(), String.t(), String.t()) ::
           {:ok, CheckpointArchiveUrlResponse.t()} | {:error, Tinkex.Error.t()}
-  def get_checkpoint_archive_url(%__MODULE__{config: config}, run_id, checkpoint_id) do
-    case Rest.get_checkpoint_archive_url(config, run_id, checkpoint_id) do
+  def get_checkpoint_archive_url(client, run_id, checkpoint_id),
+    do: get_checkpoint_archive_url(client, run_id, checkpoint_id, [])
+
+  @spec get_checkpoint_archive_url(t(), String.t(), String.t(), keyword()) ::
+          {:ok, CheckpointArchiveUrlResponse.t()} | {:error, Tinkex.Error.t()}
+  def get_checkpoint_archive_url(%__MODULE__{config: config}, run_id, checkpoint_id, opts) do
+    case Rest.get_checkpoint_archive_url(config, run_id, checkpoint_id, opts) do
       {:ok, data} -> {:ok, CheckpointArchiveUrlResponse.from_map(data)}
       error -> error
     end
@@ -253,19 +269,23 @@ defmodule Tinkex.RestClient do
   @doc """
   Get a training run by ID.
   """
-  @spec get_training_run(t(), String.t()) ::
+  @spec get_training_run(t(), String.t(), keyword()) ::
           {:ok, TrainingRun.t()} | {:error, Tinkex.Error.t()}
-  def get_training_run(%__MODULE__{config: config}, run_id) do
-    Rest.get_training_run(config, run_id)
+  def get_training_run(%__MODULE__{config: config}, run_id, opts \\ []) do
+    with {:ok, rest_opts} <- validate_access_scope(opts) do
+      Rest.get_training_run(config, run_id, rest_opts)
+    end
   end
 
   @doc """
   Get a training run by tinker path.
   """
-  @spec get_training_run_by_tinker_path(t(), String.t()) ::
+  @spec get_training_run_by_tinker_path(t(), String.t(), keyword()) ::
           {:ok, TrainingRun.t()} | {:error, Tinkex.Error.t()}
-  def get_training_run_by_tinker_path(%__MODULE__{config: config}, tinker_path) do
-    Rest.get_training_run_by_tinker_path(config, tinker_path)
+  def get_training_run_by_tinker_path(%__MODULE__{config: config}, tinker_path, opts \\ []) do
+    with {:ok, rest_opts} <- validate_access_scope(opts) do
+      Rest.get_training_run_by_tinker_path(config, tinker_path, rest_opts)
+    end
   end
 
   @doc """
@@ -274,10 +294,27 @@ defmodule Tinkex.RestClient do
   @spec list_training_runs(t(), keyword()) ::
           {:ok, TrainingRunsResponse.t()} | {:error, Tinkex.Error.t()}
   def list_training_runs(%__MODULE__{config: config}, opts \\ []) do
-    limit = Keyword.get(opts, :limit, 20)
-    offset = Keyword.get(opts, :offset, 0)
+    with {:ok, rest_opts} <- validate_access_scope(opts) do
+      limit = Keyword.get(rest_opts, :limit, 20)
+      offset = Keyword.get(rest_opts, :offset, 0)
 
-    Rest.list_training_runs(config, limit, offset)
+      Rest.list_training_runs(config, limit, offset, rest_opts)
+    end
+  end
+
+  @doc """
+  Update checkpoint TTL using a tinker path.
+  """
+  @spec set_checkpoint_ttl_from_tinker_path(t(), String.t(), integer() | nil) ::
+          {:ok, map()} | {:error, Tinkex.Error.t()}
+  def set_checkpoint_ttl_from_tinker_path(
+        %__MODULE__{config: config},
+        checkpoint_path,
+        ttl_seconds
+      ) do
+    with {:ok, ttl_seconds} <- CheckpointTTL.validate(ttl_seconds) do
+      Rest.set_checkpoint_ttl_from_tinker_path(config, checkpoint_path, ttl_seconds)
+    end
   end
 
   @doc """
@@ -343,9 +380,9 @@ defmodule Tinkex.RestClient do
       task = RestClient.get_session_async(client, "session-123")
       {:ok, response} = Task.await(task)
   """
-  @spec get_session_async(t(), String.t()) :: Task.t()
-  def get_session_async(client, session_id) do
-    Task.async(fn -> get_session(client, session_id) end)
+  @spec get_session_async(t(), String.t(), keyword()) :: Task.t()
+  def get_session_async(client, session_id, opts \\ []) do
+    Task.async(fn -> get_session(client, session_id, opts) end)
   end
 
   @doc """
@@ -451,9 +488,9 @@ defmodule Tinkex.RestClient do
 
   Returns a `Task.t()` that resolves to `{:ok, TrainingRun.t()} | {:error, Tinkex.Error.t()}`.
   """
-  @spec get_training_run_async(t(), String.t()) :: Task.t()
-  def get_training_run_async(client, run_id) do
-    Task.async(fn -> get_training_run(client, run_id) end)
+  @spec get_training_run_async(t(), String.t(), keyword()) :: Task.t()
+  def get_training_run_async(client, run_id, opts \\ []) do
+    Task.async(fn -> get_training_run(client, run_id, opts) end)
   end
 
   @doc """
@@ -461,9 +498,9 @@ defmodule Tinkex.RestClient do
 
   Returns a `Task.t()` that resolves to `{:ok, TrainingRun.t()} | {:error, Tinkex.Error.t()}`.
   """
-  @spec get_training_run_by_tinker_path_async(t(), String.t()) :: Task.t()
-  def get_training_run_by_tinker_path_async(client, tinker_path) do
-    Task.async(fn -> get_training_run_by_tinker_path(client, tinker_path) end)
+  @spec get_training_run_by_tinker_path_async(t(), String.t(), keyword()) :: Task.t()
+  def get_training_run_by_tinker_path_async(client, tinker_path, opts \\ []) do
+    Task.async(fn -> get_training_run_by_tinker_path(client, tinker_path, opts) end)
   end
 
   @doc """
@@ -529,4 +566,44 @@ defmodule Tinkex.RestClient do
   def get_checkpoint_archive_url_by_tinker_path_async(client, checkpoint_path) do
     get_checkpoint_archive_url_async(client, checkpoint_path)
   end
+
+  @doc """
+  Async variant of `set_checkpoint_ttl_from_tinker_path/3`.
+  """
+  @spec set_checkpoint_ttl_from_tinker_path_async(t(), String.t(), integer() | nil) :: Task.t()
+  def set_checkpoint_ttl_from_tinker_path_async(client, checkpoint_path, ttl_seconds) do
+    Task.async(fn ->
+      set_checkpoint_ttl_from_tinker_path(client, checkpoint_path, ttl_seconds)
+    end)
+  end
+
+  defp validate_access_scope(opts) do
+    case Keyword.fetch(opts, :access_scope) do
+      :error ->
+        {:ok, opts}
+
+      {:ok, nil} ->
+        {:ok, Keyword.delete(opts, :access_scope)}
+
+      {:ok, access_scope} ->
+        case normalize_access_scope(access_scope) do
+          {:ok, normalized_access_scope} ->
+            {:ok, Keyword.put(opts, :access_scope, normalized_access_scope)}
+
+          :error ->
+            {:error,
+             Error.new(:validation, "access_scope must be one of: owned, accessible",
+               category: :user,
+               data: %{access_scope: access_scope, allowed: @access_scopes}
+             )}
+        end
+    end
+  end
+
+  defp normalize_access_scope(access_scope) when access_scope in @access_scopes,
+    do: {:ok, access_scope}
+
+  defp normalize_access_scope(:owned), do: {:ok, "owned"}
+  defp normalize_access_scope(:accessible), do: {:ok, "accessible"}
+  defp normalize_access_scope(_access_scope), do: :error
 end

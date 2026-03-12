@@ -149,7 +149,7 @@ defmodule Tinkex.SamplingClientStreamTest do
       {:ok, stream} = SamplingClient.sample_stream(client, prompt, params)
 
       chunks = Enum.to_list(stream)
-      assert length(chunks) >= 1
+      assert [_ | _] = chunks
     end
   end
 end

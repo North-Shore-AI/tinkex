@@ -7,6 +7,7 @@ defmodule Tinkex.API.Rest do
   """
 
   alias Tinkex.API
+  alias Tinkex.CheckpointTTL
   alias Tinkex.Config
 
   alias Tinkex.Types.{
@@ -17,16 +18,24 @@ defmodule Tinkex.API.Rest do
     WeightsInfoResponse
   }
 
+  @archive_retry_delay_ms 30_000
+  @archive_max_retries 6
+
   @doc """
   Get session information.
 
   Returns training run IDs and sampler IDs associated with the session.
   """
-  @spec get_session(Config.t(), String.t()) :: {:ok, map()} | {:error, Tinkex.Error.t()}
-  def get_session(config, session_id) do
+  @spec get_session(Config.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, Tinkex.Error.t()}
+  def get_session(config, session_id, opts \\ []) do
     client = http_client(config)
 
-    client.get("/api/v1/sessions/#{session_id}", config: config, pool_type: :training)
+    client.get("/api/v1/sessions/#{session_id}",
+      config: config,
+      pool_type: :training,
+      query: access_scope_query(opts)
+    )
   end
 
   @doc """
@@ -36,11 +45,18 @@ defmodule Tinkex.API.Rest do
     * `:limit` - Maximum number of sessions to return (default: 20)
     * `:offset` - Offset for pagination (default: 0)
   """
-  @spec list_sessions(Config.t(), integer(), integer()) ::
+  @spec list_sessions(Config.t(), integer(), integer(), keyword()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
-  def list_sessions(config, limit \\ 20, offset \\ 0) do
-    path = "/api/v1/sessions?limit=#{limit}&offset=#{offset}"
-    http_client(config).get(path, config: config, pool_type: :training)
+  def list_sessions(config, limit \\ 20, offset \\ 0, opts \\ []) do
+    query =
+      [limit: limit, offset: offset]
+      |> maybe_put_query(:access_scope, Keyword.get(opts, :access_scope))
+
+    http_client(config).get("/api/v1/sessions",
+      config: config,
+      pool_type: :training,
+      query: query
+    )
   end
 
   @doc """
@@ -77,8 +93,15 @@ defmodule Tinkex.API.Rest do
   @spec get_checkpoint_archive_url(Config.t(), String.t()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def get_checkpoint_archive_url(config, checkpoint_path) do
+    get_checkpoint_archive_url(config, checkpoint_path, [])
+  end
+
+  @spec get_checkpoint_archive_url(Config.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, Tinkex.Error.t()}
+  def get_checkpoint_archive_url(config, checkpoint_path, opts)
+      when is_binary(checkpoint_path) and is_list(opts) do
     with {:ok, {run_id, checkpoint_id}} <- parse_tinker_path(checkpoint_path) do
-      get_checkpoint_archive_url(config, run_id, checkpoint_id)
+      get_checkpoint_archive_url(config, run_id, checkpoint_id, opts)
     end
   end
 
@@ -90,8 +113,14 @@ defmodule Tinkex.API.Rest do
   @spec get_checkpoint_archive_url(Config.t(), String.t(), String.t()) ::
           {:ok, map()} | {:error, Tinkex.Error.t()}
   def get_checkpoint_archive_url(config, run_id, checkpoint_id) do
+    get_checkpoint_archive_url(config, run_id, checkpoint_id, [])
+  end
+
+  @spec get_checkpoint_archive_url(Config.t(), String.t(), String.t(), keyword()) ::
+          {:ok, map()} | {:error, Tinkex.Error.t()}
+  def get_checkpoint_archive_url(config, run_id, checkpoint_id, opts) do
     path = "/api/v1/training_runs/#{run_id}/checkpoints/#{checkpoint_id}/archive"
-    http_client(config).get(path, config: config, pool_type: :training)
+    get_checkpoint_archive_url_with_retry(config, path, opts)
   end
 
   @doc """
@@ -234,11 +263,11 @@ defmodule Tinkex.API.Rest do
   - `{:ok, map()}` - Training run information on success
   - `{:error, Tinkex.Error.t()}` - On failure
   """
-  @spec get_training_run_by_tinker_path(Config.t(), String.t()) ::
+  @spec get_training_run_by_tinker_path(Config.t(), String.t(), keyword()) ::
           {:ok, TrainingRun.t()} | {:error, Tinkex.Error.t()}
-  def get_training_run_by_tinker_path(config, tinker_path) do
+  def get_training_run_by_tinker_path(config, tinker_path, opts \\ []) do
     with {:ok, {run_id, _checkpoint_id}} <- parse_tinker_path(tinker_path) do
-      get_training_run(config, run_id)
+      get_training_run(config, run_id, opts)
     end
   end
 
@@ -255,12 +284,16 @@ defmodule Tinkex.API.Rest do
   - `{:ok, map()}` - Training run information on success
   - `{:error, Tinkex.Error.t()}` - On failure
   """
-  @spec get_training_run(Config.t(), String.t()) ::
+  @spec get_training_run(Config.t(), String.t(), keyword()) ::
           {:ok, TrainingRun.t()} | {:error, Tinkex.Error.t()}
-  def get_training_run(config, training_run_id) do
+  def get_training_run(config, training_run_id, opts \\ []) do
     path = "/api/v1/training_runs/#{training_run_id}"
 
-    case http_client(config).get(path, config: config, pool_type: :training) do
+    case http_client(config).get(path,
+           config: config,
+           pool_type: :training,
+           query: access_scope_query(opts)
+         ) do
       {:ok, data} -> {:ok, TrainingRun.from_map(data)}
       {:error, _} = error -> error
     end
@@ -280,14 +313,37 @@ defmodule Tinkex.API.Rest do
   - `{:ok, map()}` - List of training runs on success
   - `{:error, Tinkex.Error.t()}` - On failure
   """
-  @spec list_training_runs(Config.t(), integer(), integer()) ::
+  @spec list_training_runs(Config.t(), integer(), integer(), keyword()) ::
           {:ok, TrainingRunsResponse.t()} | {:error, Tinkex.Error.t()}
-  def list_training_runs(config, limit \\ 20, offset \\ 0) do
-    path = "/api/v1/training_runs?limit=#{limit}&offset=#{offset}"
+  def list_training_runs(config, limit \\ 20, offset \\ 0, opts \\ []) do
+    query =
+      [limit: limit, offset: offset]
+      |> maybe_put_query(:access_scope, Keyword.get(opts, :access_scope))
 
-    case http_client(config).get(path, config: config, pool_type: :training) do
+    case http_client(config).get("/api/v1/training_runs",
+           config: config,
+           pool_type: :training,
+           query: query
+         ) do
       {:ok, data} -> {:ok, TrainingRunsResponse.from_map(data)}
       {:error, _} = error -> error
+    end
+  end
+
+  @doc """
+  Update checkpoint TTL from a tinker path.
+  """
+  @spec set_checkpoint_ttl_from_tinker_path(Config.t(), String.t(), integer() | nil) ::
+          {:ok, map()} | {:error, Tinkex.Error.t()}
+  def set_checkpoint_ttl_from_tinker_path(config, checkpoint_path, ttl_seconds) do
+    with {:ok, {run_id, checkpoint_id}} <- parse_tinker_path(checkpoint_path),
+         {:ok, ttl_seconds} <- CheckpointTTL.validate(ttl_seconds) do
+      path = "/api/v1/training_runs/#{run_id}/checkpoints/#{checkpoint_id}/ttl"
+
+      http_client(config).put(path, %{"ttl_seconds" => ttl_seconds},
+        config: config,
+        pool_type: :training
+      )
     end
   end
 
@@ -314,6 +370,47 @@ defmodule Tinkex.API.Rest do
   end
 
   defp http_client(config), do: API.client_module(config: config)
+
+  defp get_checkpoint_archive_url_with_retry(config, path, opts) do
+    max_retries = max(Keyword.get(opts, :max_retries, @archive_max_retries), 1)
+    retry_delay_ms = Keyword.get(opts, :retry_delay_ms, @archive_retry_delay_ms)
+    sleep_fun = Keyword.get(opts, :sleep_fun, &Process.sleep/1)
+
+    do_get_checkpoint_archive_url(config, path, max_retries, retry_delay_ms, sleep_fun, 0)
+  end
+
+  defp do_get_checkpoint_archive_url(config, path, max_retries, retry_delay_ms, sleep_fun, retry) do
+    case http_client(config).get(path,
+           config: config,
+           pool_type: :training,
+           max_retries: 0
+         ) do
+      {:error, %Tinkex.Error{status: 503}} when retry < max_retries - 1 ->
+        sleep_fun.(retry_delay_ms)
+
+        do_get_checkpoint_archive_url(
+          config,
+          path,
+          max_retries,
+          retry_delay_ms,
+          sleep_fun,
+          retry + 1
+        )
+
+      {:error, %Tinkex.Error{status: 503} = error} ->
+        {:error, error}
+
+      result ->
+        result
+    end
+  end
+
+  defp access_scope_query(opts) do
+    maybe_put_query([], :access_scope, Keyword.get(opts, :access_scope))
+  end
+
+  defp maybe_put_query(query, _key, nil), do: query
+  defp maybe_put_query(query, key, value), do: Keyword.put(query, key, value)
 
   defp parse_tinker_path(tinker_path) do
     with {:ok, parsed} <- ParsedCheckpointTinkerPath.from_tinker_path(tinker_path) do

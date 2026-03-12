@@ -6,6 +6,7 @@ defmodule Tinkex.Examples.SessionsManagement do
   - Create a RestClient
   - List all sessions
   - Get session details
+  - Use access_scope to include shared sessions
   """
 
   alias Tinkex.{ServiceClient, RestClient, Config}
@@ -42,7 +43,7 @@ defmodule Tinkex.Examples.SessionsManagement do
     # List sessions
     IO.puts("\n--- Listing Sessions ---")
 
-    case RestClient.list_sessions(rest_client, limit: 10) do
+    case RestClient.list_sessions(rest_client, limit: 10, access_scope: "accessible") do
       {:ok, response} ->
         IO.puts("Found #{length(response.sessions)} sessions:")
 
@@ -68,7 +69,7 @@ defmodule Tinkex.Examples.SessionsManagement do
   defp get_session_details(rest_client, session_id) do
     IO.puts("\n--- Session Details: #{session_id} ---")
 
-    case RestClient.get_session(rest_client, session_id) do
+    case RestClient.get_session(rest_client, session_id, access_scope: "accessible") do
       {:ok, response} ->
         IO.puts("Training Runs: #{length(response.training_run_ids)}")
 

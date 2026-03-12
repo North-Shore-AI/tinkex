@@ -5,7 +5,9 @@ defmodule Tinkex.Types.WeightsTrainingTypesTest do
     Checkpoint,
     Cursor,
     LoadWeightsResponse,
+    SaveWeightsForSamplerRequest,
     SaveWeightsForSamplerResponse,
+    SaveWeightsRequest,
     SaveWeightsResponse,
     TrainingRun,
     TrainingRunsResponse
@@ -15,6 +17,12 @@ defmodule Tinkex.Types.WeightsTrainingTypesTest do
     resp = SaveWeightsResponse.from_json(%{"path" => "tinker://run/weights/step-1"})
     assert resp.path == "tinker://run/weights/step-1"
     assert resp.type == "save_weights"
+  end
+
+  test "encodes save weights request ttl_seconds" do
+    request = %SaveWeightsRequest{model_id: "model-1", path: "checkpoint-1", ttl_seconds: 3600}
+
+    assert Jason.decode!(Jason.encode!(request))["ttl_seconds"] == 3600
   end
 
   test "parses save_weights_for_sampler responses with sampler id" do
@@ -27,6 +35,16 @@ defmodule Tinkex.Types.WeightsTrainingTypesTest do
     assert resp.path == "tinker://run/sampler/step-2"
     assert resp.sampling_session_id == "session:sample:1"
     assert resp.type == "save_weights_for_sampler"
+  end
+
+  test "encodes save weights for sampler request ttl_seconds" do
+    request = %SaveWeightsForSamplerRequest{
+      model_id: "model-1",
+      path: "sampler-1",
+      ttl_seconds: 120
+    }
+
+    assert Jason.decode!(Jason.encode!(request))["ttl_seconds"] == 120
   end
 
   test "parses save_weights_for_sampler responses when path is absent" do

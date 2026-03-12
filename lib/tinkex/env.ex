@@ -52,6 +52,53 @@ defmodule Tinkex.Env do
   @spec base_url(env_source()) :: String.t() | nil
   def base_url(env \\ :system), do: env |> fetch("TINKER_BASE_URL") |> normalize()
 
+  @doc """
+  Get Hugging Face token from environment.
+
+  Honors `HF_TOKEN` first, then `HUGGING_FACE_HUB_TOKEN`.
+  """
+  @spec hf_token(env_source()) :: String.t() | nil
+  def hf_token(env \\ :system) do
+    env |> fetch("HF_TOKEN") |> normalize() ||
+      env |> fetch("HUGGING_FACE_HUB_TOKEN") |> normalize()
+  end
+
+  @doc """
+  Get Hugging Face home directory from environment.
+  """
+  @spec hf_home(env_source()) :: String.t()
+  def hf_home(env \\ :system) do
+    env
+    |> fetch("HF_HOME")
+    |> normalize()
+    |> case do
+      nil ->
+        xdg_cache_home =
+          env
+          |> fetch("XDG_CACHE_HOME")
+          |> normalize()
+
+        Path.join(xdg_cache_home || Path.join(System.user_home!(), ".cache"), "huggingface")
+
+      value ->
+        value
+    end
+  end
+
+  @doc """
+  Get Hugging Face token path from environment.
+  """
+  @spec hf_token_path(env_source()) :: String.t()
+  def hf_token_path(env \\ :system) do
+    env
+    |> fetch("HF_TOKEN_PATH")
+    |> normalize()
+    |> case do
+      nil -> Path.join(hf_home(env), "token")
+      value -> value
+    end
+  end
+
   @spec cf_access_client_id(env_source()) :: String.t() | nil
   def cf_access_client_id(env \\ :system),
     do: env |> fetch("CLOUDFLARE_ACCESS_CLIENT_ID") |> normalize()

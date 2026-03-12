@@ -136,6 +136,66 @@ defmodule Tinkex.API do
   end
 
   @impl true
+  @spec put(String.t(), map(), keyword()) :: {:ok, map()} | {:error, Error.t()}
+  def put(path, body, opts) do
+    config = Keyword.fetch!(opts, :config)
+
+    query_params = URL.normalize_query_params(Keyword.get(opts, :query))
+    url = URL.build_url(config.base_url, path, config.default_query, query_params)
+    timeout = Keyword.get(opts, :timeout, config.timeout)
+    headers = Headers.build(:put, config, opts, timeout)
+    max_retries = Keyword.get(opts, :max_retries, config.max_retries)
+    pool_type = Keyword.get(opts, :pool_type, :default)
+    pool_name = PoolKey.resolve_pool_name(config.http_pool, config.base_url, pool_type)
+    response_mode = Keyword.get(opts, :response)
+    transform_opts = Keyword.get(opts, :transform, [])
+    files = Keyword.get(opts, :files)
+
+    metadata =
+      %{
+        method: :put,
+        path: path,
+        pool_type: pool_type,
+        base_url: config.base_url
+      }
+      |> merge_config_metadata(config)
+      |> merge_telemetry_metadata(opts)
+
+    with {:ok, prepared_headers, prepared_body} <-
+           Request.prepare_body(body, headers, files, transform_opts),
+         request <- Finch.build(:put, url, prepared_headers, prepared_body) do
+      {result, retry_count, duration} =
+        execute_with_telemetry(
+          fn ->
+            Retry.execute(request, pool_name, timeout, max_retries, config.dump_headers?)
+          end,
+          metadata
+        )
+
+      ResponseHandler.handle(result,
+        method: :put,
+        url: url,
+        retries: retry_count,
+        elapsed_native: duration,
+        response: response_mode
+      )
+    else
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      {:error, reason} ->
+        {:error,
+         %Error{
+           message: "Failed to prepare request: #{Request.format_error(reason)}",
+           type: :validation,
+           status: nil,
+           category: :user,
+           data: %{reason: reason}
+         }}
+    end
+  end
+
+  @impl true
   @spec delete(String.t(), keyword()) :: {:ok, map()} | {:error, Error.t()}
   def delete(path, opts) do
     config = Keyword.fetch!(opts, :config)

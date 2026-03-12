@@ -33,6 +33,37 @@ defmodule Tinkex.Future.PollTest do
       assert {:ok, %{"value" => 42}} = Task.await(task, 1_000)
     end
 
+    test "repolls metadata-only responses with allow_metadata_only disabled", %{
+      bypass: bypass,
+      config: config
+    } do
+      test_pid = self()
+
+      Bypass.expect(bypass, "POST", "/api/v1/retrieve_future", fn conn ->
+        {:ok, body, conn} = Plug.Conn.read_body(conn)
+        payload = Jason.decode!(body)
+        send(test_pid, {:retrieve_payload, payload})
+
+        case payload["allow_metadata_only"] do
+          true ->
+            resp(conn, 200, %{"status" => "complete_metadata", "response_payload_size" => 512})
+
+          false ->
+            resp(conn, 200, %{"status" => "completed", "result" => %{"value" => 43}})
+        end
+      end)
+
+      task = Future.poll("req-metadata", config: config)
+
+      assert {:ok, %{"value" => 43}} = Task.await(task, 1_000)
+
+      assert_receive {:retrieve_payload,
+                      %{"request_id" => "req-metadata", "allow_metadata_only" => true}}
+
+      assert_receive {:retrieve_payload,
+                      %{"request_id" => "req-metadata", "allow_metadata_only" => false}}
+    end
+
     test "retries pending responses with exponential backoff", %{bypass: bypass, config: config} do
       stub_sequence(bypass, [
         {200, %{"status" => "pending"}, []},
@@ -60,6 +91,27 @@ defmodule Tinkex.Future.PollTest do
 
       task = Future.poll("req-user", config: config)
       assert {:error, %Error{type: :request_failed, category: :user}} = Task.await(task, 1_000)
+    end
+
+    test "retries malformed 400 responses before succeeding", %{bypass: bypass, config: config} do
+      counter = start_supervised!({Agent, fn -> 0 end})
+
+      Bypass.expect(bypass, "POST", "/api/v1/retrieve_future", fn conn ->
+        attempt = Agent.get_and_update(counter, &{&1 + 1, &1 + 1})
+
+        case attempt do
+          attempt when attempt <= 2 ->
+            Plug.Conn.resp(conn, 400, "")
+
+          _ ->
+            resp(conn, 200, %{"status" => "completed", "result" => %{"value" => "ok"}})
+        end
+      end)
+
+      task = Future.poll("req-bad-request", config: config, sleep_fun: fn _ -> :ok end)
+
+      assert {:ok, %{"value" => "ok"}} = Task.await(task, 1_000)
+      assert Agent.get(counter, & &1) == 3
     end
 
     test "retries server-category errors until timeout", %{bypass: bypass, config: config} do

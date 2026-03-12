@@ -24,6 +24,20 @@ defmodule Tinkex.Types.FutureCompletedResponse do
         }
 end
 
+defmodule Tinkex.Types.FutureCompletedMetadataResponse do
+  @moduledoc """
+  Response indicating a future completed with metadata only.
+  """
+
+  @enforce_keys [:status, :response_payload_size]
+  defstruct [:status, :response_payload_size]
+
+  @type t :: %__MODULE__{
+          status: String.t(),
+          response_payload_size: non_neg_integer()
+        }
+end
+
 defmodule Tinkex.Types.FutureFailedResponse do
   @moduledoc """
   Response indicating a future has failed.
@@ -46,6 +60,7 @@ defmodule Tinkex.Types.FutureRetrieveResponse do
   """
 
   alias Tinkex.Types.{
+    FutureCompletedMetadataResponse,
     FutureCompletedResponse,
     FutureFailedResponse,
     FuturePendingResponse,
@@ -55,6 +70,7 @@ defmodule Tinkex.Types.FutureRetrieveResponse do
   @type t ::
           FuturePendingResponse.t()
           | FutureCompletedResponse.t()
+          | FutureCompletedMetadataResponse.t()
           | FutureFailedResponse.t()
           | TryAgainResponse.t()
 
@@ -71,6 +87,20 @@ defmodule Tinkex.Types.FutureRetrieveResponse do
 
   def from_json(%{status: "pending"}) do
     %FuturePendingResponse{status: "pending"}
+  end
+
+  def from_json(%{"status" => "complete_metadata"} = json) do
+    %FutureCompletedMetadataResponse{
+      status: "complete_metadata",
+      response_payload_size: normalize_response_payload_size(json["response_payload_size"])
+    }
+  end
+
+  def from_json(%{status: "complete_metadata"} = json) do
+    %FutureCompletedMetadataResponse{
+      status: "complete_metadata",
+      response_payload_size: normalize_response_payload_size(json[:response_payload_size])
+    }
   end
 
   def from_json(%{"status" => "completed"} = json) do
@@ -119,4 +149,7 @@ defmodule Tinkex.Types.FutureRetrieveResponse do
   def from_json(%{type: _} = json) do
     %FutureCompletedResponse{status: "completed", result: json}
   end
+
+  defp normalize_response_payload_size(size) when is_integer(size) and size >= 0, do: size
+  defp normalize_response_payload_size(_size), do: 0
 end

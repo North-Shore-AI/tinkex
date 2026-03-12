@@ -29,6 +29,7 @@ defmodule Tinkex.CircuitBreaker.Registry do
   """
 
   alias Tinkex.CircuitBreaker
+  alias Tinkex.CircuitBreaker.RegistryOwner
 
   @table_name :tinkex_circuit_breakers
 
@@ -38,23 +39,7 @@ defmodule Tinkex.CircuitBreaker.Registry do
   Creates the ETS table if it doesn't exist. Safe to call multiple times.
   """
   @spec init() :: :ok
-  def init do
-    case :ets.whereis(@table_name) do
-      :undefined ->
-        :ets.new(@table_name, [
-          :set,
-          :public,
-          :named_table,
-          read_concurrency: true,
-          write_concurrency: true
-        ])
-
-      _ref ->
-        :ok
-    end
-
-    :ok
-  end
+  def init, do: RegistryOwner.ensure_started()
 
   @doc """
   Execute a function through a named circuit breaker.
@@ -167,6 +152,7 @@ defmodule Tinkex.CircuitBreaker.Registry do
     case get_entry(name) do
       nil ->
         cb = CircuitBreaker.new(name, cb_opts)
+        ensure_table()
 
         case :ets.insert_new(@table_name, {name, 0, cb}) do
           true -> {0, cb}
@@ -232,6 +218,7 @@ defmodule Tinkex.CircuitBreaker.Registry do
   end
 
   defp cas_update(name, version, cb) do
+    ensure_table()
     match_spec = [{{name, version, :"$1"}, [], [{{name, version + 1, cb}}]}]
     :ets.select_replace(@table_name, match_spec) == 1
   end
@@ -240,9 +227,6 @@ defmodule Tinkex.CircuitBreaker.Registry do
   defp default_success?(_), do: false
 
   defp ensure_table do
-    case :ets.whereis(@table_name) do
-      :undefined -> init()
-      _ref -> :ok
-    end
+    RegistryOwner.ensure_started()
   end
 end

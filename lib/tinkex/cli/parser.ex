@@ -19,7 +19,16 @@ defmodule Tinkex.CLI.Parser do
   end
 
   defp parse_checkpoint_command([sub | rest])
-       when sub in ["list", "info", "publish", "unpublish", "delete", "download"] do
+       when sub in [
+              "list",
+              "info",
+              "publish",
+              "unpublish",
+              "set-ttl",
+              "delete",
+              "download",
+              "push-hf"
+            ] do
     parse_management_command({:checkpoint, String.to_atom(sub)}, rest)
   end
 
@@ -46,7 +55,7 @@ defmodule Tinkex.CLI.Parser do
   defp parse_management_command({:checkpoint, action}, argv) do
     switches = checkpoint_management_switches(action)
     {parsed, remaining, invalid} = OptionParser.parse(argv, strict: switches, aliases: aliases())
-    parsed_map = Map.new(parsed)
+    parsed_map = parsed_to_map(parsed)
 
     cond do
       Map.get(parsed_map, :help, false) ->
@@ -64,7 +73,7 @@ defmodule Tinkex.CLI.Parser do
   defp parse_management_command({:run, action}, argv) do
     switches = run_management_switches(action)
     {parsed, remaining, invalid} = OptionParser.parse(argv, strict: switches, aliases: aliases())
-    parsed_map = Map.new(parsed)
+    parsed_map = parsed_to_map(parsed)
 
     cond do
       Map.get(parsed_map, :help, false) ->
@@ -90,12 +99,13 @@ defmodule Tinkex.CLI.Parser do
   end
 
   defp check_checkpoint_args(action, remaining)
-       when action in [:info, :publish, :unpublish, :delete, :download] do
+       when action in [:info, :publish, :unpublish, :"set-ttl", :delete, :download, :"push-hf"] do
     cond do
       remaining == [] ->
         {:error, "Checkpoint path is required"}
 
-      action in [:info, :publish, :unpublish, :download] and length(remaining) > 1 ->
+      action in [:info, :publish, :unpublish, :"set-ttl", :download, :"push-hf"] and
+          length(remaining) > 1 ->
         {:error,
          "Unexpected argument(s): " <> Enum.map_join(Enum.drop(remaining, 1), " ", &"'#{&1}'")}
 
@@ -140,7 +150,7 @@ defmodule Tinkex.CLI.Parser do
 
   defp parse_subcommand(command, argv, switches, help_fun) do
     {parsed, remaining, invalid} = OptionParser.parse(argv, strict: switches, aliases: aliases())
-    parsed_map = Map.new(parsed)
+    parsed_map = parsed_to_map(parsed)
 
     cond do
       Map.get(parsed_map, :help, false) ->
@@ -160,13 +170,13 @@ defmodule Tinkex.CLI.Parser do
   defp invalid_option_message(command, invalid, help_fun) do
     details = Enum.map_join(invalid, ", ", fn {opt, _} -> opt end)
 
-    "Invalid option(s) for #{command}: #{details}\n\n" <> help_fun.()
+    "Invalid option(s) for #{command_label(command)}: #{details}\n\n" <> help_fun.()
   end
 
   defp unexpected_args_message(command, remaining, help_fun) do
     unexpected = Enum.map_join(remaining, " ", &"'#{&1}'")
 
-    "Unexpected argument(s) for #{command}: #{unexpected}\n\n" <> help_fun.()
+    "Unexpected argument(s) for #{command_label(command)}: #{unexpected}\n\n" <> help_fun.()
   end
 
   defp global_help do
@@ -175,7 +185,7 @@ defmodule Tinkex.CLI.Parser do
       tinkex <command> [options]
 
     Commands:
-      checkpoint   Save or manage checkpoints (list/info/publish/unpublish/delete/download)
+      checkpoint   Save or manage checkpoints (list/info/publish/unpublish/set-ttl/delete/download/push-hf)
       run          Generate text or manage training runs (list/info)
       version      Show version information
 
@@ -212,8 +222,10 @@ defmodule Tinkex.CLI.Parser do
       tinkex checkpoint info <tinker_path>
       tinkex checkpoint publish <tinker_path>
       tinkex checkpoint unpublish <tinker_path>
+      tinkex checkpoint set-ttl <tinker_path> (--ttl <seconds> | --remove)
       tinkex checkpoint delete <tinker_path> [<tinker_path> ...] [--yes]
       tinkex checkpoint download <tinker_path> [--output <dir>] [--force]
+      tinkex checkpoint push-hf <tinker_path> [--repo <repo_id>] [--public]
 
     Common options:
       --api-key <key>         API key
@@ -231,8 +243,23 @@ defmodule Tinkex.CLI.Parser do
     Delete options:
       --yes                   Skip confirmation prompt (delete is otherwise interactive)
 
+    TTL options:
+      --ttl <int>             TTL in seconds (positive integer)
+      --remove                Remove checkpoint expiration
+
     Download options:
       --force                 Overwrite existing files in the destination directory
+
+    Hugging Face options:
+      --repo <repo_id>        Target Hugging Face repo ID
+      --public                Create or update a public repo (default: private)
+      --revision <name>       Target branch or revision
+      --commit-message <msg>  Commit message for the upload
+      --create-pr             Create a pull request instead of pushing directly
+      --allow-pattern <glob>  Only upload matching files (repeatable)
+      --ignore-pattern <glob> Skip matching files (repeatable)
+      --hf-token <token>      Hugging Face token override
+      --no-model-card         Skip creating README.md when missing
     """
   end
 
@@ -265,8 +292,8 @@ defmodule Tinkex.CLI.Parser do
   defp run_management_help do
     """
     Usage:
-      tinkex run list [--limit <int>] [--offset <int>]
-      tinkex run info <run_id>
+      tinkex run list [--limit <int>] [--offset <int>] [--access-scope owned|accessible]
+      tinkex run info <run_id> [--access-scope owned|accessible]
 
     Common options:
       --api-key <key>         API key
@@ -274,6 +301,7 @@ defmodule Tinkex.CLI.Parser do
       --timeout <ms>          Request timeout in milliseconds
       --limit <int>           Maximum runs to fetch (0 = all, default: 20)
       --offset <int>          Offset for pagination (default: 0)
+      --access-scope <scope>  Read owned or accessible resources (default: owned)
       --format <table|json>   Output format (default: table)
       --json                  Shortcut for --format json
       -h, --help              Show this help text
@@ -337,7 +365,12 @@ defmodule Tinkex.CLI.Parser do
     [
       help: :boolean,
       yes: :boolean,
+      remove: :boolean,
+      public: :boolean,
+      create_pr: :boolean,
+      no_model_card: :boolean,
       api_key: :string,
+      hf_token: :string,
       base_url: :string,
       timeout: :integer,
       limit: :integer,
@@ -346,7 +379,13 @@ defmodule Tinkex.CLI.Parser do
       force: :boolean,
       format: :string,
       json: :boolean,
-      run_id: :string
+      run_id: :string,
+      ttl: :integer,
+      repo: :string,
+      revision: :string,
+      commit_message: :string,
+      allow_pattern: :keep,
+      ignore_pattern: :keep
     ]
   end
 
@@ -358,6 +397,7 @@ defmodule Tinkex.CLI.Parser do
       timeout: :integer,
       limit: :integer,
       offset: :integer,
+      access_scope: :string,
       format: :string,
       json: :boolean
     ]
@@ -373,5 +413,23 @@ defmodule Tinkex.CLI.Parser do
 
   defp aliases do
     [h: :help, f: :format]
+  end
+
+  defp command_label(command) when is_tuple(command), do: inspect(command)
+  defp command_label(command), do: to_string(command)
+
+  defp parsed_to_map(parsed) do
+    Enum.reduce(parsed, %{}, fn {key, value}, acc ->
+      case Map.fetch(acc, key) do
+        :error ->
+          Map.put(acc, key, value)
+
+        {:ok, existing} when is_list(existing) ->
+          Map.put(acc, key, existing ++ [value])
+
+        {:ok, existing} ->
+          Map.put(acc, key, [existing, value])
+      end
+    end)
   end
 end

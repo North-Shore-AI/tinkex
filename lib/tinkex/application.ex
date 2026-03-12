@@ -108,6 +108,14 @@ defmodule Tinkex.Application do
       read_concurrency: true
     ])
 
+    create_table(:tinkex_response_byte_limiters, [
+      :set,
+      :public,
+      :named_table,
+      read_concurrency: true,
+      write_concurrency: true
+    ])
+
     create_table(Tinkex.SessionManager.sessions_table(), [
       :set,
       :public,

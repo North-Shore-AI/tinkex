@@ -32,12 +32,15 @@ defmodule Tinkex.Types.WeightsInfoResponse do
   """
 
   @enforce_keys [:base_model, :is_lora]
-  defstruct [:base_model, :is_lora, :lora_rank]
+  defstruct [:base_model, :is_lora, :lora_rank, :train_unembed, :train_mlp, :train_attn]
 
   @type t :: %__MODULE__{
           base_model: String.t(),
           is_lora: boolean(),
-          lora_rank: non_neg_integer() | nil
+          lora_rank: non_neg_integer() | nil,
+          train_unembed: boolean() | nil,
+          train_mlp: boolean() | nil,
+          train_attn: boolean() | nil
         }
 
   @doc """
@@ -63,7 +66,10 @@ defmodule Tinkex.Types.WeightsInfoResponse do
     %__MODULE__{
       base_model: base_model,
       is_lora: is_lora,
-      lora_rank: json["lora_rank"]
+      lora_rank: json["lora_rank"],
+      train_unembed: json["train_unembed"],
+      train_mlp: json["train_mlp"],
+      train_attn: json["train_attn"]
     }
   end
 
@@ -71,7 +77,10 @@ defmodule Tinkex.Types.WeightsInfoResponse do
     %__MODULE__{
       base_model: base_model,
       is_lora: is_lora,
-      lora_rank: json[:lora_rank]
+      lora_rank: json[:lora_rank],
+      train_unembed: json[:train_unembed],
+      train_mlp: json[:train_mlp],
+      train_attn: json[:train_attn]
     }
   end
 end
@@ -90,6 +99,15 @@ defimpl Jason.Encoder, for: Tinkex.Types.WeightsInfoResponse do
         map
       end
 
+    map =
+      map
+      |> maybe_put(:train_unembed, resp.train_unembed)
+      |> maybe_put(:train_mlp, resp.train_mlp)
+      |> maybe_put(:train_attn, resp.train_attn)
+
     Jason.Encode.map(map, opts)
   end
+
+  defp maybe_put(map, _key, nil), do: map
+  defp maybe_put(map, key, value), do: Map.put(map, key, value)
 end

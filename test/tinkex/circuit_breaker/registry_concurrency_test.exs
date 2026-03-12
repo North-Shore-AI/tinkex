@@ -5,12 +5,11 @@ defmodule Tinkex.CircuitBreaker.RegistryConcurrencyTest do
 
   setup do
     Registry.init()
-    Registry.delete("concurrent-endpoint")
     :ok
   end
 
   test "opens circuit under concurrent failures" do
-    name = "concurrent-endpoint"
+    name = "concurrent-endpoint-#{System.unique_integer([:positive])}"
     total = 20
     gate = make_ref()
     parent = self()

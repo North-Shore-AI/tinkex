@@ -18,12 +18,12 @@ The examples are organized by functionality and complexity, ranging from simple 
 - `structured_regularizers_live.exs` – live custom loss run applying all adapters against the API
 - `recovery_live_injected.exs` – live recovery demo that injects a single `corrupted: true` poll, restores from the latest checkpoint, and writes a new checkpoint from the recovered client (requires API key)
 - `live_capabilities_and_logprobs.exs` – live health/capabilities check plus prompt logprobs (requires API key)
-- `model_info_and_unload.exs` – fetch active model metadata (tokenizer id, arch) and unload the session (requires API key)
-- `sessions_management.exs` – REST session listing and detail queries
-- `checkpoints_management.exs` – user checkpoint listing with metadata inspection
+- `model_info_and_unload.exs` – fetch active model metadata (tokenizer id, arch, LoRA flags) and unload the session (requires API key)
+- `sessions_management.exs` – REST session listing and detail queries with `access_scope: "accessible"`
+- `checkpoints_management.exs` – user checkpoint listing with expiration metadata inspection
 - `checkpoint_download.exs` – streaming checkpoint download (O(1) memory) with progress callbacks and extraction
 - `recovery_simulated.exs` – offline recovery demo that marks a run as corrupted, triggers `Monitor` + `Executor`, and advances to the next checkpoint (no API key required)
-- `weights_inspection.exs` – sampler/weights metadata inspection for LoRA+training run validation
+- `weights_inspection.exs` – sampler/weights metadata inspection with `access_scope` run reads and train-flag validation
 - `async_client_creation.exs` – parallel sampling client creation via Task-based flows
 - `cli_run_text.exs` – programmatic `tinkex run` invocation with inline prompts
 - `cli_run_prompt_file.exs` – CLI sampling with prompt files and JSON output capture
@@ -34,8 +34,8 @@ The examples are organized by functionality and complexity, ranging from simple 
 - `telemetry_reporter_demo.exs` – comprehensive telemetry reporter demo with all features
 - `retry_and_capture.exs` – retry helper + capture macros with telemetry events
 - `heartbeat_probe.exs` – guarded live probe that asserts `/api/v1/session_heartbeat` returns 200 and `/api/v1/heartbeat` returns 404 (opt-in via env)
-- `training_persistence_live.exs` – save a checkpoint, reload it with optimizer state, and spin up a fresh training client from the saved weights (requires only `TINKER_API_KEY`)
-- `save_weights_and_sample.exs` – use the synchronous helper to save sampler weights and immediately create a SamplingClient, then run a sample with the freshly saved weights (requires `TINKER_API_KEY`)
+- `training_persistence_live.exs` – save a checkpoint with a TTL, reload it with optimizer state, and spin up a fresh training client from the saved weights (requires only `TINKER_API_KEY`)
+- `save_weights_and_sample.exs` – use the synchronous helper to save sampler weights, create a SamplingClient, resolve the sampler tokenizer, and sample with the fresh weights (requires `TINKER_API_KEY`)
 - `file_upload_multipart.exs` – demonstrates multipart/form-data encoding capability (file transformation, form serialization, boundary generation); uses `examples/uploads/sample_upload.bin` by default (override via `TINKER_UPLOAD_FILE`). Note: runs without API key to demo encoding; set `TINKER_API_KEY` and `TINKER_UPLOAD_ENDPOINT` to test live uploads
 - `multimodal_resume_and_cleanup.exs` – builds a multimodal payload (text + image), prefers Qwen3-VL models (`Qwen/Qwen3-VL-30B-A3B-Instruct`, `Qwen/Qwen3-VL-235B-A22B-Instruct`) when advertised (override via `TINKER_BASE_MODEL`), and runs a live sampling request when a vision model is available (otherwise logs and skips). Uses `examples/assets/vision_sample.png` by default (override via `TINKER_IMAGE_PATH`; optional `TINKER_IMAGE_EXPECTED_TOKENS`). Then restores a training client with optimizer state (uses `TINKER_CHECKPOINT_PATH` override or caches the first checkpoint at `tmp/checkpoints/default.path`; only `TINKER_API_KEY` is required) and prints the CLI multi-delete usage.
 - `queue_reasons_and_sampling_throttling.exs` – attaches queue-state telemetry, logs server-supplied reasons, simulates backoff to exercise layered sampling dispatch throttling, and runs a live sample
@@ -194,14 +194,15 @@ Live custom loss training that mirrors the Python SDK’s `forward_backward_cust
 
 ### save_weights_and_sample.exs
 
-Demonstrates the synchronous helper `TrainingClient.save_weights_and_get_sampling_client_sync/2`: saves sampler weights (or performs an ephemeral sampler save), instantiates a `SamplingClient`, and performs a sample using the freshly saved weights.
+Demonstrates the synchronous helper `TrainingClient.save_weights_and_get_sampling_client_sync/2`: saves sampler weights (or performs an ephemeral sampler save), instantiates a `SamplingClient` with a base-model fallback for ephemeral sessions, resolves the active tokenizer from sampler metadata, and performs a sample using the freshly saved weights.
 
 **Configuration Variables:**
 - `TINKER_API_KEY` (required)
 - `TINKER_BASE_URL` (optional)
-- `TINKER_BASE_MODEL` (optional, defaults to Llama-3.1-8B)
+- `TINKER_BASE_MODEL` (optional, defaults to Qwen/Qwen3-8B)
 - `TINKER_PROMPT` (optional, defaults to "Hello from Tinkex!")
 - `TINKER_MAX_TOKENS` (optional, defaults to 32)
+- `TINKER_SAVE_TTL_SECONDS` (optional, positive integer TTL for the saved sampler checkpoint)
 
 ### forward_inference.exs
 
@@ -306,11 +307,11 @@ Expected output includes supported models with metadata (model_id, architecture)
 
 ### model_info_and_unload.exs
 
-Fetch active model metadata via the TrainingClient (`get_info`) and explicitly unload the model when finished. This is the quickest way to confirm the tokenizer id returned by the service and to release GPU memory for the session.
+Fetch active model metadata via the TrainingClient (`get_info`) and explicitly unload the model when finished. This is the quickest way to confirm the tokenizer id returned by the service, inspect LoRA flags, and release GPU memory for the session.
 
 **Key Features:**
 - Creates a training client for the configured base model
-- Calls `/api/v1/get_info` to print `model_name`, `arch`, and `tokenizer_id`
+- Calls `/api/v1/get_info` to print `model_name`, `arch`, `tokenizer_id`, and LoRA flags
 - Calls `/api/v1/unload_model` to end the session
 
 **Configuration Variables:**
@@ -376,11 +377,11 @@ This example demonstrates custom loss computation with composable regularizers u
 
 ### sessions_management.exs
 
-This example demonstrates the session management capabilities introduced in SDK version 0.1.1. It shows how to create a REST client, list all active sessions, and retrieve detailed information about specific sessions including associated training runs and samplers.
+This example demonstrates the session management capabilities introduced in SDK version 0.1.1. It shows how to create a REST client, list sessions with `access_scope: "accessible"`, and retrieve detailed information about specific sessions including associated training runs and samplers.
 
 **Key Features:**
 - REST client creation and initialization
-- Session listing with pagination support
+- Session listing with pagination support and wider visibility via `access_scope`
 - Session detail retrieval
 - Training run and sampler enumeration
 
@@ -390,12 +391,12 @@ This example demonstrates the session management capabilities introduced in SDK 
 
 ### checkpoints_management.exs
 
-This example showcases checkpoint management operations including listing user checkpoints, filtering by training run, and viewing detailed checkpoint metadata such as size, creation time, and accessibility status.
+This example showcases checkpoint management operations including listing user checkpoints, filtering by training run, and viewing detailed checkpoint metadata such as size, creation time, accessibility status, and expiration.
 
 **Key Features:**
 - User checkpoint listing with pagination
 - Run-specific checkpoint filtering
-- Checkpoint metadata inspection
+- Checkpoint metadata inspection including `expires_at`
 - Size formatting and status reporting
 
 **Configuration Variables:**
@@ -405,18 +406,20 @@ This example showcases checkpoint management operations including listing user c
 
 ### weights_inspection.exs
 
-This example demonstrates the weights and sampler inspection APIs for querying checkpoint metadata, validating LoRA compatibility, and inspecting sampler state. These APIs are useful for validating checkpoints before loading and debugging training workflows.
+This example demonstrates the weights and sampler inspection APIs for querying checkpoint metadata, validating LoRA compatibility, and inspecting sampler state. These APIs are useful for validating checkpoints before loading and debugging training workflows, especially when you need shared-run visibility and train-flag metadata.
 
 **Key Features:**
-- Checkpoint metadata inspection (base model, LoRA status, rank)
+- Checkpoint metadata inspection (base model, LoRA status, rank, train flags)
+- Archive URL inspection (signed URL + expiration)
 - Sampler state querying (loaded weights, base model)
-- Training run listing and detail retrieval
+- Training run listing and detail retrieval with `access_scope: "accessible"`
 - LoRA rank compatibility validation
 - Training run lookup from tinker:// paths
 
 **Configuration Variables:**
 - `TINKER_API_KEY` (required)
 - `TINKER_BASE_URL` (optional)
+- `TINKER_RUN_ID` (optional, run to list checkpoints for; defaults to the first visible run when available)
 - `TINKER_CHECKPOINT_PATH` (optional, specific checkpoint to inspect)
 - `TINKER_SAMPLER_ID` (optional, sampler to query)
 - `TINKER_EXPECTED_RANK` (optional, expected LoRA rank for validation)
@@ -3295,8 +3298,8 @@ Tinkex Multipart Encoding Demo
     Output: %{"file" => {"sample_upload.bin", <<6 bytes>>}}
 
 [3] Form Field Serialization:
-    Input:  %{metadata: %{version: "0.3.4", source: "tinkex"}, note: "Multipart demo from Tinkex"}
-    Output: %{"metadata[source]" => "tinkex", "metadata[version]" => "0.3.4", "note" => "Multipart demo from Tinkex"}
+    Input:  %{metadata: %{version: "0.4.0", source: "tinkex"}, note: "Multipart demo from Tinkex"}
+    Output: %{"metadata[source]" => "tinkex", "metadata[version]" => "0.4.0", "note" => "Multipart demo from Tinkex"}
 
 [4] Multipart Encoding:
     Content-Type: multipart/form-data; boundary=5f79aa0da66c9e52260a19485b79660d
@@ -3310,7 +3313,7 @@ Tinkex Multipart Encoding Demo
     --5f79aa0da66c9e52260a19485b79660d
     Content-Disposition: form-data; name="metadata[version]"
 
-    0.3.4
+    0.4.0
     --5f79aa0da66c9e52260a19485b79660d
     Content-Disposition: form-data; name="note"
 
@@ -3401,6 +3404,7 @@ CLI multi-delete (single confirmation):
 Base URL: https://tinker.thinkingmachines.dev/services/tinker-prod
 Base model: meta-llama/Llama-3.1-8B
 Checkpoint name: demo-checkpoint-1766825797
+Checkpoint TTL: 86400s
 Saved checkpoint to tinker://c10b5421-163f-50bf-951c-a1fa8d35e2c2:train:0/weights/demo-checkpoint-1766825797
 Reloaded checkpoint with optimizer state
 Created a fresh training client from checkpoint: #PID<0.329.0>
@@ -3434,7 +3438,9 @@ result: %{
 [setup] prompt="Hello from Tinkex!"
 [setup] max_tokens=32 lora_rank=8
 [save] saving weights and creating a SamplingClient (sync helper)...
-[error] save_weights_and_get_sampling_client_sync failed: [validation] Either model_path or base_model must be provided data=nil
+[tokenizer] resolved sampler tokenizer from sampler metadata
+== SAMPLE ==
+[sample output elided for README stability]
 ==> Finished examples/save_weights_and_sample.exs [2025-12-26 22:57:27 HST | 00:22]
 
 ==> Running examples/queue_state_observer_demo.exs [2025-12-26 22:57:27 HST]

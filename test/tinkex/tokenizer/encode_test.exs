@@ -44,6 +44,24 @@ defmodule Tinkex.Tokenizer.EncodeTest do
              Tokenizer.get_tokenizer_id("fallback-model", :client_pid, info_fun: info_fun)
   end
 
+  test "get_tokenizer_id normalizes tokenizer_id revision suffixes" do
+    info_fun = fn _client ->
+      {:ok,
+       %GetInfoResponse{
+         model_id: "model-1",
+         model_data: %ModelData{tokenizer_id: "struct/tokenizer:abc123"}
+       }}
+    end
+
+    assert "struct/tokenizer" =
+             Tokenizer.get_tokenizer_id("fallback-model", :client_pid, info_fun: info_fun)
+  end
+
+  test "get_tokenizer_id normalizes model-name revision suffixes before heuristics" do
+    assert "org/model" ==
+             Tokenizer.get_tokenizer_id("org/model/variant:revision-123")
+  end
+
   test "get_tokenizer_id applies Llama-3 hack" do
     assert "thinkingmachineslabinc/meta-llama-3-tokenizer" ==
              Tokenizer.get_tokenizer_id("meta-llama/Llama-3-8B-Instruct")

@@ -6,6 +6,8 @@ Fetch active model metadata (tokenizer id, arch, LoRA flags) and explicitly unlo
 
 ## Why it matters
 - `get_info` returns `model_data.tokenizer_id`, allowing server-driven tokenizer selection instead of heuristics.
+- Tokenizer references are normalized before cache lookup (for example, revision-suffixed ids are reduced to the stable repo id).
+- The same normalized tokenizer IDs are used by `SamplingClient.get_tokenizer/2`, so sampler-side lookup stays aligned with `get_info`.
 - `unload_model` ends the session and frees GPU memory when you’re done training.
 
 ## Endpoints
@@ -24,6 +26,9 @@ base_model = "meta-llama/Llama-3.1-8B"
 {:ok, info} = Tinkex.TrainingClient.get_info(training)
 IO.inspect(info.model_data.tokenizer_id, label: "tokenizer_id")
 
+# The same tokenizer id can be resolved through the sampler-side helper in 0.4.0:
+# {:ok, tokenizer} = Tinkex.SamplingClient.get_tokenizer(sampling_client)
+
 # Server currently returns 404 here on prod; call succeeds once backend exposes the route
 case Tinkex.TrainingClient.unload_model(training) do
   {:ok, resp} -> IO.inspect(resp, label: "unload response")
@@ -39,7 +44,12 @@ config = Tinkex.Config.new(api_key: System.fetch_env!("TINKER_API_KEY"))
 # 1) create session
 {:ok, session} =
   Tinkex.API.Session.create_typed(
-    %Tinkex.Types.CreateSessionRequest{tags: [], user_metadata: nil, sdk_version: "tinkex"},
+    %Tinkex.Types.CreateSessionRequest{
+      tags: [],
+      user_metadata: nil,
+      sdk_version: "tinkex",
+      project_id: "docs-demo"
+    },
     config: config
   )
 

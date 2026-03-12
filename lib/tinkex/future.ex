@@ -32,11 +32,14 @@ defmodule Tinkex.Future do
   alias Tinkex.API.Futures
   alias Tinkex.Config
   alias Tinkex.Error
+  alias Tinkex.ResponseByteLimiter
 
   alias Tinkex.Types.{
+    FutureCompletedMetadataResponse,
     FutureCompletedResponse,
     FutureFailedResponse,
     FuturePendingResponse,
+    FutureRetrieveRequest,
     FutureRetrieveResponse,
     QueueState,
     RequestErrorCategory,
@@ -79,7 +82,8 @@ defmodule Tinkex.Future do
               create_roundtrip_time: nil,
               raw_response?: true,
               start_time_ms: nil,
-              last_failed_error: nil
+              last_failed_error: nil,
+              bad_request_retries: 0
 
     @type t :: %__MODULE__{
             request_id: String.t(),
@@ -97,7 +101,8 @@ defmodule Tinkex.Future do
             create_roundtrip_time: number() | nil,
             raw_response?: boolean(),
             start_time_ms: integer(),
-            last_failed_error: Error.t() | nil
+            last_failed_error: Error.t() | nil,
+            bad_request_retries: non_neg_integer()
           }
   end
 
@@ -127,7 +132,7 @@ defmodule Tinkex.Future do
 
     state = %State{
       request_id: request_id,
-      request_payload: %{request_id: request_id},
+      request_payload: build_request_payload(request_id, true),
       prev_queue_state: opts[:initial_queue_state],
       config: config,
       metadata:
@@ -206,49 +211,80 @@ defmodule Tinkex.Future do
   # Pass max_retries: 0 to disable HTTP-level retries for polling.
   # The polling loop handles retries for 408/5xx, matching Python SDK behavior.
   defp do_poll(state, iteration) do
-    case Futures.retrieve(state.request_payload,
-           config: state.config,
-           timeout: state.http_timeout,
-           max_retries: 0,
-           tinker_request_iteration: iteration,
-           tinker_request_type: state.request_type,
-           tinker_create_roundtrip_time: state.create_roundtrip_time,
-           raw_response?: state.raw_response?
-         ) do
+    case retrieve_future(state, iteration) do
       {:ok, response} ->
         response
         |> FutureRetrieveResponse.from_json()
         |> handle_response(state, iteration)
 
-      {:error, %Error{status: 410} = error} ->
-        handle_expired_error(error, state, iteration)
-
-      # Continue polling on 408 (Request Timeout).
-      # Backoff is configurable to avoid tight loops during outages.
-      {:error, %Error{status: 408} = error} ->
-        emit_error_telemetry(@telemetry_api_error, error, iteration, state)
-        retry_with_optional_backoff(%{state | last_failed_error: error}, iteration)
-
-      # Continue polling on 5xx (Server Errors).
-      # These are transient and should be retried until poll_timeout.
-      {:error, %Error{status: status} = error}
-      when is_integer(status) and status >= 500 and status < 600 ->
-        emit_error_telemetry(@telemetry_api_error, error, iteration, state)
-        retry_with_optional_backoff(%{state | last_failed_error: error}, iteration)
-
-      # Python SDK parity: Continue polling on connection errors with backoff.
-      {:error, %Error{type: :api_connection} = error} ->
-        emit_error_telemetry(telemetry_event_for_error(error), error, iteration, state)
-
-        sleep_and_continue(
-          %{state | last_failed_error: error},
-          calc_backoff(iteration),
-          iteration
-        )
-
       {:error, %Error{} = error} ->
-        emit_error_telemetry(telemetry_event_for_error(error), error, iteration, state)
-        {:error, error}
+        handle_poll_error(error, state, iteration)
+    end
+  end
+
+  defp retrieve_future(state, iteration) do
+    Futures.retrieve(state.request_payload,
+      config: state.config,
+      timeout: state.http_timeout,
+      max_retries: 0,
+      tinker_request_iteration: iteration,
+      tinker_request_type: state.request_type,
+      tinker_create_roundtrip_time: state.create_roundtrip_time,
+      raw_response?: state.raw_response?
+    )
+  end
+
+  defp handle_poll_error(%Error{status: 410} = error, state, iteration),
+    do: handle_expired_error(error, state, iteration)
+
+  defp handle_poll_error(%Error{status: 408} = error, state, iteration),
+    do: retry_api_error(error, state, iteration)
+
+  defp handle_poll_error(%Error{status: status} = error, state, iteration)
+       when is_integer(status) and status >= 500 and status < 600,
+       do: retry_api_error(error, state, iteration)
+
+  defp handle_poll_error(%Error{status: 400} = error, state, iteration),
+    do: handle_bad_request_error(error, state, iteration)
+
+  defp handle_poll_error(%Error{type: :api_connection} = error, state, iteration) do
+    emit_error_telemetry(telemetry_event_for_error(error), error, iteration, state)
+
+    sleep_and_continue(
+      %{state | last_failed_error: error, bad_request_retries: 0},
+      calc_backoff(iteration),
+      iteration
+    )
+  end
+
+  defp handle_poll_error(%Error{} = error, state, iteration) do
+    emit_error_telemetry(telemetry_event_for_error(error), error, iteration, state)
+    {:error, error}
+  end
+
+  defp retry_api_error(error, state, iteration) do
+    emit_error_telemetry(@telemetry_api_error, error, iteration, state)
+
+    retry_with_optional_backoff(
+      %{state | last_failed_error: error, bad_request_retries: 0},
+      iteration
+    )
+  end
+
+  defp handle_bad_request_error(%Error{status: 400} = error, state, iteration) do
+    emit_error_telemetry(@telemetry_api_error, error, iteration, state)
+
+    if retryable_malformed_bad_request?(error) and state.bad_request_retries < 3 do
+      poll_loop(
+        %{
+          state
+          | last_failed_error: error,
+            bad_request_retries: state.bad_request_retries + 1
+        },
+        iteration + 1
+      )
+    else
+      {:error, error}
     end
   end
 
@@ -270,6 +306,28 @@ defmodule Tinkex.Future do
     {:ok, result}
   end
 
+  defp handle_response(
+         %FutureCompletedMetadataResponse{response_payload_size: response_payload_size},
+         state,
+         iteration
+       ) do
+    if metadata_only_enabled?(state.request_payload) do
+      ResponseByteLimiter.with_bytes(state.config, response_payload_size, fn ->
+        state
+        |> Map.put(:request_payload, build_request_payload(state.request_id, false))
+        |> Map.put(:bad_request_retries, 0)
+        |> poll_loop(iteration + 1)
+      end)
+    else
+      {:error,
+       Error.new(
+         :validation,
+         "Received unexpected metadata-only future response",
+         data: %{request_id: state.request_id}
+       )}
+    end
+  end
+
   defp handle_response(%FuturePendingResponse{}, state, iteration) do
     sleep_and_continue(state, calc_backoff(iteration), iteration)
   end
@@ -289,7 +347,7 @@ defmodule Tinkex.Future do
 
       _ ->
         emit_error_telemetry(@telemetry_request_failed, error, iteration, state)
-        state = %{state | last_failed_error: error}
+        state = %{state | last_failed_error: error, bad_request_retries: 0}
         sleep_and_continue(state, calc_backoff(iteration), iteration)
     end
   end
@@ -521,6 +579,25 @@ defmodule Tinkex.Future do
 
   defp error_category(error_map) do
     Map.get(error_map, "category") || Map.get(error_map, :category)
+  end
+
+  defp build_request_payload(request_id, allow_metadata_only) do
+    request_id
+    |> FutureRetrieveRequest.new(allow_metadata_only: allow_metadata_only)
+    |> FutureRetrieveRequest.to_json()
+  end
+
+  defp metadata_only_enabled?(request_payload) do
+    Map.get(request_payload, "allow_metadata_only", false)
+  end
+
+  defp retryable_malformed_bad_request?(%Error{status: 400, message: message, data: data}) do
+    blank_message? = message in ["", "HTTP 400"]
+
+    blank_data? =
+      data in [nil, %{}, %{"message" => ""}, %{"message" => nil}, %{"error" => ""}]
+
+    blank_message? or blank_data?
   end
 
   defp normalize_request_id(%{request_id: id}), do: ensure_binary!(id)

@@ -76,29 +76,21 @@ defmodule Tinkex.CLI.Commands.Run do
     limit = options |> Map.get(:limit, 20) |> max(0)
     offset = max(Map.get(options, :offset, 0), 0)
     page_size = Map.get(deps, :run_page_size, 100)
+    access_scope = Map.get(options, :access_scope)
+    list_opts = maybe_put_access_scope([], access_scope)
 
     with {:ok, format} <- management_format(options),
          {:ok, resp} <-
-           normalize_run_response(
-             deps.rest_api_module.list_training_runs(
-               config,
-               Pagination.initial_page_limit(limit, page_size),
-               offset
-             )
+           fetch_training_runs_page_response(
+             config,
+             deps,
+             Pagination.initial_page_limit(limit, page_size),
+             offset,
+             list_opts
            ),
          {:ok, %{items: runs, total: total}} <-
            Pagination.paginate_with(
-             fn req_limit, req_offset ->
-               case normalize_run_response(
-                      deps.rest_api_module.list_training_runs(config, req_limit, req_offset)
-                    ) do
-                 {:ok, %TrainingRunsResponse{} = response} ->
-                   {:ok, {response.training_runs, response.cursor}}
-
-                 {:error, _} = error ->
-                   error
-               end
-             end,
+             &fetch_training_runs_page(config, deps, &1, &2, list_opts),
              resp.training_runs,
              offset + length(resp.training_runs),
              page_size,
@@ -127,11 +119,25 @@ defmodule Tinkex.CLI.Commands.Run do
     end
   end
 
+  defp fetch_training_runs_page_response(config, deps, limit, offset, list_opts) do
+    normalize_run_response(
+      deps.rest_api_module.list_training_runs(config, limit, offset, list_opts)
+    )
+  end
+
+  defp fetch_training_runs_page(config, deps, limit, offset, list_opts) do
+    with {:ok, %TrainingRunsResponse{} = response} <-
+           fetch_training_runs_page_response(config, deps, limit, offset, list_opts) do
+      {:ok, {response.training_runs, response.cursor}}
+    end
+  end
+
   defp run_info(config, options, deps) do
     run_id = Map.fetch!(options, :run_id)
+    access_scope = Map.get(options, :access_scope)
 
     with {:ok, format} <- management_format(options),
-         {:ok, run} <- fetch_run(config, run_id, deps) do
+         {:ok, run} <- fetch_run(config, run_id, deps, access_scope) do
       render_run_info(run, format, deps)
     else
       {:error, %Error{} = error} ->
@@ -140,8 +146,12 @@ defmodule Tinkex.CLI.Commands.Run do
     end
   end
 
-  defp fetch_run(config, run_id, deps) do
-    case deps.rest_api_module.get_training_run(config, run_id) do
+  defp fetch_run(config, run_id, deps, access_scope) do
+    case deps.rest_api_module.get_training_run(
+           config,
+           run_id,
+           maybe_put_access_scope([], access_scope)
+         ) do
       {:ok, %TrainingRun{} = run} ->
         {:ok, run}
 
@@ -226,6 +236,7 @@ defmodule Tinkex.CLI.Commands.Run do
 
     IO.puts("#{label}: #{checkpoint["checkpoint_id"]}")
     IO.puts("  Time: #{Formatting.format_datetime(checkpoint["time"])}")
+    IO.puts("  Expires: #{Formatting.format_expiration(checkpoint["expires_at"])}")
     IO.puts("  Path: #{checkpoint["tinker_path"]}")
   end
 
@@ -259,4 +270,9 @@ defmodule Tinkex.CLI.Commands.Run do
   end
 
   defp normalize_run_response({:error, _} = error), do: error
+
+  defp maybe_put_access_scope(opts, nil), do: opts
+
+  defp maybe_put_access_scope(opts, access_scope),
+    do: Keyword.put(opts, :access_scope, access_scope)
 end

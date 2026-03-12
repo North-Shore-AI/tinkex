@@ -2,6 +2,7 @@ defmodule Tinkex.Types.FutureRetrieveResponseTest do
   use Supertester.ExUnitFoundation, isolation: :full_isolation
 
   alias Tinkex.Types.{
+    FutureCompletedMetadataResponse,
     FutureCompletedResponse,
     FutureFailedResponse,
     FuturePendingResponse,
@@ -26,6 +27,20 @@ defmodule Tinkex.Types.FutureRetrieveResponseTest do
       result = FutureRetrieveResponse.from_json(json)
 
       assert %FutureCompletedResponse{status: "completed", result: %{"data" => "test"}} = result
+    end
+
+    test "parses complete_metadata response" do
+      json = %{
+        "status" => "complete_metadata",
+        "response_payload_size" => 12_345
+      }
+
+      result = FutureRetrieveResponse.from_json(json)
+
+      assert %FutureCompletedMetadataResponse{
+               status: "complete_metadata",
+               response_payload_size: 12_345
+             } = result
     end
 
     test "parses failed response" do

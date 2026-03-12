@@ -10,7 +10,7 @@ Add the dependency and fetch packages:
 # mix.exs
 def deps do
   [
-    {:tinkex, "~> 0.3.1"}
+    {:tinkex, "~> 0.4.0"}
   ]
 end
 ```
@@ -33,7 +33,12 @@ Tinkex reads configuration from `Tinkex.Config.new/1`, pulling fallbacks from th
 
 - `TINKER_API_KEY` (required)
 - `TINKER_BASE_URL` (defaults to the production base URL)
-- Optional per-request overrides: `:timeout`, `:max_retries`, `:http_pool`, `:user_metadata`
+- Optional per-request overrides: `:timeout`, `:max_retries`, `:http_pool`, `:project_id`, `:user_metadata`
+
+Advanced env/app-config knobs such as `TINKEX_POLL_BACKOFF`, `TINKEX_PARITY`,
+`TINKEX_POOL_SIZE`, `TINKEX_POOL_COUNT`, and `TINKEX_OTEL_PROPAGATE` are covered
+in `docs/guides/environment_configuration.md` and
+`docs/guides/advanced_configuration.md`.
 
 ```elixir
 config =
@@ -101,6 +106,11 @@ After `MIX_ENV=prod mix escript.build`, invoke the CLI:
   --output ./checkpoint.json \
   --api-key "$TINKER_API_KEY"
 
+# Set a 24h checkpoint TTL
+./tinkex checkpoint set-ttl tinker://run-123/weights/0001 \
+  --ttl 86400 \
+  --api-key "$TINKER_API_KEY"
+
 # Generate text with configurable sampling params
 ./tinkex run \
   --base-model meta-llama/Llama-3.1-8B \
@@ -116,7 +126,13 @@ Flags to know:
 - `--prompt-file <path>` reads a prompt from disk (plain text or JSON array of token IDs).
 - `--json` prints the full response payload instead of decoded text.
 - `--output <path>` writes generation output to a file.
+- `--access-scope accessible` widens run-management reads to resources shared with the caller.
+- `checkpoint push-hf` exports a checkpoint adapter directly to Hugging Face Hub.
 - For parallelism and quicker startup, prefer the async client factories (`Tinkex.ServiceClient.create_sampling_client_async/2` and `Tinkex.SamplingClient.create_async/2`) inside your own scripts; the CLI remains a thin wrapper over the same APIs.
+
+`checkpoint push-hf` resolves Hugging Face auth in this order: `--hf-token`,
+`HF_TOKEN`, `HUGGING_FACE_HUB_TOKEN`, then `HF_TOKEN_PATH` (default:
+`$HF_HOME/token`).
 
 See `./tinkex checkpoint --help` and `./tinkex run --help` for the full option set, plus the troubleshooting guide for timeout/backoff tips.
 

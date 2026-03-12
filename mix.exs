@@ -1,9 +1,9 @@
 defmodule Tinkex.MixProject do
   use Mix.Project
 
-  @version "0.3.4"
+  @version "0.4.0"
   # Tinker backend expects the Python SDK version for feature gating/parity.
-  @tinker_sdk_version "0.7.0"
+  @tinker_sdk_version "0.15.0"
   @source_url "https://github.com/North-Shore-AI/tinkex"
   @docs_url "https://hexdocs.pm/tinkex"
 
@@ -59,7 +59,7 @@ defmodule Tinkex.MixProject do
       {:tokenizers, "~> 0.5"},
 
       # Tokenization (TikToken-style byte BPE, Kimi K2 compatible)
-      {:tiktoken_ex, "~> 0.1.0"},
+      {:tiktoken_ex, "~> 0.2.0"},
 
       # Telemetry
       {:telemetry, "~> 1.2"},
@@ -68,7 +68,7 @@ defmodule Tinkex.MixProject do
       # Development
       {:dialyxir, "~> 1.4", only: [:dev, :test], runtime: false},
       {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:ex_doc, "~> 0.30", only: :dev, runtime: false},
+      {:ex_doc, "~> 0.40.1", only: :dev, runtime: false},
 
       # Regularization primitives
       {:nx_penalties, "~> 0.1.2"},
@@ -76,7 +76,7 @@ defmodule Tinkex.MixProject do
       # Testing
       {:mox, "~> 1.0", only: :test},
       {:bypass, "~> 2.1", only: :test},
-      {:supertester, "~> 0.4.0", only: :test}
+      {:supertester, "~> 0.6.0", only: :test}
     ]
   end
 
@@ -172,7 +172,7 @@ defmodule Tinkex.MixProject do
         "GitHub" => @source_url,
         "Docs" => @docs_url
       },
-      files: ~w(lib mix.exs README.md CHANGELOG.md LICENSE assets docs/guides examples)
+      files: ~w(lib mix.exs README.md CHANGELOG.md LICENSE assets)
     ]
   end
 end

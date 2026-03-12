@@ -6,12 +6,14 @@ defmodule Tinkex.Types.SaveWeightsForSamplerRequest do
   """
 
   @enforce_keys [:model_id]
-  @derive {Jason.Encoder, only: [:model_id, :path, :sampling_session_seq_id, :seq_id, :type]}
+  @derive {Jason.Encoder,
+           only: [:model_id, :path, :sampling_session_seq_id, :seq_id, :ttl_seconds, :type]}
   defstruct [
     :model_id,
     :path,
     :sampling_session_seq_id,
     :seq_id,
+    :ttl_seconds,
     type: "save_weights_for_sampler"
   ]
 
@@ -20,6 +22,7 @@ defmodule Tinkex.Types.SaveWeightsForSamplerRequest do
           path: String.t() | nil,
           sampling_session_seq_id: integer() | nil,
           seq_id: integer() | nil,
+          ttl_seconds: pos_integer() | nil,
           type: String.t()
         }
 end

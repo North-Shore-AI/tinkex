@@ -2,7 +2,7 @@ defmodule Tinkex.CircuitBreaker.RegistryTest do
   @moduledoc """
   Tests for the circuit breaker registry.
   """
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   alias Tinkex.CircuitBreaker.Registry
 

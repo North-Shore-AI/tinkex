@@ -3,6 +3,8 @@ defmodule Tinkex.Types.ModelData do
   Model metadata including architecture, display name, and tokenizer id.
   """
 
+  alias Tinkex.TokenizerRef
+
   defstruct [:arch, :model_name, :tokenizer_id]
 
   @type t :: %__MODULE__{
@@ -19,7 +21,7 @@ defmodule Tinkex.Types.ModelData do
     %__MODULE__{
       arch: json["arch"] || json[:arch],
       model_name: json["model_name"] || json[:model_name],
-      tokenizer_id: json["tokenizer_id"] || json[:tokenizer_id]
+      tokenizer_id: TokenizerRef.normalize(json["tokenizer_id"] || json[:tokenizer_id])
     }
   end
 end

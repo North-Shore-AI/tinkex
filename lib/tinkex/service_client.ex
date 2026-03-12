@@ -531,10 +531,30 @@ defmodule Tinkex.ServiceClient do
     end
   end
 
-  defp lora_config_from_weights_info(%{lora_rank: nil}), do: %LoraConfig{}
+  defp lora_config_from_weights_info(weights_info) do
+    rank =
+      case Map.get(weights_info, :lora_rank) do
+        value when is_integer(value) -> value
+        _ -> %LoraConfig{}.rank
+      end
 
-  defp lora_config_from_weights_info(%{lora_rank: rank}) when is_integer(rank),
-    do: %LoraConfig{rank: rank}
+    %LoraConfig{
+      rank: rank,
+      train_unembed: Map.get(weights_info, :train_unembed, true),
+      train_mlp: Map.get(weights_info, :train_mlp, true),
+      train_attn: Map.get(weights_info, :train_attn, true)
+    }
+    |> default_nil_train_flags()
+  end
+
+  defp default_nil_train_flags(%LoraConfig{} = config) do
+    %LoraConfig{
+      config
+      | train_unembed: if(is_nil(config.train_unembed), do: true, else: config.train_unembed),
+        train_mlp: if(is_nil(config.train_mlp), do: true, else: config.train_mlp),
+        train_attn: if(is_nil(config.train_attn), do: true, else: config.train_attn)
+    }
+  end
 
   defp normalize_training_opts(opts) do
     with {:ok, lora_config} <- build_lora_config(opts) do

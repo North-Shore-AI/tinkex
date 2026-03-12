@@ -60,6 +60,27 @@ defmodule Tinkex.SessionManagerTest do
     SessionManager.stop_session("session-1", manager)
   end
 
+  test "start_session includes project_id in create payload", %{
+    bypass: bypass,
+    config: config,
+    manager: manager
+  } do
+    Bypass.expect_once(bypass, "POST", "/api/v1/create_session", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      payload = Jason.decode!(body)
+
+      assert payload["project_id"] == "project-123"
+
+      Conn.resp(conn, 200, ~s({"session_id":"session-project"}))
+    end)
+
+    config = %{config | project_id: "project-123"}
+
+    assert {:ok, "session-project"} = SessionManager.start_session(config, manager)
+
+    SessionManager.stop_session("session-project", manager)
+  end
+
   test "user-error heartbeats warn after sustained failure and keep the session", %{
     bypass: bypass,
     config: config

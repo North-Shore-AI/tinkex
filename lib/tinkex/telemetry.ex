@@ -89,32 +89,12 @@ defmodule Tinkex.Telemetry do
   @spec init(keyword()) :: {:ok, pid()} | :ignore | {:error, term()}
   def init(opts) do
     with {:ok, session_id} <- fetch_required(opts, :session_id),
-         {:ok, config} <- fetch_required(opts, :config) do
-      enabled? =
-        Keyword.get_lazy(opts, :enabled?, fn ->
-          case config.telemetry_enabled? do
-            value when is_boolean(value) -> value
-            _ -> Tinkex.Env.telemetry_enabled?()
-          end
-        end)
-
-      if enabled? do
-        telemetry_opts = Keyword.get(opts, :telemetry_opts, [])
-
-        reporter_opts =
-          telemetry_opts
-          |> Keyword.put(:session_id, session_id)
-          |> Keyword.put(:config, config)
-          |> Keyword.put(:enabled, true)
-
-        case Reporter.start_link(reporter_opts) do
-          {:ok, pid} -> {:ok, pid}
-          {:error, {:already_started, pid}} -> {:ok, pid}
-          {:error, reason} -> {:error, reason}
-        end
-      else
-        :ignore
-      end
+         {:ok, config} <- fetch_required(opts, :config),
+         true <- telemetry_enabled?(opts, config) do
+      start_reporter(session_id, config, Keyword.get(opts, :telemetry_opts, []))
+    else
+      false -> :ignore
+      {:error, _} = error -> error
     end
   end
 
@@ -122,6 +102,29 @@ defmodule Tinkex.Telemetry do
     case Keyword.fetch(opts, key) do
       {:ok, value} -> {:ok, value}
       :error -> {:error, {:missing_required_option, key}}
+    end
+  end
+
+  defp telemetry_enabled?(opts, config) do
+    Keyword.get_lazy(opts, :enabled?, fn ->
+      case config.telemetry_enabled? do
+        value when is_boolean(value) -> value
+        _ -> Tinkex.Env.telemetry_enabled?()
+      end
+    end)
+  end
+
+  defp start_reporter(session_id, config, telemetry_opts) do
+    reporter_opts =
+      telemetry_opts
+      |> Keyword.put(:session_id, session_id)
+      |> Keyword.put(:config, config)
+      |> Keyword.put(:enabled, true)
+
+    case Reporter.start_link(reporter_opts) do
+      {:ok, pid} -> {:ok, pid}
+      {:error, {:already_started, pid}} -> {:ok, pid}
+      {:error, reason} -> {:error, reason}
     end
   end
 end

@@ -3,12 +3,18 @@ defmodule Tinkex.Files.ReaderTest do
 
   alias Tinkex.Files.Reader
 
-  @fixture_dir "test/fixtures/reader"
-
   setup do
-    File.mkdir_p!(@fixture_dir)
-    on_exit(fn -> File.rm_rf!(@fixture_dir) end)
-    :ok
+    fixture_dir =
+      Path.join([
+        "test",
+        "fixtures",
+        "reader",
+        Integer.to_string(System.unique_integer([:positive]))
+      ])
+
+    File.mkdir_p!(fixture_dir)
+    on_exit(fn -> File.rm_rf!(fixture_dir) end)
+    {:ok, fixture_dir: fixture_dir}
   end
 
   describe "read_file_content/1" do
@@ -17,15 +23,15 @@ defmodule Tinkex.Files.ReaderTest do
       assert {:ok, <<1, 2, 3>>} = Reader.read_file_content(<<1, 2, 3>>)
     end
 
-    test "reads file from path" do
-      path = Path.join(@fixture_dir, "test_#{:rand.uniform(10_000)}.txt")
+    test "reads file from path", %{fixture_dir: fixture_dir} do
+      path = Path.join(fixture_dir, "test_#{:rand.uniform(10_000)}.txt")
       File.write!(path, "test content")
 
       assert {:ok, "test content"} = Reader.read_file_content(path)
     end
 
-    test "reads from File.Stream" do
-      path = Path.join(@fixture_dir, "stream.txt")
+    test "reads from File.Stream", %{fixture_dir: fixture_dir} do
+      path = Path.join(fixture_dir, "stream.txt")
       File.write!(path, "Line 1\nLine 2")
 
       stream = File.stream!(path)
@@ -36,8 +42,8 @@ defmodule Tinkex.Files.ReaderTest do
       assert {:error, :enoent} = Reader.read_file_content("/nonexistent/path.txt")
     end
 
-    test "returns error for directory path" do
-      assert {:error, :eisdir} = Reader.read_file_content(@fixture_dir)
+    test "returns error for directory path", %{fixture_dir: fixture_dir} do
+      assert {:error, :eisdir} = Reader.read_file_content(fixture_dir)
     end
   end
 

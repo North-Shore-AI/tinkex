@@ -12,6 +12,7 @@ defmodule Tinkex.TrainingClient.Operations do
 
   require Logger
 
+  alias Tinkex.CheckpointTTL
   alias Tinkex.Error
   alias Tinkex.Training.CustomLoss
 
@@ -175,33 +176,36 @@ defmodule Tinkex.TrainingClient.Operations do
   """
   @spec send_save_state_request(String.t(), integer(), keyword(), map()) ::
           {:ok, map() | SaveWeightsResponse.t()} | {:error, Error.t()}
-  def send_save_state_request(name, seq_id, _opts, state) do
-    request = %SaveWeightsRequest{
-      model_id: state.model_id,
-      path: name,
-      seq_id: seq_id
-    }
+  def send_save_state_request(name, seq_id, opts, state) do
+    with {:ok, ttl_seconds} <- validate_optional_ttl_seconds(opts) do
+      request = %SaveWeightsRequest{
+        model_id: state.model_id,
+        path: name,
+        seq_id: seq_id,
+        ttl_seconds: ttl_seconds
+      }
 
-    case state.weights_api.save_weights(
-           request,
-           config: state.config,
-           telemetry_metadata:
-             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
-         ) do
-      {:ok, %{"request_id" => _} = future} ->
-        {:ok, future}
+      case state.weights_api.save_weights(
+             request,
+             config: state.config,
+             telemetry_metadata:
+               base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
+           ) do
+        {:ok, %{"request_id" => _} = future} ->
+          {:ok, future}
 
-      {:ok, %{request_id: _} = future} ->
-        {:ok, future}
+        {:ok, %{request_id: _} = future} ->
+          {:ok, future}
 
-      {:ok, result} ->
-        {:ok, result}
+        {:ok, result} ->
+          {:ok, result}
 
-      {:error, %Error{} = error} ->
-        {:error, error}
+        {:error, %Error{} = error} ->
+          {:error, error}
 
-      other ->
-        {:error, Error.new(:validation, "Invalid save_weights response: #{inspect(other)}")}
+        other ->
+          {:error, Error.new(:validation, "Invalid save_weights response: #{inspect(other)}")}
+      end
     end
   end
 
@@ -247,33 +251,39 @@ defmodule Tinkex.TrainingClient.Operations do
   @spec send_save_weights_for_sampler_request(integer(), keyword(), map()) ::
           {:ok, map() | SaveWeightsForSamplerResponse.t()} | {:error, Error.t()}
   def send_save_weights_for_sampler_request(seq_id, opts, state) do
-    request = %SaveWeightsForSamplerRequest{
-      model_id: state.model_id,
-      path: Keyword.get(opts, :path),
-      sampling_session_seq_id: Keyword.get(opts, :sampling_session_seq_id),
-      seq_id: seq_id
-    }
+    with {:ok, ttl_seconds} <- validate_optional_ttl_seconds(opts) do
+      request = %SaveWeightsForSamplerRequest{
+        model_id: state.model_id,
+        path: Keyword.get(opts, :path),
+        sampling_session_seq_id: Keyword.get(opts, :sampling_session_seq_id),
+        seq_id: seq_id,
+        ttl_seconds: ttl_seconds
+      }
 
-    case state.weights_api.save_weights_for_sampler(request,
-           config: state.config,
-           telemetry_metadata:
-             base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
-         ) do
-      {:ok, %{"request_id" => _} = future} ->
-        {:ok, future}
+      case state.weights_api.save_weights_for_sampler(request,
+             config: state.config,
+             telemetry_metadata:
+               base_telemetry_metadata(state, %{model_id: state.model_id, seq_id: seq_id})
+           ) do
+        {:ok, %{"request_id" => _} = future} ->
+          {:ok, future}
 
-      {:ok, %{request_id: _} = future} ->
-        {:ok, future}
+        {:ok, %{request_id: _} = future} ->
+          {:ok, future}
 
-      {:ok, result} ->
-        {:ok, result}
+        {:ok, result} ->
+          {:ok, result}
 
-      {:error, %Error{} = error} ->
-        {:error, error}
+        {:error, %Error{} = error} ->
+          {:error, error}
 
-      other ->
-        {:error,
-         Error.new(:validation, "Invalid save_weights_for_sampler response: #{inspect(other)}")}
+        other ->
+          {:error,
+           Error.new(
+             :validation,
+             "Invalid save_weights_for_sampler response: #{inspect(other)}"
+           )}
+      end
     end
   end
 
@@ -590,6 +600,14 @@ defmodule Tinkex.TrainingClient.Operations do
        category: :user,
        data: %{loss_fn_config: loss_fn_config}
      )}
+  end
+
+  defp validate_optional_ttl_seconds(opts) do
+    case Keyword.fetch(opts, :ttl_seconds) do
+      :error -> {:ok, nil}
+      {:ok, nil} -> {:ok, nil}
+      {:ok, ttl_seconds} -> CheckpointTTL.validate(ttl_seconds)
+    end
   end
 
   defp normalize_loss_fn_config_key(key) when is_atom(key), do: {:ok, Atom.to_string(key)}

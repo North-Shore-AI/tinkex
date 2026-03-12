@@ -6,7 +6,7 @@ defmodule Tinkex.Examples.SaveWeightsAndSample do
   `SamplingClient`, and performs a sample using the freshly saved weights.
   """
 
-  alias Tinkex.{Config, Error, ServiceClient, Tokenizer, TrainingClient}
+  alias Tinkex.{Config, Error, SamplingClient, ServiceClient, Tokenizer, TrainingClient}
   alias Tinkex.Types.{ModelInput, SamplingParams}
 
   @default_model "Qwen/Qwen3-8B"
@@ -18,10 +18,12 @@ defmodule Tinkex.Examples.SaveWeightsAndSample do
     prompt_text = System.get_env("TINKER_PROMPT") || @default_prompt
     max_tokens = parse_int(System.get_env("TINKER_MAX_TOKENS"), @default_max_tokens)
     lora_rank = parse_int(System.get_env("TINKER_LORA_RANK"), 8)
+    ttl_seconds = parse_optional_int(System.get_env("TINKER_SAVE_TTL_SECONDS"))
 
     IO.puts("[setup] base_model=#{base_model}")
     IO.puts("[setup] prompt=#{inspect(prompt_text)}")
     IO.puts("[setup] max_tokens=#{max_tokens} lora_rank=#{lora_rank}")
+    if ttl_seconds, do: IO.puts("[setup] sampler checkpoint ttl_seconds=#{ttl_seconds}")
 
     config = Config.new()
     {:ok, service} = ServiceClient.start_link(config: config)
@@ -31,8 +33,13 @@ defmodule Tinkex.Examples.SaveWeightsAndSample do
 
     IO.puts("[save] saving weights and creating a SamplingClient (sync helper)...")
 
-    case TrainingClient.save_weights_and_get_sampling_client_sync(training) do
+    save_opts =
+      [base_model: base_model]
+      |> maybe_put(:ttl_seconds, ttl_seconds)
+
+    case TrainingClient.save_weights_and_get_sampling_client_sync(training, save_opts) do
       {:ok, sampler} ->
+        resolve_sampler_tokenizer(sampler)
         do_sample(sampler, base_model, prompt_text, max_tokens)
 
       {:error, %Error{} = error} ->
@@ -67,6 +74,19 @@ defmodule Tinkex.Examples.SaveWeightsAndSample do
     end
   end
 
+  defp resolve_sampler_tokenizer(sampler) do
+    case SamplingClient.get_tokenizer(sampler) do
+      {:ok, _tokenizer} ->
+        IO.puts("[tokenizer] resolved sampler tokenizer from sampler metadata")
+
+      {:error, %Error{} = error} ->
+        IO.puts("[tokenizer] failed to resolve sampler tokenizer: #{Error.format(error)}")
+
+      {:error, other} ->
+        IO.puts("[tokenizer] failed to resolve sampler tokenizer: #{inspect(other)}")
+    end
+  end
+
   defp parse_int(nil, default), do: default
 
   defp parse_int(val, default) when is_binary(val) do
@@ -75,6 +95,18 @@ defmodule Tinkex.Examples.SaveWeightsAndSample do
       :error -> default
     end
   end
+
+  defp parse_optional_int(nil), do: nil
+
+  defp parse_optional_int(val) when is_binary(val) do
+    case Integer.parse(val) do
+      {int, _} when int > 0 -> int
+      _ -> nil
+    end
+  end
+
+  defp maybe_put(keyword, _key, nil), do: keyword
+  defp maybe_put(keyword, key, value), do: Keyword.put(keyword, key, value)
 end
 
 Tinkex.Examples.SaveWeightsAndSample.run()

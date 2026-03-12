@@ -16,6 +16,7 @@ defmodule Tinkex.Config do
   @enforce_keys [:base_url, :api_key]
   defstruct base_url: nil,
             api_key: nil,
+            project_id: nil,
             http_pool: Tinkex.HTTP.Pool,
             http_client: Tinkex.API,
             timeout: nil,
@@ -42,6 +43,7 @@ defmodule Tinkex.Config do
   @type t :: %__MODULE__{
           base_url: String.t(),
           api_key: String.t(),
+          project_id: String.t() | nil,
           http_pool: atom(),
           http_client: module(),
           timeout: pos_integer(),
@@ -142,6 +144,12 @@ defmodule Tinkex.Config do
         [opts[:http_client], Application.get_env(:tinkex, :http_client), env.http_client],
         Tinkex.API
       )
+
+    project_id =
+      pick([
+        opts[:project_id],
+        Application.get_env(:tinkex, :project_id)
+      ])
 
     timeout = pick([opts[:timeout], Application.get_env(:tinkex, :timeout)], default_timeout)
 
@@ -255,6 +263,7 @@ defmodule Tinkex.Config do
     config = %__MODULE__{
       base_url: base_url,
       api_key: api_key,
+      project_id: project_id,
       http_pool: http_pool,
       http_client: http_client,
       timeout: timeout,
@@ -325,6 +334,15 @@ defmodule Tinkex.Config do
     validate_telemetry_enabled!(config.telemetry_enabled?)
     validate_dump_headers!(config.dump_headers?)
     validate_log_level!(config.log_level)
+    validate_project_id!(config.project_id)
+  end
+
+  defp validate_project_id!(nil), do: :ok
+
+  defp validate_project_id!(project_id) do
+    unless is_binary(project_id) and String.trim(project_id) != "" do
+      raise ArgumentError, "project_id must be a non-empty string, got: #{inspect(project_id)}"
+    end
   end
 
   defp validate_http_pool!(http_pool) do

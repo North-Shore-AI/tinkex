@@ -528,6 +528,57 @@ defmodule Tinkex.TrainingClientTest do
     assert path =~ "checkpoint-1"
   end
 
+  test "save_state sends ttl_seconds when provided", %{bypass: bypass, config: config} do
+    Bypass.expect(bypass, fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+
+      case conn.request_path do
+        "/api/v1/create_model" ->
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"model_id":"model-save-ttl"}))
+
+        "/api/v1/save_weights" ->
+          payload = Jason.decode!(body)
+          assert payload["ttl_seconds"] == 3600
+
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({"path":"tinker://model-save-ttl/weights/checkpoint-ttl"}))
+      end
+    end)
+
+    {:ok, client} =
+      TrainingClient.start_link(
+        session_id: "sess-save-ttl",
+        model_seq_id: 0,
+        base_model: "base",
+        config: config
+      )
+
+    {:ok, task} = TrainingClient.save_state(client, "checkpoint-ttl", ttl_seconds: 3600)
+    assert {:ok, %SaveWeightsResponse{}} = Task.await(task, 5_000)
+  end
+
+  test "save_state rejects non-positive ttl_seconds", %{bypass: bypass, config: config} do
+    Bypass.expect_once(bypass, "POST", "/api/v1/create_model", fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, ~s({"model_id":"model-save-invalid-ttl"}))
+    end)
+
+    {:ok, client} =
+      TrainingClient.start_link(
+        session_id: "sess-save-invalid-ttl",
+        model_seq_id: 0,
+        base_model: "base",
+        config: config
+      )
+
+    {:ok, task} = TrainingClient.save_state(client, "checkpoint-bad", ttl_seconds: 0)
+    assert {:error, %Tinkex.Error{type: :validation, category: :user}} = Task.await(task, 5_000)
+  end
+
   test "load_state_with_optimizer posts optimizer flag true", %{bypass: bypass, config: config} do
     Bypass.expect(bypass, fn conn ->
       {:ok, body, conn} = Plug.Conn.read_body(conn)
@@ -599,6 +650,42 @@ defmodule Tinkex.TrainingClientTest do
              Task.await(task, 5_000)
 
     GenServer.stop(client)
+  end
+
+  test "save_weights_for_sampler sends ttl_seconds when provided", %{
+    bypass: bypass,
+    config: config
+  } do
+    Bypass.expect_once(bypass, "POST", "/api/v1/create_model", fn conn ->
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, ~s({"model_id":"model-save-sampler-ttl"}))
+    end)
+
+    Bypass.expect_once(bypass, "POST", "/api/v1/save_weights_for_sampler", fn conn ->
+      {:ok, body, conn} = Plug.Conn.read_body(conn)
+      payload = Jason.decode!(body)
+
+      assert payload["path"] == "sampler-ttl"
+      assert payload["ttl_seconds"] == 90
+
+      conn
+      |> Plug.Conn.put_resp_content_type("application/json")
+      |> Plug.Conn.resp(200, ~s({"path":"tinker://samplers/ckpt-ttl"}))
+    end)
+
+    {:ok, client} =
+      TrainingClient.start_link(
+        session_id: "sess-save-sampler-ttl",
+        model_seq_id: 0,
+        base_model: "base",
+        config: config
+      )
+
+    {:ok, task} = TrainingClient.save_weights_for_sampler(client, "sampler-ttl", ttl_seconds: 90)
+
+    assert {:ok, %SaveWeightsForSamplerResponse{path: "tinker://samplers/ckpt-ttl"}} =
+             Task.await(task, 5_000)
   end
 
   test "save_weights_and_get_sampling_client returns sampling client when path is provided" do

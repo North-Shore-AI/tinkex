@@ -20,6 +20,10 @@ Centralized environment handling is provided by `Tinkex.Env` and fed into `Tinke
 - `TINKER_TELEMETRY`: Telemetry toggle (truthy: `1/true/yes/on`, falsey: `0/false/no/off`). Default: `true`.
 - `TINKER_LOG`: Log level (`debug` | `info` | `warn` | `warning` | `error`), applied at application start. Default: unset.
 - `TINKEX_DUMP_HEADERS`: HTTP dump toggle (same truthy/falsey parsing). Default: `false`; sensitive headers are redacted.
+- `TINKEX_POLL_BACKOFF`: Future polling backoff policy. `exponential` (or a truthy value) enables backoff for 408/5xx polling retries; `0` disables it.
+- `TINKEX_PARITY`: Default config profile. `python` keeps `timeout: 60_000` and `max_retries: 10`; `beam` switches to `timeout: 120_000` and `max_retries: 2`.
+- `TINKEX_POOL_SIZE` / `TINKEX_POOL_COUNT`: Override Finch sampling-pool sizing used to derive the other per-type pools.
+- `TINKEX_OTEL_PROPAGATE`: Toggle W3C trace-context propagation on outgoing requests.
 - `TINKEX_DEFAULT_HEADERS`: JSON object of default headers merged into every request (e.g., `{"x-env":"1"}`) with secret headers redacted in dumps/inspect.
 - `TINKEX_DEFAULT_QUERY`: JSON object of default query params merged into every request (e.g., `{"trace":"1"}`).
 - `TINKEX_HTTP_CLIENT`: Custom HTTP client module name (e.g., `Tinkex.API` or a test stub).
@@ -27,6 +31,12 @@ Centralized environment handling is provided by `Tinkex.Env` and fed into `Tinke
 - `TINKEX_PROXY`: Proxy URL for HTTP/HTTPS connections (e.g., `http://proxy.company.com:8080` or `http://user:pass@proxy.company.com:8080`). Default: none.
 - `TINKEX_PROXY_HEADERS`: JSON array of proxy headers (e.g., `[["proxy-authorization", "Basic abc123"]]`). Default: `[]`.
 - `CLOUDFLARE_ACCESS_CLIENT_ID` / `CLOUDFLARE_ACCESS_CLIENT_SECRET`: Forwarded on every request per ADR-002; secret is redacted in logs/inspect.
+- `HF_TOKEN` / `HUGGING_FACE_HUB_TOKEN`: Hugging Face auth used by `checkpoint push-hf` and tokenizer artifact downloads.
+- `HF_TOKEN_PATH`: Override the token-file path used when no Hugging Face token env var or `--hf-token` is provided.
+- `HF_HOME`: Base Hugging Face cache directory; defaults to `$XDG_CACHE_HOME/huggingface` or `~/.cache/huggingface`.
+
+There is no env var for `project_id` today; set it via `Tinkex.Config.new(project_id: ...)`
+or application config (`config :tinkex, project_id: ...`).
 
 `Tinkex.Env.snapshot/0` returns all parsed values; booleans are normalized using the truthy/falsey lists above, and lists are split on commas with trimming.
 
@@ -42,11 +52,14 @@ import Config
 config :tinkex,
   api_key: System.get_env("TINKER_API_KEY"),
   base_url: System.get_env("TINKER_BASE_URL"),
+  project_id: "project-123",
   tags: System.get_env("TINKER_TAGS"),
   feature_gates: System.get_env("TINKER_FEATURE_GATES"),
   telemetry_enabled?: true,
   log_level: :info,
   dump_headers?: false,
+  poll_backoff: :exponential,
+  otel_propagate: true,
   default_headers: %{"x-env" => "1"},
   default_query: %{"trace" => "1"},
   http_client: Tinkex.API,

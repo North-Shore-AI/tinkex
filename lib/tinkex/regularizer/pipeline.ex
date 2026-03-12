@@ -113,7 +113,7 @@ defmodule Tinkex.Regularizer.Pipeline do
         {:ok, reg_outputs} ->
           # Compute total gradient norm if tracking
           total_grad_norm =
-            if track_grad_norms and length(regularizers) > 0 do
+            if track_grad_norms and regularizers != [] do
               GradientTracker.total_grad_norm(base_loss_fn, regularizers, data, logprobs)
             else
               base_grad_norm

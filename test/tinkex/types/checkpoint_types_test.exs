@@ -12,7 +12,8 @@ defmodule Tinkex.Types.CheckpointTypesTest do
         training_run_id: "run-1",
         size_bytes: 1_000_000,
         public: false,
-        time: ~U[2025-11-20 10:00:00Z]
+        time: ~U[2025-11-20 10:00:00Z],
+        expires_at: ~U[2025-11-21 10:00:00Z]
       }
 
       assert checkpoint.checkpoint_id == "ckpt-123"
@@ -22,6 +23,7 @@ defmodule Tinkex.Types.CheckpointTypesTest do
       assert checkpoint.size_bytes == 1_000_000
       assert checkpoint.public == false
       assert checkpoint.time == ~U[2025-11-20 10:00:00Z]
+      assert checkpoint.expires_at == ~U[2025-11-21 10:00:00Z]
     end
 
     test "size_bytes can be nil" do
@@ -46,7 +48,8 @@ defmodule Tinkex.Types.CheckpointTypesTest do
         "tinker_path" => "tinker://run-2/weights/0001",
         "size_bytes" => 2_000_000,
         "public" => false,
-        "time" => "2025-11-21T12:00:00Z"
+        "time" => "2025-11-21T12:00:00Z",
+        "expires_at" => "2025-11-22T12:00:00Z"
       }
 
       checkpoint = Checkpoint.from_map(map)
@@ -55,6 +58,7 @@ defmodule Tinkex.Types.CheckpointTypesTest do
       assert checkpoint.size_bytes == 2_000_000
       assert checkpoint.training_run_id == "run-2"
       assert %DateTime{} = checkpoint.time
+      assert %DateTime{} = checkpoint.expires_at
     end
 
     test "from_map/1 handles nil size_bytes" do

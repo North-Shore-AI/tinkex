@@ -6,13 +6,14 @@ defmodule Tinkex.Types.SaveWeightsRequest do
   """
 
   @enforce_keys [:model_id]
-  @derive {Jason.Encoder, only: [:model_id, :path, :seq_id, :type]}
-  defstruct [:model_id, :path, :seq_id, type: "save_weights"]
+  @derive {Jason.Encoder, only: [:model_id, :path, :seq_id, :ttl_seconds, :type]}
+  defstruct [:model_id, :path, :seq_id, :ttl_seconds, type: "save_weights"]
 
   @type t :: %__MODULE__{
           model_id: String.t(),
           path: String.t() | nil,
           seq_id: integer() | nil,
+          ttl_seconds: pos_integer() | nil,
           type: String.t()
         }
 end

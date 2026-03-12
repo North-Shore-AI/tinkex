@@ -18,23 +18,32 @@ defmodule Tinkex.Types.MissingTypesParityTest do
     test "creates with request_id" do
       req = FutureRetrieveRequest.new("req-123")
       assert req.request_id == "req-123"
+      assert req.allow_metadata_only == false
+    end
+
+    test "creates with allow_metadata_only override" do
+      req = FutureRetrieveRequest.new("req-123", allow_metadata_only: true)
+      assert req.request_id == "req-123"
+      assert req.allow_metadata_only == true
     end
 
     test "to_json produces expected format" do
       req = FutureRetrieveRequest.new("req-456")
       json = FutureRetrieveRequest.to_json(req)
 
-      assert json == %{"request_id" => "req-456"}
+      assert json == %{"request_id" => "req-456", "allow_metadata_only" => false}
     end
 
     test "from_json parses string keys" do
       req = FutureRetrieveRequest.from_json(%{"request_id" => "req-789"})
       assert req.request_id == "req-789"
+      assert req.allow_metadata_only == false
     end
 
     test "from_json parses atom keys" do
-      req = FutureRetrieveRequest.from_json(%{request_id: "req-abc"})
+      req = FutureRetrieveRequest.from_json(%{request_id: "req-abc", allow_metadata_only: true})
       assert req.request_id == "req-abc"
+      assert req.allow_metadata_only == true
     end
   end
 

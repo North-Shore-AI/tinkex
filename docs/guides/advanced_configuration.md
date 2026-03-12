@@ -42,20 +42,26 @@ The `Tinkex.Config` struct contains all configuration needed for API requests:
 @type t :: %Tinkex.Config{
   base_url: String.t(),            # API base URL (required)
   api_key: String.t(),             # API authentication key (required)
+  project_id: String.t() | nil,    # Optional project/session grouping id
   http_pool: atom(),               # Finch pool base name/prefix (default: Tinkex.HTTP.Pool)
   http_client: module(),           # HTTP client module (default: Tinkex.API)
   timeout: pos_integer(),          # Request timeout in milliseconds (default: 60_000; set parity_mode: :beam for 120_000)
   max_retries: non_neg_integer(),  # Additional retry attempts (default: 10; set parity_mode: :beam for 2)
+  poll_backoff: nil | :none | :exponential | {:exponential, pos_integer(), pos_integer()},
   telemetry_enabled?: boolean(),   # Toggle client telemetry (default: true)
   log_level: :debug | :info | :warn | :error | nil, # Logger level (applied at startup)
   dump_headers?: boolean(),        # Dump HTTP headers (redacted)
+  proxy: proxy() | nil,            # Optional HTTP/HTTPS proxy
+  proxy_headers: [{String.t(), String.t()}],
   default_headers: map(),          # Headers merged into every request
   default_query: map(),            # Query params merged into every request
   cf_access_client_id: String.t() | nil,
   cf_access_client_secret: String.t() | nil,
   tags: [String.t()],              # Session tags (default: ["tinkex-elixir"])
   feature_gates: [String.t()],     # Feature gates (default: ["async_sampling"])
-  user_metadata: map() | nil       # Custom metadata for sessions (optional)
+  user_metadata: map() | nil,      # Custom metadata for sessions (optional)
+  recovery: Tinkex.Recovery.Policy.t() | nil,
+  otel_propagate: boolean()
 }
 ```
 
@@ -71,6 +77,11 @@ The `Tinkex.Config` struct contains all configuration needed for API requests:
 - Authentication token for Tinkex API
 - Retrieved from runtime option > app config > `TINKER_API_KEY` env var
 - Automatically masked in `inspect/1` output for security
+
+**project_id** (optional)
+- Forwarded into the initial `create_session` payload when present
+- Useful when you want the backend to group sessions/runs under a stable project label
+- Set via runtime opts or app config (no env var today)
 
 **http_pool** (default: `Tinkex.HTTP.Pool`)
 - Base name/prefix for Finch pools
@@ -92,6 +103,11 @@ The `Tinkex.Config` struct contains all configuration needed for API requests:
 - Total attempts = 1 + max_retries (default: 11 total)
 - Uses exponential backoff: starts at 500ms and caps at 10_000ms
 
+**poll_backoff** (default: `nil` / disabled)
+- Controls backoff inside `Tinkex.Future.poll/2` for 408/5xx polling retries
+- Accepts `:exponential`, `{:exponential, initial_ms, max_ms}`, `true`, `false`, or `:none`
+- `TINKEX_POLL_BACKOFF=exponential` enables it via env fallback
+
 **user_metadata** (optional)
 - Custom key-value pairs attached to sessions
 - Useful for tracking user IDs, experiment names, etc.
@@ -107,6 +123,10 @@ The `Tinkex.Config` struct contains all configuration needed for API requests:
 - `telemetry_enabled?` toggles client-side telemetry (default: true)
 - `log_level` sets Logger at application start when provided (`:debug | :info | :warn | :error`)
 - `dump_headers?` enables HTTP request/response dumps with sensitive headers redacted
+
+**otel_propagate**
+- Enables W3C `traceparent`/`tracestate` propagation on outgoing requests
+- Can be set with runtime opts, app config, or `TINKEX_OTEL_PROPAGATE=true`
 
 ## Environment Variables
 
@@ -138,6 +158,16 @@ export TINKER_BASE_URL="https://staging.example.com"
 ```elixir
 config = Tinkex.Config.new()  # Uses TINKER_BASE_URL if set
 ```
+
+### Additional env fallbacks
+
+- `TINKEX_PARITY=beam|python` selects the default timeout/retry profile
+- `TINKEX_POLL_BACKOFF=exponential` enables future-poll backoff
+- `TINKEX_POOL_SIZE` / `TINKEX_POOL_COUNT` override Finch sampling-pool sizing
+- `TINKEX_OTEL_PROPAGATE=true` enables trace-context propagation
+
+See `docs/guides/environment_configuration.md` for the full env matrix,
+including proxy and Hugging Face token variables.
 
 ### Development vs Production
 

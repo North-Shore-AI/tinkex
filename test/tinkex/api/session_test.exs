@@ -14,6 +14,7 @@ defmodule Tinkex.API.SessionTest do
     end
 
     def get(_path, _opts), do: {:error, :unsupported}
+    def put(_path, _body, _opts), do: {:error, :unsupported}
     def delete(_path, _opts), do: {:error, :unsupported}
   end
 

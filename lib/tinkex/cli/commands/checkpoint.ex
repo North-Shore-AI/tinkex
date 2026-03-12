@@ -3,7 +3,7 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
   Checkpoint management commands: save, list, info, publish, unpublish, delete, download.
   """
 
-  alias Tinkex.Error
+  alias Tinkex.{CheckpointTTL, Error}
 
   alias Tinkex.Types.{
     CheckpointsListResponse,
@@ -37,7 +37,7 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
   end
 
   @doc """
-  Manages checkpoint operations (list, info, publish, unpublish, delete, download).
+  Manages checkpoint operations (list, info, publish, unpublish, set-ttl, delete, download, push-hf).
   """
   @spec run_checkpoint_management(atom(), map(), map()) :: {:ok, map()} | {:error, term()}
   def run_checkpoint_management(action, options, overrides \\ %{}) do
@@ -49,8 +49,10 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
         :info -> checkpoint_info(config, options, deps)
         :publish -> checkpoint_publish(config, options, deps)
         :unpublish -> checkpoint_unpublish(config, options, deps)
+        :"set-ttl" -> checkpoint_set_ttl(config, options, deps)
         :delete -> checkpoint_delete(config, options, deps)
         :download -> checkpoint_download(config, options, deps)
+        :"push-hf" -> checkpoint_push_hf(config, options, deps)
       end
     end
   end
@@ -79,6 +81,7 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
       rest_api_module: Tinkex.API.Rest,
       rest_client_module: Tinkex.RestClient,
       checkpoint_download_module: Tinkex.CheckpointDownload,
+      huggingface_module: Tinkex.HuggingFace,
       config_module: Tinkex.Config,
       json_module: Jason,
       checkpoint_page_size: 1000,
@@ -408,20 +411,24 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
     page_size = Map.get(deps, :checkpoint_page_size, 1000)
 
     if run_id do
-      with {:ok, resp} <-
-             normalize_checkpoint_response(deps.rest_api_module.list_checkpoints(config, run_id)) do
-        checkpoints = resp.checkpoints
-
-        {:ok,
-         %{
-           checkpoints: checkpoints,
-           total: length(checkpoints),
-           shown: length(checkpoints),
-           run_id: run_id
-         }}
-      end
+      list_run_checkpoints(config, deps, run_id)
     else
       paginate_checkpoints(config, deps, limit, offset, page_size)
+    end
+  end
+
+  defp list_run_checkpoints(config, deps, run_id) do
+    with {:ok, resp} <-
+           normalize_checkpoint_response(deps.rest_api_module.list_checkpoints(config, run_id)) do
+      checkpoints = resp.checkpoints
+
+      {:ok,
+       %{
+         checkpoints: checkpoints,
+         total: length(checkpoints),
+         shown: length(checkpoints),
+         run_id: run_id
+       }}
     end
   end
 
@@ -431,22 +438,10 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
     initial_limit = Pagination.initial_page_limit(limit, page_size)
 
     with {:ok, resp} <-
-           normalize_checkpoint_response(
-             deps.rest_api_module.list_user_checkpoints(config, initial_limit, offset)
-           ),
+           fetch_user_checkpoint_page_response(config, deps, initial_limit, offset),
          {:ok, %{items: checkpoints, total: total}} <-
            Pagination.paginate_with(
-             fn req_limit, req_offset ->
-               case normalize_checkpoint_response(
-                      deps.rest_api_module.list_user_checkpoints(config, req_limit, req_offset)
-                    ) do
-                 {:ok, %CheckpointsListResponse{} = response} ->
-                   {:ok, {response.checkpoints, response.cursor}}
-
-                 {:error, _} = error ->
-                   error
-               end
-             end,
+             &fetch_user_checkpoint_page(config, deps, &1, &2),
              resp.checkpoints,
              offset + length(resp.checkpoints),
              page_size,
@@ -465,6 +460,19 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
          shown: shown,
          run_id: nil
        }}
+    end
+  end
+
+  defp fetch_user_checkpoint_page_response(config, deps, limit, offset) do
+    normalize_checkpoint_response(
+      deps.rest_api_module.list_user_checkpoints(config, limit, offset)
+    )
+  end
+
+  defp fetch_user_checkpoint_page(config, deps, limit, offset) do
+    with {:ok, %CheckpointsListResponse{} = response} <-
+           fetch_user_checkpoint_page_response(config, deps, limit, offset) do
+      {:ok, {response.checkpoints, response.cursor}}
     end
   end
 
@@ -517,6 +525,30 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
     end
   end
 
+  defp checkpoint_set_ttl(config, options, deps) do
+    path = Map.fetch!(options, :path)
+
+    with {:ok, format} <- management_format(options),
+         {:ok, [parsed]} <- validate_checkpoint_paths([path]),
+         {:ok, ttl_seconds, remove?} <- validate_checkpoint_ttl_options(options),
+         {:ok, _} <-
+           deps.rest_api_module.set_checkpoint_ttl_from_tinker_path(
+             config,
+             parsed.tinker_path,
+             ttl_seconds
+           ) do
+      render_set_ttl_result(format, parsed.tinker_path, ttl_seconds, remove?, deps)
+    else
+      {:error, %Error{} = error} ->
+        IO.puts(:stderr, "Set TTL failed: #{Error.format(error)}")
+        {:error, error}
+
+      {:error, reason} ->
+        IO.puts(:stderr, "Set TTL failed: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
   defp checkpoint_download(config, options, deps) do
     path = Map.fetch!(options, :path)
     output_dir = Map.get(options, :output)
@@ -537,6 +569,30 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
 
       {:error, reason} ->
         IO.puts(:stderr, "Download failed: #{inspect(reason)}")
+        {:error, reason}
+    end
+  end
+
+  defp checkpoint_push_hf(config, options, deps) do
+    path = Map.fetch!(options, :path)
+    rest_client = deps.rest_client_module.new("cli", config)
+
+    with {:ok, format} <- management_format(options),
+         {:ok, [parsed]} <- validate_checkpoint_paths([path]),
+         {:ok, result} <-
+           deps.huggingface_module.push_checkpoint_adapter(
+             rest_client,
+             parsed.tinker_path,
+             push_hf_options(options)
+           ) do
+      render_push_hf_result(format, parsed.tinker_path, result, deps)
+    else
+      {:error, %Error{} = error} ->
+        IO.puts(:stderr, "Push to Hugging Face failed: #{Error.format(error)}")
+        {:error, error}
+
+      {:error, reason} ->
+        IO.puts(:stderr, "Push to Hugging Face failed: #{inspect(reason)}")
         {:error, reason}
     end
   end
@@ -755,7 +811,7 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
           end
 
         IO.puts(header)
-        IO.puts("Checkpoint ID\tType\tSize\tPublic\tCreated\tPath")
+        IO.puts("Checkpoint ID\tType\tSize\tPublic\tCreated\tExpires\tPath")
 
         Enum.each(checkpoints, fn ckpt ->
           map = Formatting.checkpoint_to_map(ckpt)
@@ -768,6 +824,7 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
                 Formatting.format_size(map["size_bytes"]),
                 to_string(map["public"]),
                 Formatting.format_datetime(map["time"]),
+                Formatting.format_expiration(map["expires_at"]),
                 map["tinker_path"]
               ],
               "\t"
@@ -806,10 +863,14 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
             {"Size", Formatting.format_size(map["size_bytes"])},
             {"Public", to_string(map["public"])},
             {"Created", Formatting.format_datetime(map["time"])},
+            {"Expires", Formatting.format_expiration(map["expires_at"])},
             {"Base model", weights_map["base_model"]},
             {"LoRA", to_string(weights_map["is_lora"])}
           ]
           |> maybe_append_lora_rank(weights_map["lora_rank"])
+          |> maybe_append_training_flag("Train attention", weights_map["train_attn"])
+          |> maybe_append_training_flag("Train MLP", weights_map["train_mlp"])
+          |> maybe_append_training_flag("Train unembed", weights_map["train_unembed"])
 
         Enum.each(props, fn {label, value} -> IO.puts("#{label}: #{value}") end)
     end
@@ -819,6 +880,8 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
 
   defp maybe_append_lora_rank(props, nil), do: props
   defp maybe_append_lora_rank(props, rank), do: props ++ [{"LoRA rank", to_string(rank)}]
+  defp maybe_append_training_flag(props, _label, nil), do: props
+  defp maybe_append_training_flag(props, label, value), do: props ++ [{label, to_string(value)}]
 
   defp maybe_put_run_id(payload, nil), do: payload
   defp maybe_put_run_id(payload, run_id), do: Map.put(payload, "run_id", run_id)
@@ -850,4 +913,109 @@ defmodule Tinkex.CLI.Commands.Checkpoint do
   end
 
   defp normalize_checkpoint_response({:error, _} = error), do: error
+
+  defp validate_checkpoint_ttl_options(options) do
+    ttl = Map.get(options, :ttl)
+    remove? = Map.get(options, :remove, false)
+
+    cond do
+      is_nil(ttl) and not remove? ->
+        {:error,
+         Error.new(:validation, "Must specify either --ttl <seconds> or --remove",
+           category: :user
+         )}
+
+      not is_nil(ttl) and remove? ->
+        {:error,
+         Error.new(:validation, "Cannot specify both --ttl and --remove", category: :user)}
+
+      remove? ->
+        {:ok, nil, true}
+
+      true ->
+        with {:ok, validated_ttl} <- CheckpointTTL.validate(ttl) do
+          {:ok, validated_ttl, false}
+        end
+    end
+  end
+
+  defp render_set_ttl_result(format, path, ttl_seconds, remove?, deps) do
+    payload = %{
+      command: :checkpoint,
+      action: :set_ttl,
+      path: path,
+      ttl_seconds: ttl_seconds,
+      remove: remove?
+    }
+
+    if format == :json do
+      maybe_print_json(format, deps.json_module, payload)
+    else
+      if remove? do
+        IO.puts("Removed expiration for #{path}")
+      else
+        IO.puts("Updated TTL for #{path} to #{ttl_seconds} seconds")
+      end
+    end
+
+    {:ok, payload}
+  end
+
+  defp push_hf_options(options) do
+    %{
+      repo_id: Map.get(options, :repo),
+      public: Map.get(options, :public, false),
+      revision: Map.get(options, :revision),
+      commit_message: Map.get(options, :commit_message),
+      create_pr: Map.get(options, :create_pr, false),
+      allow_patterns: normalize_repeatable_option(options, :allow_pattern),
+      ignore_patterns: normalize_repeatable_option(options, :ignore_pattern),
+      hf_token: Map.get(options, :hf_token),
+      add_model_card: not Map.get(options, :no_model_card, false)
+    }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+  end
+
+  defp normalize_repeatable_option(options, key) do
+    case Map.get(options, key) do
+      nil -> nil
+      values when is_list(values) -> values
+      value -> [value]
+    end
+  end
+
+  defp render_push_hf_result(format, path, result, deps) do
+    payload = %{
+      command: :checkpoint,
+      action: :push_hf,
+      checkpoint_path: path,
+      repo_id: fetch_result_field(result, :repo_id),
+      revision: fetch_result_field(result, :revision),
+      public: fetch_result_field(result, :public)
+    }
+
+    if format == :json do
+      maybe_print_json(format, deps.json_module, payload)
+    else
+      IO.puts("Uploaded #{path} to #{payload.repo_id}")
+
+      if payload.revision do
+        IO.puts("Revision: #{payload.revision}")
+      end
+
+      if not is_nil(payload.public) do
+        IO.puts("Public: #{payload.public}")
+      end
+    end
+
+    {:ok, payload}
+  end
+
+  defp fetch_result_field(result, key) do
+    case result do
+      %{^key => value} -> value
+      %{} -> Map.get(result, Atom.to_string(key))
+    end
+  end
 end

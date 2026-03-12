@@ -11,6 +11,7 @@ defmodule Tinkex.Tokenizer do
 
   alias Tinkex.Error
   alias Tinkex.HuggingFace
+  alias Tinkex.TokenizerRef
   alias Tinkex.TrainingClient
 
   alias TiktokenEx.Encoding, as: TikEncoding
@@ -307,12 +308,17 @@ defmodule Tinkex.Tokenizer do
     info_fun = Keyword.get(opts, :info_fun, &TrainingClient.get_info/1)
 
     case safe_call_info(info_fun, training_client) do
-      {:ok, %{model_data: %{tokenizer_id: id}}} when is_binary(id) -> {:ok, id}
-      _ -> :no_id
+      {:ok, %{model_data: %{tokenizer_id: id}}} when is_binary(id) ->
+        {:ok, TokenizerRef.normalize(id)}
+
+      _ ->
+        :no_id
     end
   end
 
   defp apply_tokenizer_heuristics(model_name) do
+    model_name = TokenizerRef.normalize(model_name)
+
     cond do
       String.starts_with?(model_name, "meta-llama/Llama-3") ->
         @llama3_tokenizer

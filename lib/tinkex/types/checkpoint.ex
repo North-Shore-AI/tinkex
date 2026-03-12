@@ -16,7 +16,8 @@ defmodule Tinkex.Types.Checkpoint do
           training_run_id: String.t() | nil,
           size_bytes: integer() | nil,
           public: boolean(),
-          time: DateTime.t() | String.t() | nil
+          time: DateTime.t() | String.t() | nil,
+          expires_at: DateTime.t() | String.t() | nil
         }
 
   defstruct [
@@ -26,7 +27,8 @@ defmodule Tinkex.Types.Checkpoint do
     :training_run_id,
     :size_bytes,
     :public,
-    :time
+    :time,
+    :expires_at
   ]
 
   @doc """
@@ -43,7 +45,8 @@ defmodule Tinkex.Types.Checkpoint do
       training_run_id: get_field(map, :training_run_id) || training_run_from_path(tinker_path),
       size_bytes: get_field(map, :size_bytes),
       public: get_field(map, :public) || false,
-      time: parse_time(get_field(map, :time))
+      time: parse_time(get_field(map, :time)),
+      expires_at: parse_time(get_field(map, :expires_at))
     }
   end
 

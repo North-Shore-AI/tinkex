@@ -184,6 +184,7 @@ defmodule Tinkex.SessionManager do
       tags: config.tags || ["tinkex-elixir"],
       user_metadata: config.user_metadata,
       sdk_version: Tinkex.Version.tinker_sdk(),
+      project_id: config.project_id,
       type: "create_session"
     }
 

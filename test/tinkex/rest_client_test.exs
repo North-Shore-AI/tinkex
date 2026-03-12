@@ -63,6 +63,28 @@ defmodule Tinkex.RestClientTest do
       client = RestClient.new("session-123", config)
       {:error, _reason} = RestClient.get_session(client, "session-123")
     end
+
+    test "accepts access_scope option", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/sessions/session-access", fn conn ->
+        assert conn.query_params["access_scope"] == "accessible"
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"training_run_ids": [], "sampler_ids": []}))
+      end)
+
+      client = RestClient.new("session-123", config)
+
+      assert {:ok, %GetSessionResponse{}} =
+               RestClient.get_session(client, "session-access", access_scope: "accessible")
+    end
+
+    test "rejects invalid access_scope option", %{config: config} do
+      client = RestClient.new("session-123", config)
+
+      assert {:error, %Tinkex.Error{type: :validation, category: :user}} =
+               RestClient.get_session(client, "session-123", access_scope: "invalid")
+    end
   end
 
   describe "list_sessions/2" do
@@ -112,6 +134,21 @@ defmodule Tinkex.RestClientTest do
       {:ok, response} = RestClient.list_sessions(client)
 
       assert response.sessions == []
+    end
+
+    test "passes access_scope option", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/sessions", fn conn ->
+        assert conn.query_params["access_scope"] == "accessible"
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"sessions": []}))
+      end)
+
+      client = RestClient.new("session-123", config)
+
+      assert {:ok, %ListSessionsResponse{}} =
+               RestClient.list_sessions(client, access_scope: "accessible")
     end
   end
 
@@ -227,6 +264,26 @@ defmodule Tinkex.RestClientTest do
       assert %WeightsInfoResponse{} = response
       assert response.is_lora
       assert response.lora_rank == 8
+    end
+
+    test "parses weights train flags", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "POST", "/api/v1/weights_info", fn conn ->
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(
+          200,
+          ~s({"base_model":"Qwen/Qwen2.5-7B","is_lora":true,"lora_rank":8,"train_unembed":false,"train_mlp":true,"train_attn":false})
+        )
+      end)
+
+      client = RestClient.new("session-123", config)
+
+      {:ok, response} =
+        RestClient.get_weights_info_by_tinker_path(client, "tinker://run-id/weights/0001")
+
+      assert response.train_unembed == false
+      assert response.train_mlp == true
+      assert response.train_attn == false
     end
 
     test "returns error on failure", %{bypass: bypass, config: config} do
@@ -359,6 +416,46 @@ defmodule Tinkex.RestClientTest do
         RestClient.get_checkpoint_archive_url(client, "tinker://run-123/weights/missing")
 
       assert error.status == 404
+    end
+
+    test "retries 503 archive-generation responses", %{bypass: bypass, config: config} do
+      counter = start_supervised!({Agent, fn -> 0 end})
+      test_pid = self()
+
+      Bypass.expect(
+        bypass,
+        "GET",
+        "/api/v1/training_runs/run-503/checkpoints/weights/0001/archive",
+        fn conn ->
+          attempt = Agent.get_and_update(counter, &{&1 + 1, &1 + 1})
+
+          case attempt do
+            1 ->
+              conn
+              |> Plug.Conn.put_resp_content_type("application/json")
+              |> Plug.Conn.resp(503, ~s({"error":"Archive still being generated"}))
+
+            _ ->
+              conn
+              |> Plug.Conn.put_resp_header("location", "https://example.com/retry-ready")
+              |> Plug.Conn.resp(302, "")
+          end
+        end
+      )
+
+      client = RestClient.new("session-123", config)
+      sleep_fun = fn ms -> send(test_pid, {:slept, ms}) end
+
+      assert {:ok, %CheckpointArchiveUrlResponse{url: "https://example.com/retry-ready"}} =
+               RestClient.get_checkpoint_archive_url(
+                 client,
+                 "tinker://run-503/weights/0001",
+                 retry_delay_ms: 0,
+                 sleep_fun: sleep_fun
+               )
+
+      assert_received {:slept, 0}
+      assert Agent.get(counter, & &1) == 2
     end
 
     test "returns validation error for malformed tinker path", %{config: config} do
@@ -553,6 +650,79 @@ defmodule Tinkex.RestClientTest do
 
       {:ok, %TrainingRun{training_run_id: "run-xyz"}} =
         RestClient.get_training_run_by_tinker_path(client, "tinker://run-xyz/weights/0001")
+    end
+  end
+
+  describe "get_training_run/3" do
+    test "passes access_scope option", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/training_runs/run-access", fn conn ->
+        assert conn.query_params["access_scope"] == "accessible"
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(
+          200,
+          ~s({"training_run_id":"run-access","base_model":"base","model_owner":"owner","is_lora":false,"corrupted":false,"last_request_time":"2025-11-26T00:00:00Z"})
+        )
+      end)
+
+      client = RestClient.new("session-123", config)
+
+      assert {:ok, %TrainingRun{training_run_id: "run-access"}} =
+               RestClient.get_training_run(client, "run-access", access_scope: "accessible")
+    end
+  end
+
+  describe "list_training_runs/2" do
+    test "passes access_scope option", %{bypass: bypass, config: config} do
+      Bypass.expect_once(bypass, "GET", "/api/v1/training_runs", fn conn ->
+        assert conn.query_params["access_scope"] == "accessible"
+
+        conn
+        |> Plug.Conn.put_resp_content_type("application/json")
+        |> Plug.Conn.resp(200, ~s({"training_runs": [], "cursor": null}))
+      end)
+
+      client = RestClient.new("session-123", config)
+      assert {:ok, _response} = RestClient.list_training_runs(client, access_scope: "accessible")
+    end
+  end
+
+  describe "set_checkpoint_ttl_from_tinker_path/3" do
+    test "updates checkpoint ttl", %{bypass: bypass, config: config} do
+      Bypass.expect_once(
+        bypass,
+        "PUT",
+        "/api/v1/training_runs/run-123/checkpoints/weights/0001/ttl",
+        fn conn ->
+          {:ok, body, conn} = Plug.Conn.read_body(conn)
+          assert Jason.decode!(body) == %{"ttl_seconds" => 3600}
+
+          conn
+          |> Plug.Conn.put_resp_content_type("application/json")
+          |> Plug.Conn.resp(200, ~s({}))
+        end
+      )
+
+      client = RestClient.new("session-123", config)
+
+      assert {:ok, %{}} =
+               RestClient.set_checkpoint_ttl_from_tinker_path(
+                 client,
+                 "tinker://run-123/weights/0001",
+                 3600
+               )
+    end
+
+    test "rejects non-positive ttl values", %{config: config} do
+      client = RestClient.new("session-123", config)
+
+      assert {:error, %Tinkex.Error{type: :validation, category: :user}} =
+               RestClient.set_checkpoint_ttl_from_tinker_path(
+                 client,
+                 "tinker://run-123/weights/0001",
+                 0
+               )
     end
   end
 end

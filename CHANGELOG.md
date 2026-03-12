@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.4.0] - 2026-03-11
+
+### Added
+
+- Session `project_id` parity through `Tinkex.Config`, `SessionManager`, and session-create payloads.
+- Checkpoint TTL support across `TrainingClient.save_state/3`, `save_weights_for_sampler/3`, REST clients, CLI `checkpoint set-ttl`, and parsed `expires_at` metadata.
+- REST `access_scope` support for session and training-run reads, exposed in the CLI for `run list` / `run info`.
+- `SamplingClient.get_tokenizer/2` with sampler-metadata lookup plus shared tokenizer-id revision normalization.
+- Weights-info train flags (`train_attn`, `train_mlp`, `train_unembed`) and restore-path LoRA reconstruction parity.
+- Future polling support for `allow_metadata_only`, `complete_metadata`, malformed transient 400 retries, and a shared response-byte limiter.
+- CLI `checkpoint push-hf` with Elixir-native Hugging Face token resolution, archive export, LFS upload, and model-card generation.
+
+### Changed
+
+- Version metadata now reports Elixir package `0.4.0` with Python parity version `0.15.0`.
+- CLI table output now uses humanized timestamps while JSON output stays machine-friendly ISO-8601.
+- Checkpoint list/info and run info output now surface expiration metadata and richer checkpoint details.
+- Checkpoint archive URL retrieval now retries archive-generation `503` responses explicitly without relying on generic HTTP retries.
+- README, guides, and examples were refreshed for checkpoint TTLs, `access_scope`, tokenizer lookup, future metadata fallback, and Hugging Face export.
+
 ## [0.3.4] - 2025-12-26
 
 ### Fixed

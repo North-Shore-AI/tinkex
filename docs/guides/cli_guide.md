@@ -131,6 +131,8 @@ List all user checkpoints with pagination and JSON output, or filter by training
 - `--offset <int>` - Number of checkpoints to skip (default: 0)
 - `--format table|json` / `--json` - Output format (default: table); JSON includes `total` and `shown` counts
 
+Table output uses humanized timestamps for recent checkpoints and includes the expiration column. JSON output keeps ISO-8601 timestamps for scripting.
+
 When multiple pages are fetched (`--limit 0` or large lists), progress is printed to stderr while stdout remains clean for piping/JSON.
 
 **Examples:**
@@ -157,6 +159,7 @@ When multiple pages are fetched (`--limit 0` or large lists), progress is printe
       "size_bytes": 1024,
       "public": true,
       "time": "2025-11-26T00:00:00Z",
+      "expires_at": null,
       "tinker_path": "tinker://run-123/weights/0001"
     }
   ]
@@ -183,9 +186,13 @@ Path: tinker://run-123/weights/0001
 Size: 1.0 KB
 Public: true
 Created: 2025-11-26T00:00:00Z
+Expires: Never
 Base model: meta-llama/Llama-3.1-8B
 LoRA: true
 LoRA rank: 32
+Train attention: true
+Train MLP: false
+Train unembed: true
 ```
 
 Pass `--format json` (or `--json`) to receive the full checkpoint + weights metadata as a JSON object.
@@ -227,6 +234,26 @@ Remove public access from a checkpoint:
 ./tinkex checkpoint unpublish tinker://run-123/weights/0001 \
   --api-key "$TINKER_API_KEY"
 # Output: Unpublished tinker://run-123/weights/0001
+```
+
+### Set or Remove Checkpoint TTL
+
+Set an expiration for an existing checkpoint or clear it entirely:
+
+```bash
+./tinkex checkpoint set-ttl <tinker_path> (--ttl <seconds> | --remove)
+```
+
+**Examples:**
+
+```bash
+./tinkex checkpoint set-ttl tinker://run-123/weights/0001 \
+  --ttl 86400 \
+  --api-key "$TINKER_API_KEY"
+
+./tinkex checkpoint set-ttl tinker://run-123/weights/0001 \
+  --remove \
+  --api-key "$TINKER_API_KEY"
 ```
 
 ### Delete Checkpoint
@@ -273,6 +300,37 @@ Download and extract checkpoint files locally:
   --force \
   --api-key "$TINKER_API_KEY"
 # Output: Downloaded to ./models/checkpoint-001
+```
+
+Archive URL retrieval retries short `503 Archive still being generated`
+responses automatically before failing.
+
+### Export to Hugging Face Hub
+
+Upload a checkpoint adapter to Hugging Face Hub without leaving the CLI:
+
+```bash
+./tinkex checkpoint push-hf <tinker_path> [--repo <repo_id>] [--public]
+```
+
+**Options:**
+- `--repo <repo_id>` - Target repo ID (defaults to a derived adapter repo name)
+- `--public` - Create or update a public repo (default: private)
+- `--revision <name>` - Target branch or revision
+- `--commit-message <msg>` - Commit summary
+- `--create-pr` - Open a pull request instead of pushing directly
+- `--allow-pattern <glob>` / `--ignore-pattern <glob>` - File upload filters (repeatable)
+- `--hf-token <token>` - Hugging Face token override (otherwise `HF_TOKEN`, `HUGGING_FACE_HUB_TOKEN`, then `HF_TOKEN_PATH` or `$HF_HOME/token` are checked)
+- `--no-model-card` - Skip generating `README.md` when one is missing
+
+**Example:**
+
+```bash
+./tinkex checkpoint push-hf tinker://run-123/weights/0001 \
+  --repo your-user/my-adapter \
+  --hf-token "$HF_TOKEN" \
+  --public \
+  --api-key "$TINKER_API_KEY"
 ```
 
 ### Help for Checkpoint Commands
@@ -481,12 +539,13 @@ Sampling complete (3 sequences)
 List all training runs with pagination and JSON output:
 
 ```bash
-./tinkex run list [--limit <int>] [--offset <int>] [--format table|json]
+./tinkex run list [--limit <int>] [--offset <int>] [--access-scope owned|accessible] [--format table|json]
 ```
 
 **Options:**
 - `--limit <int>` - Maximum number of runs to return (`0` = fetch all; default: 20)
 - `--offset <int>` - Number of runs to skip (default: 0)
+- `--access-scope owned|accessible` - Read only owned runs or all runs accessible to the caller
 - `--format table|json` / `--json` - Output format (default: table); JSON includes `total`/`shown` plus full run objects
 
 Progress is printed to stderr when multiple pages are fetched (e.g., `--limit 0`).
@@ -523,7 +582,7 @@ Progress is printed to stderr when multiple pages are fetched (e.g., `--limit 0`
 Retrieve detailed information about a specific training run:
 
 ```bash
-./tinkex run info <run_id> [--format table|json]
+./tinkex run info <run_id> [--access-scope owned|accessible] [--format table|json]
 ```
 
 **Arguments:**
@@ -536,9 +595,10 @@ Owner: user@example.com
 LoRA: Yes
 LoRA rank: 16
 Status: Active
-Last update: 2025-11-26T00:00:00Z
+Last update: 2 hours ago
 Last training checkpoint: ckpt-123
-  Time: 2025-11-26T00:00:00Z
+  Time: 2 hours ago
+  Expires: Never
   Path: tinker://run-abc123/weights/0001
 Metadata: stage=prod
 ```
@@ -558,7 +618,7 @@ Display version and build information:
 
 ```bash
 ./tinkex version
-# Output: tinkex 0.1.8 (abc1234)
+# Output: tinkex 0.4.0 (abc1234)
 
 ./tinkex --version  # alias
 ```
@@ -574,7 +634,7 @@ Get structured version information:
 **Output:**
 ```json
 {
-  "version": "0.1.8",
+  "version": "0.4.0",
   "commit": "abc1234"
 }
 ```
@@ -692,7 +752,7 @@ The `result` map structure varies by command:
 ```elixir
 {:ok, %{
   command: :version,
-  version: "0.1.8",
+  version: "0.4.0",
   commit: "abc1234",
   options: %{json: false}
 }}

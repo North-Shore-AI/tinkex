@@ -21,6 +21,16 @@ defmodule Tinkex.Types.ModelInfoTypesTest do
       assert %ModelData{arch: "qwen", model_name: "Qwen/Qwen2", tokenizer_id: "hf/qwen"} =
                ModelData.from_json(json)
     end
+
+    test "normalizes tokenizer_id revision suffixes" do
+      json = %{
+        "arch" => "llama",
+        "model_name" => "meta-llama/Llama-3",
+        "tokenizer_id" => "hf/tok:revision-123"
+      }
+
+      assert %ModelData{tokenizer_id: "hf/tok"} = ModelData.from_json(json)
+    end
   end
 
   describe "GetInfoResponse.from_json/1" do

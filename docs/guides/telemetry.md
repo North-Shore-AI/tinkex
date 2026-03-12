@@ -264,7 +264,7 @@ Example batch structure:
 %{
   session_id: "session-abc123",
   platform: "unix/linux",
-  sdk_version: "0.1.2",
+  sdk_version: "0.4.0",
   events: [
     %{
       event: "GENERIC_EVENT",
