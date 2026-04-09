@@ -172,7 +172,7 @@ defmodule Tinkex.MixProject do
         "GitHub" => @source_url,
         "Docs" => @docs_url
       },
-      files: ~w(lib mix.exs README.md CHANGELOG.md LICENSE assets)
+      files: ~w(lib mix.exs README.md CHANGELOG.md LICENSE assets docs examples)
     ]
   end
 end
